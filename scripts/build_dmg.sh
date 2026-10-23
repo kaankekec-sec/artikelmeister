@@ -106,7 +106,8 @@ codesign --force --deep --sign - "${APP_BUNDLE}"
 echo "[4/4] Creating ${DMG_OUTPUT} installer..."
 mkdir -p "${DMG_STAGING}"
 cp -R "${APP_BUNDLE}" "${DMG_STAGING}/"
-cp "ornek_almanca_kelimeler.csv" "${DMG_STAGING}/"
+[ -f "examplesheet.csv" ] && cp "examplesheet.csv" "${DMG_STAGING}/" || true
+[ -f "wortschatzkapitel7-8.csv" ] && cp "wortschatzkapitel7-8.csv" "${DMG_STAGING}/" || true
 ln -s /Applications "${DMG_STAGING}/Applications"
 
 hdiutil create \

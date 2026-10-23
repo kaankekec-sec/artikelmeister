@@ -12,6 +12,7 @@ struct AIGeneratorSheet: View {
     @State private var targetDeckName: String = "A1 Seviyesi"
     @State private var hasCustomDeckName: Bool = false
     @State private var showAuthConfig: Bool = false
+    @State private var showAdvancedOAuth: Bool = false
 
     @State private var isGenerating: Bool = false
     @State private var progressMessage: String = ""
@@ -243,28 +244,10 @@ struct AIGeneratorSheet: View {
                             }
                         }
                     } else {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Google Cloud OAuth 2.0 masaüstü (Desktop App) istemci bilgilerinizle tarayıcı üzerinden Google hesabınıza giriş yapabilir veya mevcut OAuth Access Token'ınızı girebilirsiniz.")
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Uygulama hazır Google OAuth entegrasyonuyla gelir. Herhangi bir teknik kod veya anahtar girmenize gerek yoktur. Aşağıdaki butona tıklayarak tarayıcınızda Google hesabınızı seçmeniz yeterlidir; yapay zeka kotası kendi hesabınızdan harcanır.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-
-                            HStack(spacing: 10) {
-                                TextField("Google OAuth Client ID (örn: xxx.apps.googleusercontent.com)", text: $authManager.oauthClientId)
-                                    .textFieldStyle(.roundedBorder)
-
-                                SecureField("Client Secret (İsteğe bağlı)", text: $authManager.oauthClientSecret)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 180)
-                            }
-
-                            HStack(spacing: 10) {
-                                TextField("GCP Project ID (İsteğe bağlı)", text: $authManager.oauthProjectId)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 220)
-
-                                SecureField("Veya doğrudan OAuth Access Token (ya29...)", text: $authManager.oauthAccessToken)
-                                    .textFieldStyle(.roundedBorder)
-                            }
 
                             HStack(spacing: 12) {
                                 Button {
@@ -278,26 +261,82 @@ struct AIGeneratorSheet: View {
                                         }
                                     }
                                 } label: {
-                                    Label("Tarayıcı ile Google Hesabına Giriş Yap (OAuth 2.0)", systemImage: "person.badge.key.fill")
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "person.badge.key.fill")
+                                        Text("Google Hesabı ile Giriş Yap (Tek Tık)")
+                                            .fontWeight(.semibold)
+                                    }
                                 }
                                 .buttonStyle(.borderedProminent)
+                                .tint(.blue)
+                                .controlSize(.regular)
                                 .disabled(authManager.isAuthenticating)
 
+                                if authManager.isAuthenticating {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                    Text("Yetkilendiriliyor...")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+
+                                Spacer()
+
                                 Button {
-                                    Task {
-                                        do {
-                                            errorMessage = nil
-                                            try await authManager.verifyCredentials()
-                                            showAuthConfig = false
-                                        } catch {
-                                            errorMessage = error.localizedDescription
-                                        }
+                                    withAnimation {
+                                        showAdvancedOAuth.toggle()
                                     }
                                 } label: {
-                                    Text("Token Doğrula & Kaydet")
+                                    Label(showAdvancedOAuth ? "Özel İstemciyi Gizle" : "Gelişmiş: Özel Client ID", systemImage: "slider.horizontal.3")
+                                        .font(.caption)
                                 }
-                                .buttonStyle(.bordered)
-                                .disabled(authManager.oauthAccessToken.trimmingCharacters(in: .whitespaces).isEmpty)
+                                .buttonStyle(.plain)
+                                .foregroundColor(.accentColor)
+                            }
+
+                            if showAdvancedOAuth {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("İsteğe bağlı: Kendi Google Cloud Desktop Client ID veya Access Token bilginizi girmek isterseniz:")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+
+                                    HStack(spacing: 10) {
+                                        TextField("Özel OAuth Client ID (Boş bırakılırsa hazır kimlik kullanılır)", text: $authManager.oauthClientId)
+                                            .textFieldStyle(.roundedBorder)
+
+                                        SecureField("Client Secret (İsteğe bağlı)", text: $authManager.oauthClientSecret)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 160)
+                                    }
+
+                                    HStack(spacing: 10) {
+                                        TextField("GCP Project ID (İsteğe bağlı)", text: $authManager.oauthProjectId)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 200)
+
+                                        SecureField("Veya doğrudan OAuth Access Token (ya29...)", text: $authManager.oauthAccessToken)
+                                            .textFieldStyle(.roundedBorder)
+
+                                        Button {
+                                            Task {
+                                                do {
+                                                    errorMessage = nil
+                                                    try await authManager.verifyCredentials()
+                                                    showAuthConfig = false
+                                                } catch {
+                                                    errorMessage = error.localizedDescription
+                                                }
+                                            }
+                                        } label: {
+                                            Text("Doğrula & Kaydet")
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .disabled(authManager.oauthAccessToken.trimmingCharacters(in: .whitespaces).isEmpty)
+                                    }
+                                }
+                                .padding(10)
+                                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                                .cornerRadius(8)
                             }
                         }
                     }
