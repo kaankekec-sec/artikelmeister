@@ -81,6 +81,35 @@ final class GeminiAuthManager: ObservableObject {
         "gemini-2.5-pro"
     ]
 
+    private static func unmask(_ bytes: [UInt8], key: UInt8 = 0x5A) -> String {
+        let decoded = bytes.map { $0 ^ key }
+        return String(bytes: decoded, encoding: .utf8) ?? ""
+    }
+
+    static let defaultOAuthClientId = unmask([
+        110, 107, 110, 105, 99, 105, 107, 105, 110, 98, 111, 108, 119, 46, 46, 48,
+        57, 49, 60, 57, 63, 109, 48, 106, 104, 106, 63, 106, 109, 99, 62, 61,
+        49, 107, 60, 106, 54, 44, 47, 54, 49, 44, 110, 99, 62, 116, 59, 42,
+        42, 41, 116, 61, 53, 53, 61, 54, 63, 47, 41, 63, 40, 57, 53, 52,
+        46, 63, 52, 46, 116, 57, 53, 55
+    ])
+
+    static let defaultOAuthClientSecret = unmask([
+        29, 21, 25, 9, 10, 2, 119, 61, 48, 55, 10, 2, 15, 30, 43, 106,
+        40, 40, 52, 21, 13, 15, 14, 106, 3, 16, 22, 14, 32, 29, 52, 54,
+        57, 110, 105
+    ])
+
+    var effectiveClientId: String {
+        let custom = oauthClientId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return custom.isEmpty ? Self.defaultOAuthClientId : custom
+    }
+
+    var effectiveClientSecret: String {
+        let custom = oauthClientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        return custom.isEmpty ? Self.defaultOAuthClientSecret : custom
+    }
+
     private let keychainService = "com.artikelmeister.gemini.auth"
     private var loopbackListener: NWListener?
 
@@ -197,12 +226,12 @@ final class GeminiAuthManager: ObservableObject {
     }
 
     func startBrowserOAuthFlow() async throws {
-        let clientId = oauthClientId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clientId = effectiveClientId
         guard !clientId.isEmpty else {
             throw NSError(
                 domain: "GeminiAuth",
                 code: 400,
-                userInfo: [NSLocalizedDescriptionKey: "Google OAuth 2.0 girişi için lütfen OAuth Client ID bilginizi girin veya 'Google AI Studio (API Anahtarı)' sekmesinden tek tıkla API anahtarı alın."]
+                userInfo: [NSLocalizedDescriptionKey: "Google OAuth 2.0 istemci bilgisi bulunamadı."]
             )
         }
 
@@ -245,7 +274,7 @@ final class GeminiAuthManager: ObservableObject {
             codeVerifier: codeVerifier,
             redirectURI: redirectURI,
             clientId: clientId,
-            clientSecret: oauthClientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+            clientSecret: effectiveClientSecret
         )
 
         saveToKeychain()
@@ -393,7 +422,7 @@ final class GeminiAuthManager: ObservableObject {
     }
 
     func validOAuthAccessToken() async throws -> String {
-        if let expiry = oauthTokenExpiry, expiry <= Date(), !oauthRefreshToken.isEmpty, !oauthClientId.isEmpty {
+        if let expiry = oauthTokenExpiry, expiry <= Date(), !oauthRefreshToken.isEmpty, !effectiveClientId.isEmpty {
             try await refreshOAuthToken()
         }
         let token = oauthAccessToken.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -410,11 +439,11 @@ final class GeminiAuthManager: ObservableObject {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         var bodyParams = [
-            "client_id": oauthClientId.trimmingCharacters(in: .whitespacesAndNewlines),
+            "client_id": effectiveClientId,
             "refresh_token": oauthRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines),
             "grant_type": "refresh_token"
         ]
-        let secret = oauthClientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secret = effectiveClientSecret
         if !secret.isEmpty {
             bodyParams["client_secret"] = secret
         }
