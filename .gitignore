@@ -1,0 +1,21 @@
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Build Artifacts
+build/
+*.dmg
+*.app
+*.dSYM
+*.o
+*.swp
+*.icns
+*.iconset
+
+# Local scratch / test files
+.system_generated/
+scratch/
