@@ -1,69 +1,31 @@
-# ArtikelMeister
+# artikelmeister
 
 Got tired of guessing *der*, *die*, *das* so I made an app for it.
 
 It has a bloody brain icon because remembering German genders hurts.
 
-### Features
+### features
 
-- **Spaced Repetition:** Drills the articles you struggle with using smart review intervals.
-- **Active Recall:** Type the article before flipping the card.
-- **Universal Cloud Sync:** Synchronizes flashcards, streaks, and progress seamlessly across macOS and Android via Google Drive.
-- **Smart Duplicate Prevention:** Merges words added from different devices without duplicate entries.
-- **Gemini AI Generator:** Automatically creates CEFR-graded German vocabulary with meanings and articles.
-- **Offline First:** Fully functional without an internet connection, storing data locally on your device.
-- **Deck Management:** Organize words into custom decks or import/export via CSV.
+-smart repetition system
+-google drive sync with your google account
+-ai generator
+-could be used offline
+-csv file support to import custom words
 
----
-
-### Project Structure
-
-```text
-ArtikelMeister/
-├── macos/              # macOS desktop application (Swift / SwiftUI / AppKit)
-│   ├── Sources/        # Application source code
-│   └── scripts/        # Build and packaging scripts (DMG installer)
-├── android/            # Android mobile application (Jetpack Compose & Kotlin)
-│   ├── app/            # Application module
-│   └── build.gradle.kts
-├── shared/             # Cross-platform shared specifications and sample data
-│   ├── samples/        # Sample vocabulary CSV sheets
-│   └── sync-spec.md    # Universal Google Drive sync format specification
-└── README.md
-```
-
----
-
-### Building & Running
-
-#### macOS
-Requires macOS 13 or newer. Universal binary supports both Apple Silicon (arm64) and Intel (x86_64).
-
-```bash
-cd macos
-chmod +x scripts/build_dmg.sh
-./scripts/build_dmg.sh
-```
-
-#### Android
-Requires Android Studio Ladybug (or newer) with Android SDK 35 (minSdkVersion 26).
-
-1. Open the `android/` directory in Android Studio.
-2. Build and run on a connected device or emulator:
-   ```bash
+#### android
    cd android
    ./gradlew assembleDebug
    ```
 
 ---
 
-### License
+### license
 
-MIT
+mit
 
 ---
 
-Google is forcing me to include a formal privacy policy for OAuth verification, so here is the serious legal text:
+google is forcing me to include a formal privacy policy for verification, so here is the serious legal text:
 
 ---
 
