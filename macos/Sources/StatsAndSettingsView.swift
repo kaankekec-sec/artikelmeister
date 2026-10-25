@@ -222,8 +222,11 @@ private struct HeatmapCell: View {
 
 struct SettingsView: View {
     @EnvironmentObject var store: DeckStore
+    @EnvironmentObject var authManager: GeminiAuthManager
     @State private var showResetConfirmation = false
     @State private var showDeleteAllConfirmation = false
+    @State private var showDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
     @State private var mergeOnBackupImport = true
     @State private var backupStatusMessage: String? = nil
     @State private var backupStatusIsError: Bool = false
@@ -231,11 +234,134 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Ayarlar ve Yerel Depolama")
+                Text("Ayarlar ve Bulut Eşitleme")
                     .font(.title2.bold())
 
-                // Daily Limits (Anki style)
-                GroupBox(label: Label("Günlük Çalışma Limitleri (Anki SM-2)", systemImage: "slider.horizontal.3")) {
+                // Universal Google Profile & Cloud Synchronization
+                GroupBox(label: Label(
+                    "Evrensel Profil & Google Drive Bulut Eşitleme",
+                    systemImage: authManager.isGoogleAccountConnected ? "checkmark.icloud.fill" : "person.crop.circle"
+                )) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if authManager.isGoogleAccountConnected {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.green.opacity(0.18))
+                                        .frame(width: 40, height: 40)
+                                    Image(systemName: "checkmark.icloud.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.green)
+                                }
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(!authManager.userName.isEmpty ? authManager.userName : "Google Hesabı Bağlı")
+                                        .font(.subheadline.bold())
+                                    Text(!authManager.userEmail.isEmpty ? authManager.userEmail : "Google Profil Aktif")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("Bulut Eşitleme Aktif")
+                                        .font(.caption2.weight(.medium))
+                                        .foregroundColor(.green)
+                                }
+
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(Color.green.opacity(0.08))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.green.opacity(0.25), lineWidth: 1)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                            HStack(spacing: 10) {
+                                Button {
+                                    Task {
+                                        await store.syncWithGoogleDrive(authManager: authManager, isSilentAutoSync: false)
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        if store.isSyncingCloud {
+                                            ProgressView()
+                                                .scaleEffect(0.7)
+                                                .frame(width: 14, height: 14)
+                                        } else {
+                                            Image(systemName: "arrow.triangle.2.circlepath")
+                                        }
+                                        Text(store.isSyncingCloud ? "Eşitleniyor..." : "Şimdi Bulutla Eşitle")
+                                            .fontWeight(.semibold)
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.blue)
+                                .disabled(store.isSyncingCloud || isDeletingAccount)
+
+                                Button {
+                                    authManager.clearAuthorization()
+                                    store.cloudSyncStatusMessage = "Google hesabından çıkış yapıldı (yerel veriler korundu)."
+                                    store.cloudSyncIsError = false
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                                        Text("Hesaptan Çıkış Yap")
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        } else {
+                            Text("Google hesabınızla giriş yaparak tüm kelimelerinizi, çalışma geçmişinizi, günlük serinizi (streak) ve tercihlerinizi Google Drive bulutunuzla otomatik eşitleyebilirsiniz.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Button {
+                                Task {
+                                    do {
+                                        try await authManager.startBrowserOAuthFlow()
+                                        await store.syncWithGoogleDrive(authManager: authManager, isSilentAutoSync: false)
+                                    } catch {
+                                        store.cloudSyncIsError = true
+                                        store.cloudSyncStatusMessage = "Bulut bağlantı hatası: \(error.localizedDescription)"
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if authManager.isAuthenticating || store.isSyncingCloud {
+                                        ProgressView()
+                                            .scaleEffect(0.7)
+                                            .frame(width: 14, height: 14)
+                                    } else {
+                                        Image(systemName: "person.crop.circle.badge.plus")
+                                    }
+                                    Text(authManager.isAuthenticating ? "Google ile Bağlanılıyor..." : "Google Hesabı ile Giriş Yap & Eşitle")
+                                        .fontWeight(.semibold)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.blue)
+                            .disabled(authManager.isAuthenticating || store.isSyncingCloud)
+                        }
+
+                        if let statusMsg = store.cloudSyncStatusMessage {
+                            HStack(spacing: 8) {
+                                Image(systemName: store.cloudSyncIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                                    .foregroundColor(store.cloudSyncIsError ? .red : .green)
+                                Text(statusMsg)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundColor(store.cloudSyncIsError ? .red : .primary)
+                                Spacer()
+                            }
+                            .padding(10)
+                            .background((store.cloudSyncIsError ? Color.red : Color.green).opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                }
+
+                // Daily Limits
+                GroupBox(label: Label("Günlük Çalışma Limitleri", systemImage: "slider.horizontal.3")) {
                     VStack(alignment: .leading, spacing: 18) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
@@ -359,7 +485,7 @@ struct SettingsView: View {
                 }
 
                 // One-Click Backup & Restore / Deck Sharing (#6)
-                GroupBox(label: Label("Yedekleme, Geri Yükleme ve Deste Paketi Paylaşımı (.json)", systemImage: "externaldrive.fill.badge.timemachine")) {
+                GroupBox(label: Label("Yedekleme ve Deste Paylaşımı", systemImage: "externaldrive.fill.badge.timemachine")) {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("Tüm kelime haznenizi, deste kategorilerinizi ve öğrenme geçmişinizi tek tıkla `.json` paketi olarak yedekleyebilir veya arkadaşlarınızla paylaşmak üzere kişisel ilerlemenizden arındırılmış temiz deste paketi oluşturabilirsiniz.")
                             .font(.caption)
@@ -421,7 +547,7 @@ struct SettingsView: View {
                 }
 
                 // Local Storage Management
-                GroupBox(label: Label("Yerel Depolama Alanı", systemImage: "internaldrive")) {
+                GroupBox(label: Label("Veri Yönetimi", systemImage: "internaldrive")) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("İçe aktarılan tüm kelimeler ve Anki öğrenme geçmişiniz bilgisayarınızda yerel olarak şu klasörde saklanır:")
                             .font(.subheadline)
@@ -446,7 +572,7 @@ struct SettingsView: View {
 
                         Divider().padding(.vertical, 4)
 
-                        HStack(spacing: 16) {
+                        HStack(spacing: 12) {
                             Button(role: .destructive) {
                                 showResetConfirmation = true
                             } label: {
@@ -462,6 +588,24 @@ struct SettingsView: View {
                             }
                             .buttonStyle(.bordered)
                             .disabled(store.cards.isEmpty)
+
+                            Button(role: .destructive) {
+                                showDeleteAccountConfirmation = true
+                            } label: {
+                                HStack(spacing: 4) {
+                                    if isDeletingAccount {
+                                        ProgressView()
+                                            .scaleEffect(0.6)
+                                            .frame(width: 12, height: 12)
+                                    } else {
+                                        Image(systemName: "person.crop.circle.badge.minus")
+                                    }
+                                    Text(isDeletingAccount ? "Siliniyor..." : "Hesap Verilerini Sil")
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
+                            .disabled(isDeletingAccount || (store.cards.isEmpty && !authManager.isGoogleAccountConnected))
                         }
                     }
                     .padding(14)
@@ -488,6 +632,22 @@ struct SettingsView: View {
                 store.deleteAllCards()
             }
             Button("İptal", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Hesap Verilerini Silmek İstediğinize Emin Misiniz?",
+            isPresented: $showDeleteAccountConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Evet, Tüm Hesap Verilerini Sil", role: .destructive) {
+                isDeletingAccount = true
+                Task {
+                    await store.deleteAccountAndAllData(authManager: authManager)
+                    isDeletingAccount = false
+                }
+            }
+            Button("İptal", role: .cancel) {}
+        } message: {
+            Text("Bu işlem geri alınamaz:\n• Google Drive'daki \"ArtikelMeister Cloud Sync\" klasörünüz ve bulut yedeğiniz kalıcı olarak silinir.\n• Bu cihazdaki tüm kelimeleriniz, desteleriniz, günlük seriniz (streak) ve tercih ayarlarınız sıfırlanır.\n• Google hesabı bağlantınız sonlandırılır.")
         }
     }
 

@@ -1,11 +1,222 @@
 import AppKit
+import Foundation
 
 let outputDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "build/AppIcon.iconset"
 let fm = FileManager.default
 try? fm.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
-func renderIcon(size: Int, scale: Int, filename: String) {
-    let pixelSize = size * scale
+// Locate shared/logo/logo_source.png relative to current working directory or script path
+let candidatePaths = [
+    "../shared/logo/logo_source.png",
+    "shared/logo/logo_source.png",
+    "/Users/kaankekec/Documents/antigravity/adventurous-hypatia/shared/logo/logo_source.png"
+]
+
+guard let sourcePath = candidatePaths.first(where: { fm.fileExists(atPath: $0) }),
+      let srcImage = NSImage(contentsOfFile: sourcePath),
+      let tiffData = srcImage.tiffRepresentation,
+      let srcRep = NSBitmapImageRep(data: tiffData) else {
+    fatalError("Could not load master logo_source.png")
+}
+
+let masterSize = 584
+
+// Bilinear color sampling from srcRep (1024x1024)
+func sampleBilinear(_ rep: NSBitmapImageRep, x: CGFloat, y: CGFloat) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
+    let w = CGFloat(rep.pixelsWide - 1)
+    let h = CGFloat(rep.pixelsHigh - 1)
+    let cx = min(max(x, 0), w)
+    let cy = min(max(y, 0), h)
+
+    let x0 = Int(floor(cx))
+    let y0 = Int(floor(cy))
+    let x1 = min(x0 + 1, Int(w))
+    let y1 = min(y0 + 1, Int(h))
+    let fx = cx - CGFloat(x0)
+    let fy = cy - CGFloat(y0)
+
+    let c00 = rep.colorAt(x: x0, y: y0)!.usingColorSpace(.deviceRGB)!
+    let c10 = rep.colorAt(x: x1, y: y0)!.usingColorSpace(.deviceRGB)!
+    let c01 = rep.colorAt(x: x0, y: y1)!.usingColorSpace(.deviceRGB)!
+    let c11 = rep.colorAt(x: x1, y: y1)!.usingColorSpace(.deviceRGB)!
+
+    let r = (c00.redComponent * (1 - fx) + c10.redComponent * fx) * (1 - fy) +
+            (c01.redComponent * (1 - fx) + c11.redComponent * fx) * fy
+    let g = (c00.greenComponent * (1 - fx) + c10.greenComponent * fx) * (1 - fy) +
+            (c01.greenComponent * (1 - fx) + c11.greenComponent * fx) * fy
+    let b = (c00.blueComponent * (1 - fx) + c10.blueComponent * fx) * (1 - fy) +
+            (c01.blueComponent * (1 - fx) + c11.blueComponent * fx) * fy
+    return (r, g, b)
+}
+
+func makeMasterBitmaps() -> (
+    squircleFull: NSBitmapImageRep,
+    squircleNoDrops: NSBitmapImageRep,
+    brainNoDrops: NSBitmapImageRep
+) {
+    let squircleFull = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: masterSize,
+        pixelsHigh: masterSize,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    )!
+
+    let squircleNoDrops = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: masterSize,
+        pixelsHigh: masterSize,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    )!
+
+    let brainNoDrops = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: masterSize,
+        pixelsHigh: masterSize,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    )!
+
+    // Radial soft-feathered erasure weight (0.0 = keep 100%, 1.0 = erase droplet completely)
+    // for the 4 detached droplets at the bottom of the logo
+    let droplets: [(cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat)] = [
+        (451.0, 693.0, 17.5, 25.0), // Drop 1: middle-left teardrop
+        (585.0, 718.0, 11.5, 11.5), // Drop 2: center-right small droplet
+        (622.0, 691.5, 12.5, 12.5), // Drop 3: right small droplet
+        (651.0, 653.5, 11.5, 11.5)  // Drop 4: far-right small droplet
+    ]
+
+    func dropletEraseWeight(_ sx: CGFloat, _ sy: CGFloat) -> CGFloat {
+        var maxWeight: CGFloat = 0.0
+        for d in droplets {
+            let dx = (sx - d.cx) / d.rx
+            let dy = (sy - d.cy) / d.ry
+            let dist = hypot(dx, dy)
+            if dist < 1.0 {
+                return 1.0
+            } else if dist < 1.45 {
+                let w = 1.0 - (dist - 1.0) / 0.45
+                if w > maxWeight { maxWeight = w }
+            }
+        }
+        return maxWeight
+    }
+
+    let halfMaster = CGFloat(masterSize) * 0.5
+    // Map squircle [236..787] (552px) and [221..802] (582px) to symmetric 572x572 square centered in 584x584
+    let scaleX: CGFloat = 552.0 / 572.0
+    let scaleY: CGFloat = 582.0 / 572.0
+
+    for cy in 0..<masterSize {
+        let sy = 511.5 + (CGFloat(cy) + 0.5 - halfMaster) * scaleY
+
+        // Sample clean dark-slate background color at this row inside the squircle (left & right of the brain)
+        let clampedSy = min(max(sy, 240.0), 775.0)
+        let bgLeft = sampleBilinear(srcRep, x: 275.0, y: clampedSy)
+        let bgRight = sampleBilinear(srcRep, x: 748.0, y: clampedSy)
+
+        for cx in 0..<masterSize {
+            let sx = 511.5 + (CGFloat(cx) + 0.5 - halfMaster) * scaleX
+
+            guard sx >= 235.0 && sx <= 788.0 && sy >= 220.0 && sy <= 803.0 else {
+                let clear = NSColor(deviceRed: 0, green: 0, blue: 0, alpha: 0)
+                squircleFull.setColor(clear, atX: cx, y: cy)
+                squircleNoDrops.setColor(clear, atX: cx, y: cy)
+                brainNoDrops.setColor(clear, atX: cx, y: cy)
+                continue
+            }
+
+            let c = sampleBilinear(srcRep, x: sx, y: sy)
+            let r = c.r
+            let g = c.g
+            let b = c.b
+
+            // 1. Compute squircle mask alpha (separating dark squircle from light gray studio backdrop)
+            let isInteriorCore = (sx >= 300.0 && sx <= 725.0) && (sy >= 295.0 && sy <= 725.0)
+            let sqAlpha: CGFloat
+            if isInteriorCore {
+                sqAlpha = 1.0
+            } else {
+                let b255 = b * 255.0
+                sqAlpha = min(1.0, max(0.0, (166.0 - b255) / (166.0 - 122.0)))
+            }
+
+            if sqAlpha <= 0.001 {
+                let clear = NSColor(deviceRed: 0, green: 0, blue: 0, alpha: 0)
+                squircleFull.setColor(clear, atX: cx, y: cy)
+                squircleNoDrops.setColor(clear, atX: cx, y: cy)
+                brainNoDrops.setColor(clear, atX: cx, y: cy)
+                continue
+            }
+
+            // Un-blend exterior light gray (~0.82) on partially transparent perimeter pixels to avoid any light halo
+            let cleanR: CGFloat
+            let cleanG: CGFloat
+            let cleanB: CGFloat
+            if sqAlpha < 0.999 && !isInteriorCore {
+                let ext: CGFloat = 0.82
+                cleanR = min(0.35, max(0.0, (r - (1.0 - sqAlpha) * ext) / sqAlpha))
+                cleanG = min(0.40, max(0.0, (g - (1.0 - sqAlpha) * ext) / sqAlpha))
+                cleanB = min(0.45, max(0.0, (b - (1.0 - sqAlpha) * ext) / sqAlpha))
+            } else {
+                cleanR = r
+                cleanG = g
+                cleanB = b
+            }
+
+            let fullColor = NSColor(deviceRed: cleanR, green: cleanG, blue: cleanB, alpha: sqAlpha)
+            squircleFull.setColor(fullColor, atX: cx, y: cy)
+
+            // Interpolated background color at (sx, sy)
+            let t = min(1.0, max(0.0, (sx - 275.0) / (748.0 - 275.0)))
+            let bgR = bgLeft.r * (1.0 - t) + bgRight.r * t
+            let bgG = bgLeft.g * (1.0 - t) + bgRight.g * t
+            let bgB = bgLeft.b * (1.0 - t) + bgRight.b * t
+
+            let eraseW = dropletEraseWeight(sx, sy)
+            let noDropR = cleanR * (1.0 - eraseW) + bgR * eraseW
+            let noDropG = cleanG * (1.0 - eraseW) + bgG * eraseW
+            let noDropB = cleanB * (1.0 - eraseW) + bgB * eraseW
+            squircleNoDrops.setColor(NSColor(deviceRed: noDropR, green: noDropG, blue: noDropB, alpha: sqAlpha), atX: cx, y: cy)
+
+            // Extract neon red brain & glow layer via inverse alpha-over against (bgR, bgG, bgB)
+            let inBrainBounds = (sx >= 295.0 && sx <= 735.0) && (sy >= 290.0 && sy <= 735.0)
+            if inBrainBounds && noDropR > bgR + 0.015 && (noDropR - noDropG) > 0.02 {
+                let bAlpha = min(1.0, max(0.0, (noDropR - bgR) / max(0.05, 1.0 - bgR))) * (1.0 - eraseW)
+                if bAlpha > 0.002 {
+                    let fgR: CGFloat = 1.0
+                    let fgG = min(1.0, max(0.0, (noDropG - (1.0 - bAlpha) * bgG) / max(0.01, bAlpha)))
+                    let fgB = min(1.0, max(0.0, (noDropB - (1.0 - bAlpha) * bgB) / max(0.01, bAlpha)))
+                    brainNoDrops.setColor(NSColor(deviceRed: fgR, green: fgG, blue: fgB, alpha: bAlpha), atX: cx, y: cy)
+                } else {
+                    brainNoDrops.setColor(NSColor(deviceRed: 0, green: 0, blue: 0, alpha: 0), atX: cx, y: cy)
+                }
+            } else {
+                brainNoDrops.setColor(NSColor(deviceRed: 0, green: 0, blue: 0, alpha: 0), atX: cx, y: cy)
+            }
+        }
+    }
+
+    return (squircleFull, squircleNoDrops, brainNoDrops)
+}
+
+func renderScaledPNG(from masterRep: NSBitmapImageRep, pixelSize: Int, insetFraction: CGFloat = 0.0) -> Data {
     let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil,
         pixelsWide: pixelSize,
@@ -20,242 +231,116 @@ func renderIcon(size: Int, scale: Int, filename: String) {
     )!
 
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    guard let cg = NSGraphicsContext.current?.cgContext else { return }
+    let ctx = NSGraphicsContext(bitmapImageRep: rep)!
+    ctx.imageInterpolation = .high
+    NSGraphicsContext.current = ctx
 
     let s = CGFloat(pixelSize)
-    let rect = NSRect(x: 0, y: 0, width: s, height: s)
-    let inset = s * 0.055
-    let cardRect = rect.insetBy(dx: inset, dy: inset)
-    let radius = s * 0.22
+    let inset = s * insetFraction
+    let destRect = NSRect(x: inset, y: inset, width: s - inset * 2, height: s - inset * 2)
 
-    // 1. Dark Blood-Obsidian Rounded Squircle Background
-    let bgPath = NSBezierPath(roundedRect: cardRect, xRadius: radius, yRadius: radius)
-    bgPath.addClip()
-
-    let bgGradient = NSGradient(colors: [
-        NSColor(calibratedRed: 0.20, green: 0.02, blue: 0.05, alpha: 1.0),
-        NSColor(calibratedRed: 0.08, green: 0.01, blue: 0.02, alpha: 1.0),
-        NSColor(calibratedRed: 0.03, green: 0.01, blue: 0.02, alpha: 1.0)
-    ])!
-    bgGradient.draw(in: bgPath, angle: -90)
-
-    // Crimson radial glow behind the brain
-    let glowCenter = NSPoint(x: s * 0.5, y: s * 0.54)
-    let glowGrad = NSGradient(colors: [
-        NSColor(calibratedRed: 0.85, green: 0.05, blue: 0.12, alpha: 0.55),
-        NSColor(calibratedRed: 0.50, green: 0.02, blue: 0.06, alpha: 0.20),
-        NSColor(calibratedRed: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
-    ])!
-    glowGrad.draw(fromCenter: glowCenter, radius: s * 0.04, toCenter: glowCenter, radius: s * 0.44, options: [])
-
-    // 2. Blood splatters in background
-    let splatterPositions: [(CGFloat, CGFloat, CGFloat)] = [
-        (0.24, 0.74, 0.022), (0.77, 0.76, 0.018), (0.19, 0.42, 0.015),
-        (0.82, 0.46, 0.020), (0.28, 0.26, 0.016), (0.73, 0.25, 0.024),
-        (0.64, 0.82, 0.014), (0.35, 0.81, 0.013)
-    ]
-    NSColor(calibratedRed: 0.75, green: 0.03, blue: 0.09, alpha: 0.75).setFill()
-    for (px, py, pr) in splatterPositions {
-        let r = s * pr
-        let dot = NSBezierPath(ovalIn: NSRect(x: s * px - r, y: s * py - r, width: r * 2, height: r * 2))
-        dot.fill()
-    }
-
-    // 3. Draw Anatomical Brain Base Shape (Side-view / 3D Cortex Silhouette)
-    let brainPath = NSBezierPath()
-    // Start at frontal lobe bottom-left
-    brainPath.move(to: NSPoint(x: s * 0.25, y: s * 0.46))
-    // Frontal lobe curve up
-    brainPath.curve(to: NSPoint(x: s * 0.22, y: s * 0.63),
-                    controlPoint1: NSPoint(x: s * 0.16, y: s * 0.48),
-                    controlPoint2: NSPoint(x: s * 0.16, y: s * 0.58))
-    // Superior frontal gyrus
-    brainPath.curve(to: NSPoint(x: s * 0.38, y: s * 0.78),
-                    controlPoint1: NSPoint(x: s * 0.23, y: s * 0.72),
-                    controlPoint2: NSPoint(x: s * 0.30, y: s * 0.78))
-    // Parietal lobe top arch
-    brainPath.curve(to: NSPoint(x: s * 0.62, y: s * 0.79),
-                    controlPoint1: NSPoint(x: s * 0.46, y: s * 0.82),
-                    controlPoint2: NSPoint(x: s * 0.55, y: s * 0.82))
-    // Occipital lobe back curve
-    brainPath.curve(to: NSPoint(x: s * 0.80, y: s * 0.62),
-                    controlPoint1: NSPoint(x: s * 0.72, y: s * 0.78),
-                    controlPoint2: NSPoint(x: s * 0.80, y: s * 0.71))
-    // Lower occipital & cerebellum bulge
-    brainPath.curve(to: NSPoint(x: s * 0.73, y: s * 0.41),
-                    controlPoint1: NSPoint(x: s * 0.82, y: s * 0.52),
-                    controlPoint2: NSPoint(x: s * 0.80, y: s * 0.43))
-    // Cerebellum tuck & temporal lobe bottom
-    brainPath.curve(to: NSPoint(x: s * 0.48, y: s * 0.39),
-                    controlPoint1: NSPoint(x: s * 0.67, y: s * 0.35),
-                    controlPoint2: NSPoint(x: s * 0.55, y: s * 0.35))
-    // Temporal pole back to frontal base
-    brainPath.curve(to: NSPoint(x: s * 0.25, y: s * 0.46),
-                    controlPoint1: NSPoint(x: s * 0.38, y: s * 0.38),
-                    controlPoint2: NSPoint(x: s * 0.29, y: s * 0.41))
-    brainPath.close()
-
-    // Shadow under brain
-    cg.saveGState()
-    cg.setShadow(offset: CGSize(width: 0, height: -s * 0.02), blur: s * 0.05, color: NSColor.black.cgColor)
-    let brainFillGrad = NSGradient(colors: [
-        NSColor(calibratedRed: 0.95, green: 0.32, blue: 0.38, alpha: 1.0),
-        NSColor(calibratedRed: 0.78, green: 0.12, blue: 0.20, alpha: 1.0),
-        NSColor(calibratedRed: 0.48, green: 0.03, blue: 0.08, alpha: 1.0)
-    ])!
-    brainFillGrad.draw(in: brainPath, angle: -75)
-    cg.restoreGState()
-
-    // Crimson blood pool / stain overlay on lower cortex
-    NSGraphicsContext.saveGraphicsState()
-    brainPath.addClip()
-    let bloodOverlayGrad = NSGradient(colors: [
-        NSColor(calibratedRed: 0.82, green: 0.0, blue: 0.07, alpha: 0.0),
-        NSColor(calibratedRed: 0.75, green: 0.0, blue: 0.06, alpha: 0.65),
-        NSColor(calibratedRed: 0.42, green: 0.0, blue: 0.03, alpha: 0.92)
-    ])!
-    bloodOverlayGrad.draw(in: NSRect(x: s * 0.15, y: s * 0.34, width: s * 0.70, height: s * 0.30), angle: -90)
-
-    // 4. Draw Cerebral Sulci / Gyri Folds (Dark Crimson / Anatomical Folds)
-    let sulci = NSBezierPath()
-    sulci.lineWidth = s * 0.020
-    sulci.lineCapStyle = .round
-    sulci.lineJoinStyle = .round
-
-    // Lateral sulcus (Sylvian fissure)
-    sulci.move(to: NSPoint(x: s * 0.32, y: s * 0.47))
-    sulci.curve(to: NSPoint(x: s * 0.60, y: s * 0.56),
-                controlPoint1: NSPoint(x: s * 0.42, y: s * 0.48),
-                controlPoint2: NSPoint(x: s * 0.50, y: s * 0.55))
-
-    // Central sulcus
-    sulci.move(to: NSPoint(x: s * 0.49, y: s * 0.79))
-    sulci.curve(to: NSPoint(x: s * 0.45, y: s * 0.53),
-                controlPoint1: NSPoint(x: s * 0.44, y: s * 0.70),
-                controlPoint2: NSPoint(x: s * 0.49, y: s * 0.61))
-
-    // Frontal gyri folds
-    sulci.move(to: NSPoint(x: s * 0.25, y: s * 0.59))
-    sulci.curve(to: NSPoint(x: s * 0.41, y: s * 0.65),
-                controlPoint1: NSPoint(x: s * 0.30, y: s * 0.64),
-                controlPoint2: NSPoint(x: s * 0.36, y: s * 0.60))
-
-    sulci.move(to: NSPoint(x: s * 0.33, y: s * 0.73))
-    sulci.curve(to: NSPoint(x: s * 0.44, y: s * 0.68),
-                controlPoint1: NSPoint(x: s * 0.37, y: s * 0.70),
-                controlPoint2: NSPoint(x: s * 0.41, y: s * 0.72))
-
-    // Parietal-occipital folds
-    sulci.move(to: NSPoint(x: s * 0.60, y: s * 0.77))
-    sulci.curve(to: NSPoint(x: s * 0.57, y: s * 0.58),
-                controlPoint1: NSPoint(x: s * 0.56, y: s * 0.70),
-                controlPoint2: NSPoint(x: s * 0.62, y: s * 0.64))
-
-    sulci.move(to: NSPoint(x: s * 0.64, y: s * 0.67))
-    sulci.curve(to: NSPoint(x: s * 0.76, y: s * 0.57),
-                controlPoint1: NSPoint(x: s * 0.69, y: s * 0.66),
-                controlPoint2: NSPoint(x: s * 0.73, y: s * 0.62))
-
-    // Temporal lobe folds
-    sulci.move(to: NSPoint(x: s * 0.40, y: s * 0.43))
-    sulci.curve(to: NSPoint(x: s * 0.66, y: s * 0.47),
-                controlPoint1: NSPoint(x: s * 0.49, y: s * 0.43),
-                controlPoint2: NSPoint(x: s * 0.58, y: s * 0.49))
-
-    NSColor(calibratedRed: 0.32, green: 0.01, blue: 0.05, alpha: 0.88).setStroke()
-    sulci.stroke()
-
-    // Glowing blood vessels inside sulci
-    let veins = sulci.copy() as! NSBezierPath
-    veins.lineWidth = s * 0.007
-    NSColor(calibratedRed: 1.0, green: 0.12, blue: 0.18, alpha: 0.85).setStroke()
-    veins.stroke()
-    NSGraphicsContext.restoreGraphicsState()
-
-    // Outer brain rim highlight
-    brainPath.lineWidth = s * 0.012
-    NSColor(calibratedRed: 0.90, green: 0.08, blue: 0.15, alpha: 0.9).setStroke()
-    brainPath.stroke()
-
-    // 5. Draw Dripping Blood Streams & Drops from the Brain
-    let dripStreams: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
-        // (x, topY, bottomY, width)
-        (0.31, 0.43, 0.22, 0.032),
-        (0.44, 0.40, 0.15, 0.038),
-        (0.56, 0.39, 0.25, 0.028),
-        (0.68, 0.41, 0.19, 0.034)
-    ]
-
-    let bloodGrad = NSGradient(colors: [
-        NSColor(calibratedRed: 0.92, green: 0.02, blue: 0.08, alpha: 1.0),
-        NSColor(calibratedRed: 0.55, green: 0.0, blue: 0.04, alpha: 1.0)
-    ])!
-
-    for (dx, topY, botY, w) in dripStreams {
-        let cx = s * dx
-        let sy = s * topY
-        let ey = s * botY
-        let r = s * w
-
-        // Vertical stem + teardrop bulb at bottom
-        let drip = NSBezierPath()
-        drip.move(to: NSPoint(x: cx - r * 0.45, y: sy))
-        drip.line(to: NSPoint(x: cx - r * 0.35, y: ey + r * 1.1))
-        drip.curve(to: NSPoint(x: cx, y: ey - r),
-                   controlPoint1: NSPoint(x: cx - r * 1.1, y: ey + r * 0.2),
-                   controlPoint2: NSPoint(x: cx - r * 0.8, y: ey - r))
-        drip.curve(to: NSPoint(x: cx + r * 0.35, y: ey + r * 1.1),
-                   controlPoint1: NSPoint(x: cx + r * 0.8, y: ey - r),
-                   controlPoint2: NSPoint(x: cx + r * 1.1, y: ey + r * 0.2))
-        drip.line(to: NSPoint(x: cx + r * 0.45, y: sy))
-        drip.close()
-
-        bloodGrad.draw(in: drip, angle: -90)
-
-        // Specular highlight on blood drop
-        let shine = NSBezierPath(ovalIn: NSRect(x: cx - r * 0.42, y: ey - r * 0.35, width: r * 0.32, height: r * 0.55))
-        NSColor(calibratedRed: 1.0, green: 0.65, blue: 0.68, alpha: 0.65).setFill()
-        shine.fill()
-    }
-
-    // Detached falling blood droplets below
-    let droplets: [(CGFloat, CGFloat, CGFloat)] = [
-        (0.31, 0.12, 0.020),
-        (0.56, 0.14, 0.022)
-    ]
-    for (dx, dy, dr) in droplets {
-        let cx = s * dx
-        let cy = s * dy
-        let r = s * dr
-        let drop = NSBezierPath()
-        drop.move(to: NSPoint(x: cx, y: cy + r * 1.4))
-        drop.curve(to: NSPoint(x: cx, y: cy - r),
-                   controlPoint1: NSPoint(x: cx - r * 1.2, y: cy + r * 0.2),
-                   controlPoint2: NSPoint(x: cx - r * 0.9, y: cy - r))
-        drop.curve(to: NSPoint(x: cx, y: cy + r * 1.4),
-                   controlPoint1: NSPoint(x: cx + r * 0.9, y: cy - r),
-                   controlPoint2: NSPoint(x: cx + r * 1.2, y: cy + r * 0.2))
-        drop.close()
-        bloodGrad.draw(in: drop, angle: -90)
-    }
-
-    // Inner border ring
-    let borderPath = NSBezierPath(roundedRect: cardRect.insetBy(dx: s * 0.008, dy: s * 0.008), xRadius: radius, yRadius: radius)
-    borderPath.lineWidth = s * 0.014
-    NSColor(calibratedRed: 0.85, green: 0.05, blue: 0.12, alpha: 0.45).setStroke()
-    borderPath.stroke()
+    let img = NSImage(size: NSSize(width: masterRep.pixelsWide, height: masterRep.pixelsHigh))
+    img.addRepresentation(masterRep)
+    img.draw(in: destRect, from: .zero, operation: .sourceOver, fraction: 1.0)
 
     NSGraphicsContext.restoreGraphicsState()
-
-    if let pngData = rep.representation(using: .png, properties: [:]) {
-        let fileURL = URL(fileURLWithPath: outputDir).appendingPathComponent(filename)
-        try? pngData.write(to: fileURL)
-    }
+    return rep.representation(using: .png, properties: [:])!
 }
 
-let sizes = [16, 32, 128, 256, 512]
-for sz in sizes {
-    renderIcon(size: sz, scale: 1, filename: "icon_\(sz)x\(sz).png")
-    renderIcon(size: sz, scale: 2, filename: "icon_\(sz)x\(sz)@2x.png")
+func createICOFile(from masterRep: NSBitmapImageRep, outputURL: URL) {
+    let icoSizes = [16, 32, 48, 64, 128, 256]
+    let pngFrames: [(Int, Data)] = icoSizes.map { sz in
+        (sz, renderScaledPNG(from: masterRep, pixelSize: sz, insetFraction: 0.0))
+    }
+
+    var icoData = Data()
+    func appendUInt16(_ val: UInt16) {
+        var le = val.littleEndian
+        icoData.append(Data(bytes: &le, count: 2))
+    }
+    func appendUInt32(_ val: UInt32) {
+        var le = val.littleEndian
+        icoData.append(Data(bytes: &le, count: 4))
+    }
+
+    // ICONDIR Header (6 bytes)
+    appendUInt16(0) // Reserved
+    appendUInt16(1) // Type 1 = ICO
+    appendUInt16(UInt16(pngFrames.count))
+
+    // ICONDIRENTRY (16 bytes per frame)
+    var currentOffset = UInt32(6 + pngFrames.count * 16)
+    for (sz, data) in pngFrames {
+        let dimByte: UInt8 = sz >= 256 ? 0 : UInt8(sz)
+        icoData.append(dimByte) // width
+        icoData.append(dimByte) // height
+        icoData.append(0)       // palette count
+        icoData.append(0)       // reserved
+        appendUInt16(1)         // color planes
+        appendUInt16(32)        // bits per pixel
+        appendUInt32(UInt32(data.count))
+        appendUInt32(currentOffset)
+        currentOffset += UInt32(data.count)
+    }
+
+    // Raw PNG payloads
+    for (_, data) in pngFrames {
+        icoData.append(data)
+    }
+
+    try? icoData.write(to: outputURL, options: .atomic)
+}
+
+let masters = makeMasterBitmaps()
+
+// 1. Generate macOS AppIcon.iconset PNGs
+let macIconSizes = [16, 32, 128, 256, 512]
+for sz in macIconSizes {
+    let png1x = renderScaledPNG(from: masters.squircleFull, pixelSize: sz, insetFraction: 0.035)
+    try? png1x.write(to: URL(fileURLWithPath: outputDir).appendingPathComponent("icon_\(sz)x\(sz).png"))
+
+    let png2x = renderScaledPNG(from: masters.squircleFull, pixelSize: sz * 2, insetFraction: 0.035)
+    try? png2x.write(to: URL(fileURLWithPath: outputDir).appendingPathComponent("icon_\(sz)x\(sz)@2x.png"))
+}
+
+// 2. Save high-res 1024x1024 master assets in shared/logo/
+let rootCandidate = fm.fileExists(atPath: "../shared") ? ".." : "."
+let sharedLogoDir = "\(rootCandidate)/shared/logo"
+try? fm.createDirectory(atPath: sharedLogoDir, withIntermediateDirectories: true)
+
+let full1024 = renderScaledPNG(from: masters.squircleFull, pixelSize: 1024, insetFraction: 0.0)
+let noDropsSquircle1024 = renderScaledPNG(from: masters.squircleNoDrops, pixelSize: 1024, insetFraction: 0.0)
+let noDropsBrain1024 = renderScaledPNG(from: masters.brainNoDrops, pixelSize: 1024, insetFraction: 0.0)
+
+try? full1024.write(to: URL(fileURLWithPath: "\(sharedLogoDir)/app_logo_squircle.png"))
+try? noDropsSquircle1024.write(to: URL(fileURLWithPath: "\(sharedLogoDir)/app_logo_squircle_nodrops.png"))
+try? noDropsBrain1024.write(to: URL(fileURLWithPath: "\(sharedLogoDir)/app_logo_brain_nodrops.png"))
+
+// 3. Generate multi-resolution .ico files
+createICOFile(from: masters.squircleFull, outputURL: URL(fileURLWithPath: "\(rootCandidate)/AppIcon.ico"))
+createICOFile(from: masters.squircleFull, outputURL: URL(fileURLWithPath: "\(sharedLogoDir)/AppIcon.ico"))
+createICOFile(from: masters.squircleFull, outputURL: URL(fileURLWithPath: "\(rootCandidate)/macos/AppIcon.ico"))
+
+// 4. Update Android drawable & mipmap resources if present
+let androidResPath = "\(rootCandidate)/android/app/src/main/res"
+if fm.fileExists(atPath: androidResPath) {
+    let drawable512 = renderScaledPNG(from: masters.squircleFull, pixelSize: 512, insetFraction: 0.0)
+    let drawableNoDrops512 = renderScaledPNG(from: masters.squircleNoDrops, pixelSize: 512, insetFraction: 0.0)
+    let drawableBrain512 = renderScaledPNG(from: masters.brainNoDrops, pixelSize: 512, insetFraction: 0.0)
+
+    try? drawable512.write(to: URL(fileURLWithPath: "\(androidResPath)/drawable/bloody_brain_icon.png"))
+    try? drawableNoDrops512.write(to: URL(fileURLWithPath: "\(androidResPath)/drawable/bloody_brain_squircle_nodrops.png"))
+    try? drawableBrain512.write(to: URL(fileURLWithPath: "\(androidResPath)/drawable/bloody_brain_neon_nodrops.png"))
+
+    let mipmaps: [(String, Int)] = [
+        ("mipmap-mdpi", 48),
+        ("mipmap-hdpi", 72),
+        ("mipmap-xhdpi", 96),
+        ("mipmap-xxhdpi", 144),
+        ("mipmap-xxxhdpi", 192)
+    ]
+    for (folder, px) in mipmaps {
+        let data = renderScaledPNG(from: masters.squircleFull, pixelSize: px, insetFraction: 0.0)
+        try? data.write(to: URL(fileURLWithPath: "\(androidResPath)/\(folder)/ic_launcher.png"))
+    }
 }

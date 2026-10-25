@@ -16,11 +16,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct ArtikelMeisterApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var store = DeckStore()
+    @StateObject private var authManager = GeminiAuthManager.shared
 
     var body: some Scene {
         WindowGroup("ArtikelMeister — Almanca Artikel & Kelime Çalışması") {
             RootContainerView()
                 .environmentObject(store)
+                .environmentObject(authManager)
         }
         .defaultSize(width: 1040, height: 660)
         .windowStyle(.titleBar)

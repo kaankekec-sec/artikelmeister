@@ -16,6 +16,7 @@ struct HeatmapDayItem: Identifiable {
     let count: Int
 }
 
+@MainActor
 final class DeckStore: ObservableObject {
     @Published var cards: [Flashcard] = []
     @Published var settings: AppSettings = AppSettings()
@@ -23,6 +24,15 @@ final class DeckStore: ObservableObject {
     @Published var studyHistory: [String: DailyProgress] = [:]
     @Published var studyQueue: [Flashcard] = []
     @Published var currentTime: Date = Date()
+    @Published var deletedCardKeys: [String: Date] = [:]
+
+    // Cloud Sync State
+    @Published var isSyncingCloud: Bool = false
+    @Published var cloudSyncStatusMessage: String? = nil
+    @Published var cloudSyncIsError: Bool = false
+    @Published var lastCloudSyncTime: Date? = nil
+
+    private var autoSyncTask: Task<Void, Never>? = nil
 
     /// `nil` means "Tüm Desteler" (All Decks); otherwise filters study queue to that specific deck name
     @Published var selectedStudyDeck: String? = nil {
@@ -43,6 +53,7 @@ final class DeckStore: ObservableObject {
     private let settingsFileURL: URL
     private let progressFileURL: URL
     private let historyFileURL: URL
+    private let deletedCardsFileURL: URL
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -53,6 +64,7 @@ final class DeckStore: ObservableObject {
         self.settingsFileURL = storageDirectory.appendingPathComponent("settings.json")
         self.progressFileURL = storageDirectory.appendingPathComponent("daily_progress.json")
         self.historyFileURL = storageDirectory.appendingPathComponent("study_history.json")
+        self.deletedCardsFileURL = storageDirectory.appendingPathComponent("deleted_cards.json")
 
         ensureDirectoriesExist()
         loadAll()
@@ -64,18 +76,20 @@ final class DeckStore: ObservableObject {
     private func startLiveDueTimer() {
         dueCheckTimer?.invalidate()
         dueCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            let now = Date()
-            self.currentTime = now
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let now = Date()
+                self.currentTime = now
 
-            let hasNewlyDueLearning = self.filteredPoolCards.contains { card in
-                (card.stage == .learning || card.stage == .relearning) &&
-                card.dueDate <= now &&
-                !self.studyQueue.contains(where: { $0.id == card.id })
-            }
+                let hasNewlyDueLearning = self.filteredPoolCards.contains { card in
+                    (card.stage == .learning || card.stage == .relearning) &&
+                    card.dueDate <= now &&
+                    !self.studyQueue.contains(where: { $0.id == card.id })
+                }
 
-            if hasNewlyDueLearning {
-                self.rebuildStudyQueue(now: now, preserveCurrentFrontCard: !self.studyQueue.isEmpty)
+                if hasNewlyDueLearning {
+                    self.rebuildStudyQueue(now: now, preserveCurrentFrontCard: !self.studyQueue.isEmpty)
+                }
             }
         }
     }
@@ -131,7 +145,30 @@ final class DeckStore: ObservableObject {
            let loadedCards = try? decoder.decode([Flashcard].self, from: data) {
             self.cards = loadedCards
         } else {
-            saveCards()
+            saveCards(triggerCloudSync: false)
+        }
+
+        if fm.fileExists(atPath: deletedCardsFileURL.path),
+           let data = try? Data(contentsOf: deletedCardsFileURL),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            var map: [String: Date] = [:]
+            for (k, v) in json {
+                if let d = UniversalDateHelper.parse(v) {
+                    map[k] = d
+                }
+            }
+            self.deletedCardKeys = map
+        }
+    }
+
+    func saveDeletedCardsFileOnly() {
+        ensureDirectoriesExist()
+        var strMap: [String: String] = [:]
+        for (k, v) in deletedCardKeys {
+            strMap[k] = UniversalDateHelper.format(v)
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: strMap, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: deletedCardsFileURL, options: .atomic)
         }
     }
 
@@ -145,7 +182,7 @@ final class DeckStore: ObservableObject {
         }
     }
 
-    func saveCards() {
+    func saveCards(triggerCloudSync: Bool = true) {
         ensureDirectoriesExist()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -153,14 +190,29 @@ final class DeckStore: ObservableObject {
         if let data = try? encoder.encode(cards) {
             try? data.write(to: cardsFileURL, options: .atomic)
         }
+        if triggerCloudSync {
+            scheduleAutoCloudSync()
+        }
     }
 
-    func saveSettings() {
+    func updateSettings(transform: (inout AppSettings) -> Void) {
+        transform(&settings)
+        settings.updatedAt = Date()
         saveSettingsFileOnly()
         rebuildStudyQueue()
+        scheduleAutoCloudSync()
     }
 
-    func saveProgress() {
+    func saveSettings(triggerCloudSync: Bool = true) {
+        settings.updatedAt = Date()
+        saveSettingsFileOnly()
+        rebuildStudyQueue()
+        if triggerCloudSync {
+            scheduleAutoCloudSync()
+        }
+    }
+
+    func saveProgress(triggerCloudSync: Bool = true) {
         ensureDirectoriesExist()
         studyHistory[dailyProgress.dateString] = dailyProgress
         let encoder = JSONEncoder()
@@ -170,6 +222,9 @@ final class DeckStore: ObservableObject {
             try? data.write(to: progressFileURL, options: .atomic)
         }
         saveHistory()
+        if triggerCloudSync {
+            scheduleAutoCloudSync()
+        }
     }
 
     func saveHistory() {
@@ -225,7 +280,9 @@ final class DeckStore: ObservableObject {
         guard !clean.isEmpty else { return nil }
         if !settings.customDecks.contains(where: { $0.lowercased() == clean.lowercased() }) {
             settings.customDecks.append(clean)
+            settings.updatedAt = Date()
             saveSettingsFileOnly()
+            scheduleAutoCloudSync()
         }
         return allDeckNames.first(where: { $0.lowercased() == clean.lowercased() }) ?? clean
     }
@@ -239,28 +296,39 @@ final class DeckStore: ObservableObject {
             settings.customDecks.append(cleanNew)
         }
 
+        let now = Date()
         for idx in cards.indices where cards[idx].deckName == oldName {
             cards[idx].deckName = cleanNew
+            cards[idx].updatedAt = now
         }
 
         if selectedStudyDeck == oldName {
             selectedStudyDeck = cleanNew
         }
 
+        settings.updatedAt = now
         saveSettingsFileOnly()
         saveCards()
         rebuildStudyQueue(preserveCurrentFrontCard: true)
+        scheduleAutoCloudSync()
     }
 
     func deleteDeck(name: String, deleteWords: Bool = false) {
         guard name != "Genel" else { return }
         settings.customDecks.removeAll { $0.lowercased() == name.lowercased() }
 
+        let now = Date()
         if deleteWords {
+            let removed = cards.filter { $0.deckName == name }
+            for c in removed {
+                deletedCardKeys[c.syncKey] = now
+            }
+            saveDeletedCardsFileOnly()
             cards.removeAll { $0.deckName == name }
         } else {
             for idx in cards.indices where cards[idx].deckName == name {
                 cards[idx].deckName = "Genel"
+                cards[idx].updatedAt = now
             }
         }
 
@@ -268,9 +336,11 @@ final class DeckStore: ObservableObject {
             selectedStudyDeck = nil
         }
 
+        settings.updatedAt = now
         saveSettingsFileOnly()
         saveCards()
         rebuildStudyQueue()
+        scheduleAutoCloudSync()
     }
 
     var filteredPoolCards: [Flashcard] {
@@ -557,6 +627,7 @@ final class DeckStore: ObservableObject {
                 changed = true
             }
             if changed {
+                cards[existingIdx].updatedAt = Date()
                 saveCards()
                 rebuildStudyQueue()
             }
@@ -564,6 +635,10 @@ final class DeckStore: ObservableObject {
         }
 
         let newCard = Flashcard(artikel: artikel, word: cleanWord, meaning: cleanMeaning, deckName: cleanDeck)
+        if deletedCardKeys[newCard.syncKey] != nil {
+            deletedCardKeys.removeValue(forKey: newCard.syncKey)
+            saveDeletedCardsFileOnly()
+        }
         cards.append(newCard)
         saveCards()
         rebuildStudyQueue()
@@ -583,11 +658,16 @@ final class DeckStore: ObservableObject {
         cards[idx].word = cleanWord
         cards[idx].meaning = cleanMeaning
         cards[idx].deckName = cleanDeck
+        cards[idx].updatedAt = Date()
         saveCards()
         rebuildStudyQueue(preserveCurrentFrontCard: true)
     }
 
     func deleteCard(id: UUID) {
+        if let target = cards.first(where: { $0.id == id }) {
+            deletedCardKeys[target.syncKey] = Date()
+            saveDeletedCardsFileOnly()
+        }
         cards.removeAll { $0.id == id }
         cardDueStepMap.removeValue(forKey: id)
         if let sel = selectedStudyDeck, !allDeckNames.contains(sel) {
@@ -608,6 +688,7 @@ final class DeckStore: ObservableObject {
             cards[idx].dueDate = now
             cards[idx].lastReviewedAt = nil
             cards[idx].totalReviews = 0
+            cards[idx].updatedAt = now
         }
         cardDueStepMap.removeAll()
         dailyProgress = DailyProgress.empty(for: now)
@@ -618,6 +699,11 @@ final class DeckStore: ObservableObject {
     }
 
     func deleteAllCards() {
+        let now = Date()
+        for c in cards {
+            deletedCardKeys[c.syncKey] = now
+        }
+        saveDeletedCardsFileOnly()
         cards.removeAll()
         cardDueStepMap.removeAll()
         selectedStudyDeck = nil
@@ -648,18 +734,28 @@ final class DeckStore: ObservableObject {
         }
 
         let backup = ArtikelMeisterBackup(
-            version: 1,
+            version: 2,
             exportedAt: now,
             includesProgress: includeProgress,
             cards: exportedCards,
             settings: includeProgress ? settings : nil,
-            studyHistory: includeProgress ? studyHistory : nil
+            studyHistory: includeProgress ? studyHistory : nil,
+            deletedCardKeys: includeProgress ? deletedCardKeys : nil,
+            userEmail: GeminiAuthManager.shared.userEmail.isEmpty ? nil : GeminiAuthManager.shared.userEmail
         )
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(backup)
+    }
+
+    func exportBackupJSONString(includeProgress: Bool) -> String {
+        guard let data = try? exportBackupJSONData(includeProgress: includeProgress),
+              let str = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return str
     }
 
     func importBackupJSONData(_ data: Data, mergeWithExisting: Bool) throws -> (added: Int, updated: Int) {
@@ -681,6 +777,10 @@ final class DeckStore: ObservableObject {
                 }
                 saveHistory()
             }
+            for c in backup.cards {
+                deletedCardKeys.removeValue(forKey: c.syncKey)
+            }
+            saveDeletedCardsFileOnly()
             saveCards()
             rebuildStudyQueue()
             return (backup.cards.count, 0)
@@ -688,22 +788,18 @@ final class DeckStore: ObservableObject {
             var added = 0
             var updated = 0
             for incoming in backup.cards {
+                deletedCardKeys.removeValue(forKey: incoming.syncKey)
                 if let idx = cards.firstIndex(where: {
                     $0.artikel == incoming.artikel && $0.word.lowercased() == incoming.word.lowercased()
                 }) {
-                    if !incoming.meaning.isEmpty && cards[idx].meaning.isEmpty {
-                        cards[idx].meaning = incoming.meaning
-                        updated += 1
-                    }
-                    if incoming.deckName != "Genel" && cards[idx].deckName == "Genel" {
-                        cards[idx].deckName = incoming.deckName
-                        updated += 1
-                    }
+                    cards[idx] = smartMergeCards(local: cards[idx], incoming: incoming)
+                    updated += 1
                 } else {
                     cards.append(incoming)
                     added += 1
                 }
             }
+            saveDeletedCardsFileOnly()
             if let h = backup.studyHistory {
                 for (dateKey, prog) in h {
                     if let existingProg = studyHistory[dateKey] {
@@ -720,6 +816,292 @@ final class DeckStore: ObservableObject {
             rebuildStudyQueue()
             return (added, updated)
         }
+    }
+
+    // MARK: - Universal Google Drive Smart Sync & Deduplication Engine
+
+    func scheduleAutoCloudSync() {
+        guard GeminiAuthManager.shared.isGoogleAccountConnected else { return }
+        autoSyncTask?.cancel()
+        autoSyncTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            await self.syncWithGoogleDrive(authManager: .shared, isSilentAutoSync: true)
+        }
+    }
+
+    func smartMergeCards(local: Flashcard, incoming: Flashcard) -> Flashcard {
+        // Choose the card with further / newer Anki SM-2 study progress
+        let incomingHasMoreProgress: Bool
+        if incoming.totalReviews != local.totalReviews {
+            incomingHasMoreProgress = incoming.totalReviews > local.totalReviews
+        } else if (incoming.lastReviewedAt ?? .distantPast) != (local.lastReviewedAt ?? .distantPast) {
+            incomingHasMoreProgress = (incoming.lastReviewedAt ?? .distantPast) > (local.lastReviewedAt ?? .distantPast)
+        } else {
+            incomingHasMoreProgress = incoming.updatedAt > local.updatedAt
+        }
+        let progressSource = incomingHasMoreProgress ? incoming : local
+
+        // Choose best meaning (non-empty wins; if both non-empty, newer updatedAt wins)
+        let mergedMeaning: String
+        let localMeaningTrimmed = local.meaning.trimmingCharacters(in: .whitespacesAndNewlines)
+        let incomingMeaningTrimmed = incoming.meaning.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !localMeaningTrimmed.isEmpty && incomingMeaningTrimmed.isEmpty {
+            mergedMeaning = local.meaning
+        } else if !incomingMeaningTrimmed.isEmpty && localMeaningTrimmed.isEmpty {
+            mergedMeaning = incoming.meaning
+        } else if incoming.updatedAt > local.updatedAt && !incomingMeaningTrimmed.isEmpty {
+            mergedMeaning = incoming.meaning
+        } else {
+            mergedMeaning = local.meaning
+        }
+
+        // Choose best deck (specific deck over 'Genel' wins; if both specific, newer updatedAt wins)
+        let mergedDeck: String
+        if local.cleanDeckName != "Genel" && incoming.cleanDeckName == "Genel" {
+            mergedDeck = local.cleanDeckName
+        } else if incoming.cleanDeckName != "Genel" && local.cleanDeckName == "Genel" {
+            mergedDeck = incoming.cleanDeckName
+        } else if incoming.updatedAt > local.updatedAt {
+            mergedDeck = incoming.cleanDeckName
+        } else {
+            mergedDeck = local.cleanDeckName
+        }
+
+        return Flashcard(
+            id: local.id,
+            artikel: local.artikel,
+            word: local.word,
+            meaning: mergedMeaning,
+            deckName: mergedDeck,
+            createdAt: min(local.createdAt, incoming.createdAt),
+            updatedAt: max(local.updatedAt, incoming.updatedAt),
+            stage: progressSource.stage,
+            easeFactor: progressSource.easeFactor,
+            intervalDays: progressSource.intervalDays,
+            repetitions: progressSource.repetitions,
+            lapses: progressSource.lapses,
+            dueDate: progressSource.dueDate,
+            lastReviewedAt: progressSource.lastReviewedAt,
+            totalReviews: progressSource.totalReviews
+        )
+    }
+
+    func syncWithGoogleDrive(isSilentAutoSync: Bool = false) async {
+        await syncWithGoogleDrive(authManager: .shared, isSilentAutoSync: isSilentAutoSync)
+    }
+
+    func syncWithGoogleDrive(authManager: GeminiAuthManager, isSilentAutoSync: Bool = false) async {
+        guard authManager.isGoogleAccountConnected && !isSyncingCloud else { return }
+        isSyncingCloud = true
+        if !isSilentAutoSync {
+            cloudSyncIsError = false
+            cloudSyncStatusMessage = "Google Drive ('\(GoogleDriveSyncService.SYNC_FOLDER_NAME)') ile eşitleniyor..."
+        }
+
+        do {
+            if authManager.userEmail.isEmpty {
+                try? await authManager.fetchUserProfile()
+            }
+
+            let snapshot = try await GoogleDriveSyncService.fetchCloudSnapshot(authManager: authManager)
+            let cloudBackup = snapshot.backup
+
+            var addedFromCloud = 0
+            var overlappingDeduplicated = 0
+
+            if let cloudBackup = cloudBackup {
+                // 1. Merge deleted card tombstones
+                var mergedDeleted = deletedCardKeys
+                if let cloudDeleted = cloudBackup.deletedCardKeys {
+                    for (k, ts) in cloudDeleted {
+                        let existingTs = mergedDeleted[k] ?? .distantPast
+                        if ts > existingTs {
+                            mergedDeleted[k] = ts
+                        }
+                    }
+                }
+                deletedCardKeys = mergedDeleted
+                saveDeletedCardsFileOnly()
+
+                // 2. Deduplicate & Smart-Merge local cards + cloud cards by syncKey
+                var mergedByKey: [String: Flashcard] = [:]
+                var keyOrder: [String] = []
+
+                for localCard in cards {
+                    let key = localCard.syncKey
+                    let delTs = mergedDeleted[key] ?? .distantPast
+                    if delTs > localCard.updatedAt { continue }
+                    if let existing = mergedByKey[key] {
+                        mergedByKey[key] = smartMergeCards(local: existing, incoming: localCard)
+                    } else {
+                        mergedByKey[key] = localCard
+                        keyOrder.append(key)
+                    }
+                }
+
+                for cloudCard in cloudBackup.cards {
+                    let key = cloudCard.syncKey
+                    let delTs = mergedDeleted[key] ?? .distantPast
+                    if delTs > cloudCard.updatedAt { continue }
+
+                    if let existing = mergedByKey[key] {
+                        mergedByKey[key] = smartMergeCards(local: existing, incoming: cloudCard)
+                        overlappingDeduplicated += 1
+                    } else {
+                        mergedByKey[key] = cloudCard
+                        keyOrder.append(key)
+                        addedFromCloud += 1
+                    }
+                }
+
+                cards = keyOrder.compactMap { mergedByKey[$0] }
+
+                // 3. Merge studyHistory & today's dailyProgress
+                if let cloudHistory = cloudBackup.studyHistory {
+                    var mergedHistory = studyHistory
+                    for (dateKey, cloudProg) in cloudHistory {
+                        if let localProg = mergedHistory[dateKey] {
+                            mergedHistory[dateKey] = DailyProgress(
+                                dateString: dateKey,
+                                newCardsStudied: max(localProg.newCardsStudied, cloudProg.newCardsStudied),
+                                reviewsCompleted: max(localProg.reviewsCompleted, cloudProg.reviewsCompleted),
+                                againCount: max(localProg.againCount, cloudProg.againCount),
+                                hardCount: max(localProg.hardCount, cloudProg.hardCount),
+                                goodCount: max(localProg.goodCount, cloudProg.goodCount),
+                                easyCount: max(localProg.easyCount, cloudProg.easyCount)
+                            )
+                        } else {
+                            mergedHistory[dateKey] = cloudProg
+                        }
+                    }
+                    studyHistory = mergedHistory
+                    let todayKey = DailyProgress.todayString()
+                    if let mergedToday = mergedHistory[todayKey] {
+                        dailyProgress = DailyProgress(
+                            dateString: todayKey,
+                            newCardsStudied: max(dailyProgress.newCardsStudied, mergedToday.newCardsStudied),
+                            reviewsCompleted: max(dailyProgress.reviewsCompleted, mergedToday.reviewsCompleted),
+                            againCount: max(dailyProgress.againCount, mergedToday.againCount),
+                            hardCount: max(dailyProgress.hardCount, mergedToday.hardCount),
+                            goodCount: max(dailyProgress.goodCount, mergedToday.goodCount),
+                            easyCount: max(dailyProgress.easyCount, mergedToday.easyCount)
+                        )
+                    }
+                    saveProgress(triggerCloudSync: false)
+                }
+
+                // 4. Merge user preferences & custom decks
+                if let cloudSettings = cloudBackup.settings {
+                    var unionDecks = ["Genel"]
+                    for d in settings.customDecks where !d.trimmingCharacters(in: .whitespaces).isEmpty && !unionDecks.contains(d) {
+                        unionDecks.append(d)
+                    }
+                    for d in cloudSettings.customDecks where !d.trimmingCharacters(in: .whitespaces).isEmpty && !unionDecks.contains(d) {
+                        unionDecks.append(d)
+                    }
+                    for c in cards where !c.cleanDeckName.isEmpty && !unionDecks.contains(c.cleanDeckName) {
+                        unionDecks.append(c.cleanDeckName)
+                    }
+
+                    let newerPrefs = (cloudSettings.updatedAt > settings.updatedAt) ? cloudSettings : settings
+                    settings = AppSettings(
+                        dailyNewCardLimit: newerPrefs.dailyNewCardLimit,
+                        dailyReviewLimit: newerPrefs.dailyReviewLimit,
+                        autoPlayPronunciation: newerPrefs.autoPlayPronunciation,
+                        showMeaningOnFront: newerPrefs.showMeaningOnFront,
+                        newCardOrderRandom: newerPrefs.newCardOrderRandom,
+                        isDarkMode: newerPrefs.isDarkMode,
+                        customDecks: unionDecks,
+                        updatedAt: max(settings.updatedAt, cloudSettings.updatedAt)
+                    )
+                    saveSettingsFileOnly()
+                }
+
+                saveCards(triggerCloudSync: false)
+                rebuildStudyQueue(preserveCurrentFrontCard: true)
+            } else {
+                var deduplicatedMap: [String: Flashcard] = [:]
+                var keyOrder: [String] = []
+                for c in cards {
+                    if let existing = deduplicatedMap[c.syncKey] {
+                        deduplicatedMap[c.syncKey] = smartMergeCards(local: existing, incoming: c)
+                    } else {
+                        deduplicatedMap[c.syncKey] = c
+                        keyOrder.append(c.syncKey)
+                    }
+                }
+                if deduplicatedMap.count != cards.count {
+                    cards = keyOrder.compactMap { deduplicatedMap[$0] }
+                    saveCards(triggerCloudSync: false)
+                }
+            }
+
+            // 5. Upload unified deduplicated backup back to Google Drive
+            let unifiedJson = exportBackupJSONString(includeProgress: true)
+            _ = try await GoogleDriveSyncService.uploadCloudBackup(
+                authManager: authManager,
+                folderId: snapshot.folderId,
+                existingFileId: snapshot.fileId,
+                backupJson: unifiedJson
+            )
+
+            lastCloudSyncTime = Date()
+            cloudSyncIsError = false
+            cloudSyncStatusMessage = (addedFromCloud > 0)
+                ? "Bulutla eşitlendi: +\(addedFromCloud) yeni kelime alındı (Toplam \(cards.count) kelime)."
+                : "Google Drive ile başarıyla eşitlendi (\(cards.count) kelime, \(currentStreakDays) gün seri)."
+        } catch {
+            cloudSyncIsError = true
+            cloudSyncStatusMessage = "Bulut eşitleme hatası: \(error.localizedDescription)"
+        }
+
+        isSyncingCloud = false
+    }
+
+    func deleteAccountAndAllData() async {
+        await deleteAccountAndAllData(authManager: .shared)
+    }
+
+    func deleteAccountAndAllData(authManager: GeminiAuthManager) async {
+        autoSyncTask?.cancel()
+        isSyncingCloud = true
+        cloudSyncIsError = false
+        cloudSyncStatusMessage = "Bulut ve yerel hesap verileri tamamen siliniyor..."
+
+        await GoogleDriveSyncService.deleteAllCloudAccountData(authManager: authManager)
+        await authManager.revokeGoogleTokenBestEffort()
+        authManager.clearAuthorization()
+
+        cards = []
+        deletedCardKeys = [:]
+        studyHistory = [:]
+        dailyProgress = DailyProgress.empty()
+        let currentDarkMode = settings.isDarkMode
+        settings = AppSettings(isDarkMode: currentDarkMode, updatedAt: Date())
+        selectedStudyDeck = nil
+        cardDueStepMap.removeAll()
+
+        let fm = FileManager.default
+        try? fm.removeItem(at: cardsFileURL)
+        try? fm.removeItem(at: settingsFileURL)
+        try? fm.removeItem(at: progressFileURL)
+        try? fm.removeItem(at: historyFileURL)
+        try? fm.removeItem(at: deletedCardsFileURL)
+        try? fm.removeItem(at: importedCSVsDirectory)
+        try? fm.removeItem(at: backupsDirectory)
+
+        ensureDirectoriesExist()
+        saveSettingsFileOnly()
+        saveCards(triggerCloudSync: false)
+        saveProgress(triggerCloudSync: false)
+        saveDeletedCardsFileOnly()
+        rebuildStudyQueue()
+
+        lastCloudSyncTime = nil
+        cloudSyncIsError = false
+        cloudSyncStatusMessage = "Hesap, Google Drive bulut verileri ve yerel veriler tamamen silindi."
+        isSyncingCloud = false
     }
 
     // MARK: - CSV Import / Export
