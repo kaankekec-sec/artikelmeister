@@ -24,10 +24,14 @@ else
     SDK_PATH="$(xcrun --show-sdk-path --sdk macosx)"
 fi
 
-echo "[1/4] Generating AppIcon.icns..."
-swiftc -sdk "${SDK_PATH}" -module-cache-path "${BUILD_DIR}/ModuleCache" scripts/generate_icon.swift -o "${BUILD_DIR}/generate_icon"
+echo "[1/4] Generating AppIcon.icns and .ico..."
+swiftc -Xfrontend -disable-sandbox -sdk "${SDK_PATH}" -module-cache-path "${BUILD_DIR}/ModuleCache" scripts/generate_icon.swift -o "${BUILD_DIR}/generate_icon"
 "${BUILD_DIR}/generate_icon" "${BUILD_DIR}/AppIcon.iconset"
 iconutil -c icns "${BUILD_DIR}/AppIcon.iconset" -o "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
+cp "${ROOT_DIR}/shared/logo/app_logo_squircle.png" "${APP_BUNDLE}/Contents/Resources/app_logo_squircle.png"
+cp "${ROOT_DIR}/shared/logo/app_logo_squircle_nodrops.png" "${APP_BUNDLE}/Contents/Resources/app_logo_squircle_nodrops.png"
+cp "${ROOT_DIR}/shared/logo/app_logo_brain_nodrops.png" "${APP_BUNDLE}/Contents/Resources/app_logo_brain_nodrops.png"
+cp "${MACOS_DIR}/AppIcon.ico" "${APP_BUNDLE}/Contents/Resources/AppIcon.ico"
 
 echo "[2/4] Creating Info.plist..."
 cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
@@ -85,6 +89,7 @@ SOURCES=(
 
 swiftc \
     -O \
+    -Xfrontend -disable-sandbox \
     -target arm64-apple-macosx14.0 \
     -module-cache-path "${BUILD_DIR}/ModuleCache" \
     -sdk "${SDK_PATH}" \
@@ -93,6 +98,7 @@ swiftc \
 
 swiftc \
     -O \
+    -Xfrontend -disable-sandbox \
     -target x86_64-apple-macosx14.0 \
     -module-cache-path "${BUILD_DIR}/ModuleCache" \
     -sdk "${SDK_PATH}" \
@@ -115,11 +121,14 @@ cp -R "${APP_BUNDLE}" "${DMG_STAGING}/"
 [ -f "${ROOT_DIR}/shared/samples/wortschatzkapitel7-8.csv" ] && cp "${ROOT_DIR}/shared/samples/wortschatzkapitel7-8.csv" "${DMG_STAGING}/" || true
 ln -s /Applications "${DMG_STAGING}/Applications"
 
-hdiutil create \
-    -volname "${APP_NAME}" \
-    -srcfolder "${DMG_STAGING}" \
-    -ov \
-    -format UDZO \
-    "${DMG_OUTPUT}"
-
-echo "Done! Created ${DMG_OUTPUT} and ${APP_BUNDLE}"
+if [ "${SKIP_DMG:-0}" != "1" ]; then
+    hdiutil create \
+        -volname "${APP_NAME}" \
+        -srcfolder "${DMG_STAGING}" \
+        -ov \
+        -format UDZO \
+        "${DMG_OUTPUT}"
+    echo "Done! Created ${DMG_OUTPUT} and ${APP_BUNDLE}"
+else
+    echo "Done! Built ${APP_BUNDLE} and staged ${DMG_STAGING} (SKIP_DMG=1)"
+fi

@@ -18,6 +18,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -99,11 +100,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -112,6 +115,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -125,9 +129,55 @@ import com.artikelmeister.android.Artikel
 import com.artikelmeister.android.DeckStore
 import com.artikelmeister.android.GeminiAuthManager
 import com.artikelmeister.android.GoogleDriveSyncService
+import com.artikelmeister.android.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.pow
 import kotlin.math.roundToInt
+
+private data class AndroidLogoDropletSpec(
+    val normX: Float,
+    val startNormY: Float,
+    val endNormY: Float,
+    val widthFactor: Float,
+    val heightFactor: Float,
+    val isTeardrop: Boolean,
+    val speedMultiplier: Float,
+    val phaseOffset: Float
+)
+
+private val logoDropletSpecs = listOf(
+    // 1. Middle-left main teardrop below stem (canonical logo position: x=0.3922, y=0.8073)
+    AndroidLogoDropletSpec(
+        normX = 0.3922f, startNormY = 0.7420f, endNormY = 0.8950f,
+        widthFactor = 0.045f, heightFactor = 0.064f, isTeardrop = true,
+        speedMultiplier = 1.0f, phaseOffset = 0.00f
+    ),
+    // 2. Center-right small droplet below long stem (canonical logo position: x=0.6310, y=0.8465)
+    AndroidLogoDropletSpec(
+        normX = 0.6310f, startNormY = 0.8120f, endNormY = 0.9150f,
+        widthFactor = 0.022f, heightFactor = 0.022f, isTeardrop = false,
+        speedMultiplier = 1.0f, phaseOffset = 0.32f
+    ),
+    // 3. Right small droplet below stem (canonical logo position: x=0.6980, y=0.8019)
+    AndroidLogoDropletSpec(
+        normX = 0.6980f, startNormY = 0.7620f, endNormY = 0.8850f,
+        widthFactor = 0.024f, heightFactor = 0.024f, isTeardrop = false,
+        speedMultiplier = 1.0f, phaseOffset = 0.61f
+    ),
+    // 4. Far-right small droplet below cerebellum (canonical logo position: x=0.7456, y=0.7384)
+    AndroidLogoDropletSpec(
+        normX = 0.7456f, startNormY = 0.6920f, endNormY = 0.8350f,
+        widthFactor = 0.022f, heightFactor = 0.022f, isTeardrop = false,
+        speedMultiplier = 1.0f, phaseOffset = 0.83f
+    ),
+    // 5. Left bulb subtle secondary drip (below the large left hanging bulb at x=0.2650)
+    AndroidLogoDropletSpec(
+        normX = 0.2650f, startNormY = 0.7180f, endNormY = 0.8550f,
+        widthFactor = 0.026f, heightFactor = 0.036f, isTeardrop = true,
+        speedMultiplier = 1.0f, phaseOffset = 0.47f
+    )
+)
 
 /**
  * 1:1 Port of BloodyBrainLogoView from SplashView.swift & generate_icon.swift
@@ -138,59 +188,52 @@ fun BloodyBrainLogoView(
     animated: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    if (!animated) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = modifier.size(size)
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.bloody_brain_icon),
+                contentDescription = "ArtikelMeister Logo",
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        return
+    }
+
     val infiniteTransition = rememberInfiniteTransition(label = "bloody_brain_transition")
 
-    val pulseFraction by if (animated) {
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "pulse"
-        )
-    } else {
-        remember { mutableStateOf(0f) }
-    }
+    val pulseFraction by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1050, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
 
-    val drip1Progress by if (animated) {
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1350, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "drip1"
-        )
-    } else {
-        remember { mutableStateOf(0f) }
-    }
+    val masterDripCycle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1950, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "masterDripCycle"
+    )
 
-    val drip2Progress by if (animated) {
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1350, delayMillis = 550, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "drip2"
-        )
-    } else {
-        remember { mutableStateOf(0f) }
-    }
-
-    val auraScale = if (animated) 0.94f + (pulseFraction * 0.14f) else 0.94f
-    val brainScale = if (animated) 0.97f + (pulseFraction * 0.08f) else 1.0f
-    val auraAlpha = if (animated) 0.30f + (pulseFraction * 0.25f) else 0.30f
+    val auraScale = 0.96f + (pulseFraction * 0.09f)
+    val badgeScale = 0.985f + (pulseFraction * 0.028f)
+    val auraAlpha = 0.28f + (pulseFraction * 0.24f)
+    val neonGlowAlpha = 0.14f + (pulseFraction * 0.52f)
 
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier.size(size)
     ) {
-        // Outer Crimson Aura + Dripping Blood Streams + Falling Droplets
+        // 1. Breathing neon crimson outer aura behind the dark squircle
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
@@ -199,202 +242,119 @@ fun BloodyBrainLogoView(
             val s = this.size.minDimension
             val center = Offset(this.size.width / 2f, this.size.height / 2f)
 
-            // Outer crimson aura
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0.90f, 0.04f, 0.12f).copy(alpha = auraAlpha),
-                        Color(0.45f, 0.01f, 0.05f).copy(alpha = 0.12f),
+                        Color(1.0f, 0.16f, 0.18f).copy(alpha = auraAlpha),
+                        Color(0.75f, 0.04f, 0.10f).copy(alpha = 0.10f + 0.10f * pulseFraction),
                         Color.Transparent
                     ),
                     center = center,
-                    radius = s * 0.65f
+                    radius = s * 0.66f
                 ),
-                radius = s * 0.65f,
+                radius = s * 0.66f,
                 center = center
             )
         }
 
-        // Blood drip streams & falling droplets
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = this.size.width
-            val h = this.size.height
-
-            // Attached blood drips hanging from the cortex
-            val streamW = w * 0.72f
-            val streamH = h * 0.48f
-            val streamLeft = (w - streamW) / 2f
-            val streamTop = h * 0.48f
-
-            val columns = listOf(
-                Triple(0.22f, 0.72f, 0.07f),
-                Triple(0.40f, 0.95f, 0.08f),
-                Triple(0.58f, 0.64f, 0.065f),
-                Triple(0.76f, 0.84f, 0.075f)
-            )
-
-            val streamPath = Path()
-            for ((cxFactor, lenFactor, radiusFactor) in columns) {
-                val cx = streamLeft + streamW * cxFactor
-                val endY = streamTop + streamH * lenFactor
-                val r = streamW * radiusFactor
-
-                streamPath.moveTo(cx - r * 0.5f, streamTop)
-                streamPath.lineTo(cx - r * 0.4f, endY - r)
-                streamPath.quadraticTo(cx - r, endY, cx, endY)
-                streamPath.quadraticTo(cx + r, endY, cx + r * 0.4f, endY - r)
-                streamPath.lineTo(cx + r * 0.5f, streamTop)
-                streamPath.close()
-            }
-
-            drawPath(
-                path = streamPath,
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0.92f, 0.03f, 0.09f),
-                        Color(0.52f, 0.0f, 0.04f)
-                    ),
-                    startY = streamTop,
-                    endY = streamTop + streamH
-                )
-            )
-
-            // Helper to draw a blood teardrop
-            fun drawTeardrop(cx: Float, topY: Float, dropW: Float, dropH: Float, alpha: Float) {
-                val path = Path().apply {
-                    moveTo(cx, topY)
-                    cubicTo(
-                        cx - dropW * 0.65f, topY + dropH * 0.55f,
-                        cx - dropW * 0.4f, topY + dropH,
-                        cx, topY + dropH
-                    )
-                    cubicTo(
-                        cx + dropW * 0.4f, topY + dropH,
-                        cx + dropW * 0.65f, topY + dropH * 0.55f,
-                        cx, topY
-                    )
-                    close()
-                }
-                drawPath(
-                    path = path,
-                    color = Color(0.88f, 0.02f, 0.08f).copy(alpha = alpha.coerceIn(0f, 1f))
-                )
-            }
-
-            // Falling blood drop 1 (left)
-            val drop1Y = h * 0.66f + (drip1Progress * h * 0.26f)
-            val drop1Alpha = 1f - drip1Progress
-            drawTeardrop(
-                cx = w * 0.32f,
-                topY = drop1Y,
-                dropW = w * 0.08f,
-                dropH = h * 0.12f,
-                alpha = drop1Alpha
-            )
-
-            // Falling blood drop 2 (right-center)
-            val drop2Y = h * 0.64f + (drip2Progress * h * 0.28f)
-            val drop2Alpha = 1f - drip2Progress
-            drawTeardrop(
-                cx = w * 0.58f,
-                topY = drop2Y,
-                dropW = w * 0.09f,
-                dropH = h * 0.13f,
-                alpha = drop2Alpha
-            )
-        }
-
-        // Anatomical Brain Silhouette & Cerebral Sulci Folds
-        Canvas(
+        // 2. Exact dark-slate squircle & neon brain base + pulsing neon overlay + live falling droplets
+        Box(
+            contentAlignment = Alignment.Center,
             modifier = Modifier
                 .fillMaxSize()
-                .scale(brainScale)
+                .scale(badgeScale)
         ) {
-            val s = this.size.minDimension
-            // Note: in generate_icon.swift y=0 was bottom, in Compose Canvas y=0 is top.
-            // So we flip y -> (1f - y) shifted slightly up for the cortex.
-            fun by(normY: Float): Float = s * (1.02f - normY)
-            fun bx(normX: Float): Float = s * normX
+            Image(
+                painter = painterResource(id = R.drawable.bloody_brain_squircle_nodrops),
+                contentDescription = "ArtikelMeister Logo",
+                modifier = Modifier.fillMaxSize()
+            )
 
-            val brainPath = Path().apply {
-                moveTo(bx(0.25f), by(0.46f))
-                cubicTo(bx(0.16f), by(0.48f), bx(0.16f), by(0.58f), bx(0.22f), by(0.63f))
-                cubicTo(bx(0.23f), by(0.72f), bx(0.30f), by(0.78f), bx(0.38f), by(0.78f))
-                cubicTo(bx(0.46f), by(0.82f), bx(0.55f), by(0.82f), bx(0.62f), by(0.79f))
-                cubicTo(bx(0.72f), by(0.78f), bx(0.80f), by(0.71f), bx(0.80f), by(0.62f))
-                cubicTo(bx(0.82f), by(0.52f), bx(0.80f), by(0.43f), bx(0.73f), by(0.41f))
-                cubicTo(bx(0.67f), by(0.35f), bx(0.55f), by(0.35f), bx(0.48f), by(0.39f))
-                cubicTo(bx(0.38f), by(0.38f), bx(0.29f), by(0.41f), bx(0.25f), by(0.46f))
-                close()
+            Image(
+                painter = painterResource(id = R.drawable.bloody_brain_neon_nodrops),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(neonGlowAlpha)
+            )
+
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = this.size.width
+                val h = this.size.height
+
+                for (drop in logoDropletSpecs) {
+                    val phase = (masterDripCycle * drop.speedMultiplier + drop.phaseOffset) % 1.0f
+
+                    val fallProgress: Float
+                    val dropScale: Float
+                    val dropAlpha: Float
+
+                    if (phase < 0.20f) {
+                        val p = phase / 0.20f
+                        fallProgress = p * 0.06f
+                        dropScale = 0.45f + 0.55f * p
+                        dropAlpha = 0.55f + 0.45f * p
+                    } else if (phase < 0.86f) {
+                        val p = (phase - 0.20f) / 0.66f
+                        fallProgress = 0.06f + 0.94f * p.pow(1.42f)
+                        dropScale = 1.0f
+                        dropAlpha = 1.0f
+                    } else {
+                        val p = (phase - 0.86f) / 0.14f
+                        fallProgress = 1.0f + 0.08f * p
+                        dropScale = 1.0f - 0.25f * p
+                        dropAlpha = 1.0f - p
+                    }
+
+                    val cx = w * drop.normX
+                    val cy = h * (drop.startNormY + (drop.endNormY - drop.startNormY) * fallProgress)
+                    val dw = w * drop.widthFactor * dropScale
+                    val dh = h * drop.heightFactor * dropScale
+
+                    // Soft neon red halo around droplet
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(1.0f, 0.18f, 0.18f).copy(alpha = (dropAlpha * 0.45f).coerceIn(0f, 1f)),
+                                Color.Transparent
+                            ),
+                            center = Offset(cx, cy),
+                            radius = maxOf(dw, dh) * 0.9f
+                        ),
+                        radius = maxOf(dw, dh) * 0.9f,
+                        center = Offset(cx, cy),
+                        blendMode = BlendMode.Plus
+                    )
+
+                    if (drop.isTeardrop) {
+                        val topY = cy - dh * 0.5f
+                        val path = Path().apply {
+                            moveTo(cx, topY)
+                            cubicTo(
+                                cx - dw * 0.62f, topY + dh * 0.58f,
+                                cx - dw * 0.38f, topY + dh,
+                                cx, topY + dh
+                            )
+                            cubicTo(
+                                cx + dw * 0.38f, topY + dh,
+                                cx + dw * 0.62f, topY + dh * 0.58f,
+                                cx, topY
+                            )
+                            close()
+                        }
+                        drawPath(
+                            path = path,
+                            color = Color(1.0f, 0.176f, 0.176f).copy(alpha = dropAlpha.coerceIn(0f, 1f))
+                        )
+                    } else {
+                        drawOval(
+                            color = Color(1.0f, 0.176f, 0.176f).copy(alpha = dropAlpha.coerceIn(0f, 1f)),
+                            topLeft = Offset(cx - dw * 0.5f, cy - dh * 0.5f),
+                            size = Size(dw, dh)
+                        )
+                    }
+                }
             }
-
-            drawPath(
-                path = brainPath,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0.98f, 0.32f, 0.38f),
-                        Color(0.82f, 0.06f, 0.14f),
-                        Color(0.45f, 0.01f, 0.05f)
-                    ),
-                    start = Offset(bx(0.2f), by(0.8f)),
-                    end = Offset(bx(0.8f), by(0.35f))
-                )
-            )
-
-            // Outer brain rim highlight
-            drawPath(
-                path = brainPath,
-                color = Color(0.95f, 0.12f, 0.20f).copy(alpha = 0.9f),
-                style = Stroke(width = s * 0.016f)
-            )
-
-            // Cerebral Sulci / Gyri Folds
-            val sulci = Path().apply {
-                moveTo(bx(0.32f), by(0.47f))
-                cubicTo(bx(0.42f), by(0.48f), bx(0.50f), by(0.55f), bx(0.60f), by(0.56f))
-
-                moveTo(bx(0.49f), by(0.79f))
-                cubicTo(bx(0.44f), by(0.70f), bx(0.49f), by(0.61f), bx(0.45f), by(0.53f))
-
-                moveTo(bx(0.25f), by(0.59f))
-                cubicTo(bx(0.30f), by(0.64f), bx(0.36f), by(0.60f), bx(0.41f), by(0.65f))
-
-                moveTo(bx(0.33f), by(0.73f))
-                cubicTo(bx(0.37f), by(0.70f), bx(0.41f), by(0.72f), bx(0.44f), by(0.68f))
-
-                moveTo(bx(0.60f), by(0.77f))
-                cubicTo(bx(0.56f), by(0.70f), bx(0.62f), by(0.64f), bx(0.57f), by(0.58f))
-
-                moveTo(bx(0.64f), by(0.67f))
-                cubicTo(bx(0.69f), by(0.66f), bx(0.73f), by(0.62f), bx(0.76f), by(0.57f))
-
-                moveTo(bx(0.40f), by(0.43f))
-                cubicTo(bx(0.49f), by(0.43f), bx(0.58f), by(0.49f), bx(0.66f), by(0.47f))
-            }
-
-            drawPath(
-                path = sulci,
-                color = Color(0.32f, 0.01f, 0.05f).copy(alpha = 0.88f),
-                style = Stroke(width = s * 0.024f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-            )
-
-            drawPath(
-                path = sulci,
-                color = Color(1.0f, 0.16f, 0.22f).copy(alpha = 0.85f),
-                style = Stroke(width = s * 0.008f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-            )
-
-            // Crimson blood splatter accents on the cortex
-            drawCircle(
-                color = Color(0.88f, 0.0f, 0.06f).copy(alpha = 0.75f),
-                radius = s * 0.055f,
-                center = Offset(s * 0.34f, s * 0.52f)
-            )
-            drawCircle(
-                color = Color(0.75f, 0.0f, 0.05f).copy(alpha = 0.80f),
-                radius = s * 0.07f,
-                center = Offset(s * 0.62f, s * 0.55f)
-            )
         }
     }
 }
@@ -407,7 +367,7 @@ fun SplashIntroView(onFinished: () -> Unit) {
     var started by remember { mutableStateOf(false) }
 
     val appearScale by animateFloatAsState(
-        targetValue = if (started) 1.0f else 0.72f,
+        targetValue = if (started) 1.0f else 0.74f,
         animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
         label = "appearScale"
     )
@@ -424,7 +384,7 @@ fun SplashIntroView(onFinished: () -> Unit) {
 
     LaunchedEffect(Unit) {
         started = true
-        delay(2250L)
+        delay(2350L)
         onFinished()
     }
 
@@ -435,9 +395,9 @@ fun SplashIntroView(onFinished: () -> Unit) {
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0.11f, 0.01f, 0.03f),
-                        Color(0.04f, 0.01f, 0.02f),
-                        Color.Black
+                        Color(0.08f, 0.14f, 0.17f),
+                        Color(0.03f, 0.06f, 0.11f),
+                        Color(0.01f, 0.02f, 0.05f)
                     )
                 )
             )
@@ -452,7 +412,7 @@ fun SplashIntroView(onFinished: () -> Unit) {
             Spacer(modifier = Modifier.weight(1f))
 
             BloodyBrainLogoView(
-                size = 185.dp,
+                size = 196.dp,
                 animated = true,
                 modifier = Modifier.scale(appearScale)
             )
@@ -468,8 +428,8 @@ fun SplashIntroView(onFinished: () -> Unit) {
                     brush = Brush.linearGradient(
                         colors = listOf(
                             Color.White,
-                            Color(1.0f, 0.45f, 0.50f),
-                            Color(0.90f, 0.12f, 0.22f)
+                            Color(1.0f, 0.38f, 0.40f),
+                            Color(1.0f, 0.16f, 0.18f)
                         )
                     )
                 )
@@ -481,7 +441,7 @@ fun SplashIntroView(onFinished: () -> Unit) {
                 text = "Almanca Artikel & Nöro-Hafıza Çalışma Sistemi",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = Color.White.copy(alpha = 0.68f * appearOpacity)
+                color = Color.White.copy(alpha = 0.72f * appearOpacity)
             )
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -502,7 +462,7 @@ fun SplashIntroView(onFinished: () -> Unit) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Loading progress bar
+            // Neon crimson loading progress bar
             Box(
                 modifier = Modifier
                     .width(240.dp)
@@ -518,8 +478,8 @@ fun SplashIntroView(onFinished: () -> Unit) {
                         .background(
                             Brush.horizontalGradient(
                                 colors = listOf(
-                                    Color(0.95f, 0.08f, 0.18f),
-                                    Color(0.65f, 0.02f, 0.08f)
+                                    Color(1.0f, 0.18f, 0.18f),
+                                    Color(0.78f, 0.04f, 0.10f)
                                 )
                             )
                         )
@@ -531,7 +491,7 @@ fun SplashIntroView(onFinished: () -> Unit) {
             Text(
                 text = "Geçmek için tıklayın",
                 fontSize = 11.sp,
-                color = Color.White.copy(alpha = 0.35f)
+                color = Color.White.copy(alpha = 0.38f)
             )
         }
     }

@@ -12,7 +12,7 @@ struct AIGeneratorSheet: View {
     @State private var targetDeckName: String = "A1 Seviyesi"
     @State private var hasCustomDeckName: Bool = false
     @State private var showAuthConfig: Bool = false
-    @State private var showAdvancedOAuth: Bool = false
+    @State private var showAdvancedApiKey: Bool = false
 
     @State private var isGenerating: Bool = false
     @State private var progressMessage: String = ""
@@ -184,35 +184,78 @@ struct AIGeneratorSheet: View {
                 if showAuthConfig || !authManager.isAuthorized {
                     Divider()
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         Text("Aktif Gemini Modeli:")
                             .font(.caption.weight(.semibold))
-                        TextField("Örn: gemini-3.8-flash", text: $authManager.selectedModel)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 220)
-                            .onChange(of: authManager.selectedModel) {
-                                authManager.saveToKeychain()
+
+                        Picker("", selection: $authManager.selectedModel) {
+                            ForEach(authManager.availableModels, id: \.self) { model in
+                                Text(model).tag(model)
                             }
-                        Text("(Varsayılan: gemini-3.8-flash)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 200)
+                        .onChange(of: authManager.selectedModel) {
+                            authManager.saveToKeychain()
+                        }
+
                         Spacer()
                     }
 
-                    Picker("Yetkilendirme Yöntemi", selection: $authManager.authMode) {
-                        ForEach(GeminiAuthMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
+                    // Primary Auth: Google OAuth 2.0 (Only method shown directly)
+                    HStack(spacing: 12) {
+                        Button {
+                            Task {
+                                do {
+                                    errorMessage = nil
+                                    try await authManager.startBrowserOAuthFlow()
+                                    showAuthConfig = false
+                                    await store.syncWithGoogleDrive(authManager: authManager, isSilentAutoSync: true)
+                                } catch {
+                                    errorMessage = error.localizedDescription
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "key.fill")
+                                Text(authManager.isAuthorized && authManager.authMode == .googleOAuth ? "Google Hesabını Yeniden Bağla" : "Google Hesabı ile Giriş Yap (Tek Tık)")
+                                    .fontWeight(.semibold)
+                            }
                         }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: authManager.authMode) {
-                        authManager.saveToKeychain()
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                        .controlSize(.regular)
+                        .disabled(authManager.isAuthenticating)
+
+                        if authManager.isAuthenticating {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Yetkilendiriliyor...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            withAnimation {
+                                showAdvancedApiKey.toggle()
+                            }
+                        } label: {
+                            Label(showAdvancedApiKey ? "Gelişmiş Seçenekleri Gizle" : "Gelişmiş: API Anahtarı ile Doğrula", systemImage: "slider.horizontal.3")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.accentColor)
                     }
 
-                    if authManager.authMode == .apiKey {
+                    // Advanced Section: API Key configuration
+                    if showAdvancedApiKey {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Google hesabınızla Google AI Studio üzerinden ücretsiz Gemini API anahtarınızı alıp aşağıya yapıştırabilirsiniz. Anahtarınız macOS Keychain'de güvenle saklanır.")
-                                .font(.caption)
+                            Text("Google AI Studio API Anahtarı:")
+                                .font(.caption.weight(.semibold))
+                            Text("Google hesabınızla Google AI Studio üzerinden ücretsiz Gemini API anahtarınızı alıp aşağıya yapıştırabilirsiniz.")
+                                .font(.caption2)
                                 .foregroundColor(.secondary)
 
                             HStack(spacing: 10) {
@@ -230,6 +273,7 @@ struct AIGeneratorSheet: View {
                                     Task {
                                         do {
                                             errorMessage = nil
+                                            authManager.authMode = .apiKey
                                             try await authManager.verifyCredentials()
                                             showAuthConfig = false
                                         } catch {
@@ -243,98 +287,9 @@ struct AIGeneratorSheet: View {
                                 .disabled(authManager.apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
                             }
                         }
-                    } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack(spacing: 12) {
-                                Button {
-                                    Task {
-                                        do {
-                                            errorMessage = nil
-                                            try await authManager.startBrowserOAuthFlow()
-                                            showAuthConfig = false
-                                        } catch {
-                                            errorMessage = error.localizedDescription
-                                        }
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "person.badge.key.fill")
-                                        Text("Google Hesabı ile Giriş Yap (Tek Tık)")
-                                            .fontWeight(.semibold)
-                                    }
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.blue)
-                                .controlSize(.regular)
-                                .disabled(authManager.isAuthenticating)
-
-                                if authManager.isAuthenticating {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                    Text("Yetkilendiriliyor...")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-
-                                Spacer()
-
-                                Button {
-                                    withAnimation {
-                                        showAdvancedOAuth.toggle()
-                                    }
-                                } label: {
-                                    Label(showAdvancedOAuth ? "Özel İstemciyi Gizle" : "Gelişmiş: Özel Client ID", systemImage: "slider.horizontal.3")
-                                        .font(.caption)
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundColor(.accentColor)
-                            }
-
-                            if showAdvancedOAuth {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("İsteğe bağlı: Kendi Google Cloud Desktop Client ID veya Access Token bilginizi girmek isterseniz:")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-
-                                    HStack(spacing: 10) {
-                                        TextField("Özel OAuth Client ID (Boş bırakılırsa hazır kimlik kullanılır)", text: $authManager.oauthClientId)
-                                            .textFieldStyle(.roundedBorder)
-
-                                        SecureField("Client Secret (İsteğe bağlı)", text: $authManager.oauthClientSecret)
-                                            .textFieldStyle(.roundedBorder)
-                                            .frame(width: 160)
-                                    }
-
-                                    HStack(spacing: 10) {
-                                        TextField("GCP Project ID (İsteğe bağlı)", text: $authManager.oauthProjectId)
-                                            .textFieldStyle(.roundedBorder)
-                                            .frame(width: 200)
-
-                                        SecureField("Veya doğrudan OAuth Access Token (ya29...)", text: $authManager.oauthAccessToken)
-                                            .textFieldStyle(.roundedBorder)
-
-                                        Button {
-                                            Task {
-                                                do {
-                                                    errorMessage = nil
-                                                    try await authManager.verifyCredentials()
-                                                    showAuthConfig = false
-                                                } catch {
-                                                    errorMessage = error.localizedDescription
-                                                }
-                                            }
-                                        } label: {
-                                            Text("Doğrula & Kaydet")
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .disabled(authManager.oauthAccessToken.trimmingCharacters(in: .whitespaces).isEmpty)
-                                    }
-                                }
-                                .padding(10)
-                                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                                .cornerRadius(8)
-                            }
-                        }
+                        .padding(10)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                        .cornerRadius(8)
                     }
 
                     if let statusMsg = authManager.authStatusMessage {
@@ -542,6 +497,7 @@ struct AIGeneratorSheet: View {
 
     // MARK: - Execution
 
+    @MainActor
     private func generateAndAddWords() async {
         errorMessage = nil
         isGenerating = true
@@ -581,6 +537,11 @@ struct AIGeneratorSheet: View {
                 }
             }
             self.newlyAddedWords = addedItems
+            if !addedItems.isEmpty {
+                Task {
+                    await store.syncWithGoogleDrive(authManager: authManager, isSilentAutoSync: true)
+                }
+            }
         } catch {
             self.errorMessage = error.localizedDescription
         }

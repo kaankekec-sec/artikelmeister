@@ -72,6 +72,16 @@ final class GeminiAuthManager: ObservableObject {
     @Published var isAuthenticating: Bool = false
     @Published var authStatusMessage: String? = nil
 
+    // Universal Google Profile & Cloud Sync state
+    @Published var userEmail: String = ""
+    @Published var userName: String = ""
+    @Published var userPictureUrl: String = ""
+    @Published var driveSyncFolderId: String = ""
+    @Published var driveSyncFileId: String = ""
+    @Published var hasDismissedStartupSignIn: Bool = false
+    @Published var hasCompletedOnboarding: Bool = false
+    @Published var hasCloudSyncScope: Bool = false
+
     @Published var availableModels: [String] = [
         "gemini-3.8-flash",
         "gemini-3.8-pro",
@@ -123,6 +133,14 @@ final class GeminiAuthManager: ObservableObject {
         var oauthRefreshToken: String
         var oauthTokenExpiry: Date?
         var selectedModel: String
+        var userEmail: String?
+        var userName: String?
+        var userPictureUrl: String?
+        var driveSyncFolderId: String?
+        var driveSyncFileId: String?
+        var hasDismissedStartupSignIn: Bool?
+        var hasCompletedOnboarding: Bool?
+        var hasCloudSyncScope: Bool?
     }
 
     init() {
@@ -139,6 +157,11 @@ final class GeminiAuthManager: ObservableObject {
         }
     }
 
+    var isGoogleAccountConnected: Bool {
+        !oauthAccessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        !oauthRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     // MARK: - Keychain Persistence
 
     func saveToKeychain() {
@@ -151,7 +174,15 @@ final class GeminiAuthManager: ObservableObject {
             oauthAccessToken: oauthAccessToken.trimmingCharacters(in: .whitespacesAndNewlines),
             oauthRefreshToken: oauthRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines),
             oauthTokenExpiry: oauthTokenExpiry,
-            selectedModel: selectedModel
+            selectedModel: selectedModel,
+            userEmail: userEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            userName: userName.trimmingCharacters(in: .whitespacesAndNewlines),
+            userPictureUrl: userPictureUrl.trimmingCharacters(in: .whitespacesAndNewlines),
+            driveSyncFolderId: driveSyncFolderId.trimmingCharacters(in: .whitespacesAndNewlines),
+            driveSyncFileId: driveSyncFileId.trimmingCharacters(in: .whitespacesAndNewlines),
+            hasDismissedStartupSignIn: hasDismissedStartupSignIn,
+            hasCompletedOnboarding: hasCompletedOnboarding,
+            hasCloudSyncScope: hasCloudSyncScope
         )
         guard let data = try? JSONEncoder().encode(creds) else { return }
 
@@ -190,6 +221,15 @@ final class GeminiAuthManager: ObservableObject {
         self.oauthAccessToken = creds.oauthAccessToken
         self.oauthRefreshToken = creds.oauthRefreshToken
         self.oauthTokenExpiry = creds.oauthTokenExpiry
+        self.userEmail = creds.userEmail ?? ""
+        self.userName = creds.userName ?? ""
+        self.userPictureUrl = creds.userPictureUrl ?? ""
+        self.driveSyncFolderId = creds.driveSyncFolderId ?? ""
+        self.driveSyncFileId = creds.driveSyncFileId ?? ""
+        self.hasDismissedStartupSignIn = creds.hasDismissedStartupSignIn ?? false
+        self.hasCompletedOnboarding = creds.hasCompletedOnboarding ?? false
+        self.hasCloudSyncScope = creds.hasCloudSyncScope ?? false
+
         if !creds.selectedModel.isEmpty {
             // Migrate legacy default "gemini-2.5-flash" to "gemini-3.8-flash"
             if creds.selectedModel == "gemini-2.5-flash" {
@@ -208,13 +248,67 @@ final class GeminiAuthManager: ObservableObject {
         oauthAccessToken = ""
         oauthRefreshToken = ""
         oauthTokenExpiry = nil
-        authStatusMessage = "Yetkilendirme bilgileri temizlendi."
+        userEmail = ""
+        userName = ""
+        userPictureUrl = ""
+        driveSyncFolderId = ""
+        driveSyncFileId = ""
+        hasDismissedStartupSignIn = false
+        hasCompletedOnboarding = false
+        hasCloudSyncScope = false
+        authStatusMessage = "Yetkilendirme ve hesap bilgileri temizlendi."
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: "default"
         ]
         SecItemDelete(query as CFDictionary)
+    }
+
+    func completeOnboarding() {
+        hasCompletedOnboarding = true
+        hasDismissedStartupSignIn = true
+        saveToKeychain()
+    }
+
+    func dismissStartupSignIn() {
+        hasDismissedStartupSignIn = true
+        saveToKeychain()
+    }
+
+    func fetchUserProfile() async throws {
+        guard isGoogleAccountConnected else { return }
+        let token = try await validOAuthAccessToken()
+        guard let url = URL(string: "https://www.googleapis.com/oauth2/v3/userinfo") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let email = (json["email"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+                let name = (json["name"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+                let picture = (json["picture"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+                if !email.isEmpty { self.userEmail = email }
+                if !name.isEmpty { self.userName = name }
+                if !picture.isEmpty { self.userPictureUrl = picture }
+                saveToKeychain()
+            }
+        }
+    }
+
+    func revokeGoogleTokenBestEffort() async {
+        let tokenToRevoke = (!oauthRefreshToken.isEmpty ? oauthRefreshToken : oauthAccessToken).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tokenToRevoke.isEmpty,
+              let encoded = tokenToRevoke.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://oauth2.googleapis.com/revoke?token=\(encoded)") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
+        _ = try? await URLSession.shared.data(for: request)
     }
 
     // MARK: - Browser Links & OAuth 2.0 PKCE Loopback Flow
@@ -255,7 +349,7 @@ final class GeminiAuthManager: ObservableObject {
             URLQueryItem(name: "client_id", value: clientId),
             URLQueryItem(name: "redirect_uri", value: redirectURI),
             URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "scope", value: "https://www.googleapis.com/auth/generative-language.retriever https://www.googleapis.com/auth/cloud-platform"),
+            URLQueryItem(name: "scope", value: "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/generative-language.retriever https://www.googleapis.com/auth/cloud-platform"),
             URLQueryItem(name: "access_type", value: "offline"),
             URLQueryItem(name: "prompt", value: "consent"),
             URLQueryItem(name: "code_challenge", value: codeChallenge),
@@ -277,8 +371,13 @@ final class GeminiAuthManager: ObservableObject {
             clientSecret: effectiveClientSecret
         )
 
+        authMode = .googleOAuth
+        hasCloudSyncScope = true
+        hasDismissedStartupSignIn = true
+        try? await fetchUserProfile()
         saveToKeychain()
-        authStatusMessage = "Google Hesabı ile Gemini yetkilendirmesi başarıyla tamamlandı!"
+        let emailSuffix = !userEmail.isEmpty ? " (\(userEmail))" : ""
+        authStatusMessage = "Google Hesabı\(emailSuffix), Drive Senkronizasyonu ve Gemini AI başarıyla bağlandı!"
     }
 
     private func startLoopbackServer() throws -> (UInt16, @Sendable () async throws -> String) {
@@ -312,16 +411,16 @@ final class GeminiAuthManager: ObservableObject {
                 let htmlBody: String
                 if extractedCode != nil {
                     htmlBody = """
-                    <html><head><meta charset="utf-8"><title>ArtikelMeister Yetkilendirme</title></head>
-                    <body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;">
-                    <h2 style="color: #28a745;">✓ Gemini Yetkilendirmesi Başarılı!</h2>
+                    <html><head><meta charset="utf-8"><title>ArtikelMeister Evrensel Profil &amp; AI</title></head>
+                    <body style="font-family: -apple-system, Roboto, sans-serif; text-align: center; padding: 60px; background: #121214; color: #fff;">
+                    <h2 style="color: #28a745;">✓ Google Hesabı, Bulut Senkronizasyonu ve Gemini AI Bağlandı!</h2>
                     <p>Bu tarayıcı sekmesini kapatıp <b>ArtikelMeister</b> uygulamasına dönebilirsiniz.</p>
                     </body></html>
                     """
                 } else {
                     htmlBody = """
                     <html><head><meta charset="utf-8"><title>ArtikelMeister Yetkilendirme Hatası</title></head>
-                    <body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;">
+                    <body style="font-family: -apple-system, Roboto, sans-serif; text-align: center; padding: 60px; background: #121214; color: #fff;">
                     <h2 style="color: #dc3545;">Yetkilendirme Tamamlanamadı</h2>
                     <p>\(extractedError ?? "Kod alınamadı.")</p>
                     </body></html>
@@ -432,7 +531,7 @@ final class GeminiAuthManager: ObservableObject {
         return token
     }
 
-    private func refreshOAuthToken() async throws {
+    func refreshOAuthToken() async throws {
         let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
@@ -875,5 +974,353 @@ enum GeminiVocabularyGenerator {
 
         let decoded = try JSONDecoder().decode([GeneratedWordItem].self, from: jsonData)
         return decoded
+    }
+}
+
+/**
+ * Universal Cross-Platform Google Drive Cloud Sync Service
+ * Creates/maintains the 'ArtikelMeister Cloud Sync' folder and 'artikelmeister_universal_sync.json'
+ * inside the user's Google Drive so macOS, Android, and future iOS/Windows platforms stay 1:1 in sync.
+ */
+@MainActor
+enum GoogleDriveSyncService {
+    static let SYNC_FOLDER_NAME = "ArtikelMeister Cloud Sync"
+    static let SYNC_FILE_NAME = "artikelmeister_universal_sync.json"
+
+    struct CloudSnapshot {
+        let folderId: String
+        let fileId: String?
+        let backup: ArtikelMeisterBackup?
+    }
+
+    static func parseGoogleDriveError(httpCode: Int, responseBody: String) -> String {
+        var message: String?
+        var reason: String?
+
+        if let data = responseBody.data(using: .utf8),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let errObj = root["error"] as? [String: Any] {
+            message = (errObj["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let errorsArr = errObj["errors"] as? [[String: Any]], let first = errorsArr.first {
+                reason = first["reason"] as? String
+            }
+        }
+
+        let rawMsg = message ?? String(responseBody.prefix(240)).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if rawMsg.localizedCaseInsensitiveContains("Google Drive API has not been used in project") ||
+           rawMsg.localizedCaseInsensitiveContains("is disabled") ||
+           reason == "accessNotConfigured" || reason == "SERVICE_DISABLED" {
+            return "Google Cloud projenizde 'Google Drive API' etkinleştirilmemiş.\nLütfen Google Cloud Console'dan Google Drive API'yi etkinleştirin (Enable):\nhttps://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=414393134856"
+        }
+
+        if httpCode == 401 {
+            return "Google oturumunun süresi dolmuş. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın."
+        }
+
+        if httpCode == 403 {
+            if rawMsg.localizedCaseInsensitiveContains("insufficient") {
+                return "Google Drive izinleri eksik. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın ve Drive izin kutucuğunu işaretleyin."
+            }
+            return "Google Drive erişim reddedildi (HTTP 403):\n\(rawMsg)"
+        }
+
+        return "Google Drive hatası (HTTP \(httpCode)):\n\(rawMsg)"
+    }
+
+    private static func sendAuthorizedRequest(
+        _ request: URLRequest,
+        authManager: GeminiAuthManager,
+        retryOn401: Bool = true
+    ) async throws -> (Data, HTTPURLResponse) {
+        var req = request
+        var token = try await authManager.validOAuthAccessToken()
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Sunucudan geçerli bir yanıt alınamadı."])
+        }
+
+        if httpResponse.statusCode == 401 && retryOn401 && !authManager.oauthRefreshToken.isEmpty {
+            try? await authManager.refreshOAuthToken()
+            token = try await authManager.validOAuthAccessToken()
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (retryData, retryResponse) = try await URLSession.shared.data(for: req)
+            if let retryHttp = retryResponse as? HTTPURLResponse {
+                return (retryData, retryHttp)
+            }
+        }
+
+        return (data, httpResponse)
+    }
+
+    static func ensureSyncFolder(authManager: GeminiAuthManager) async throws -> String {
+        // 1. Check if cached folderId is still valid and not trashed
+        let cachedFolderId = authManager.driveSyncFolderId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cachedFolderId.isEmpty,
+           let checkUrl = URL(string: "https://www.googleapis.com/drive/v3/files/\(cachedFolderId)?fields=id,name,trashed") {
+            var checkReq = URLRequest(url: checkUrl)
+            checkReq.httpMethod = "GET"
+            checkReq.timeoutInterval = 20
+            if let (data, resp) = try? await sendAuthorizedRequest(checkReq, authManager: authManager),
+               (200...299).contains(resp.statusCode),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let trashed = json["trashed"] as? Bool, !trashed {
+                return cachedFolderId
+            }
+        }
+
+        // 2. Query Drive for existing 'ArtikelMeister Cloud Sync' folder
+        let query = "mimeType = 'application/vnd.google-apps.folder' and name = '\(SYNC_FOLDER_NAME)' and trashed = false"
+        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let listUrl = URL(string: "https://www.googleapis.com/drive/v3/files?q=\(encodedQuery)&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc") else {
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Geçersiz arama sorgusu."])
+        }
+
+        var listReq = URLRequest(url: listUrl)
+        listReq.httpMethod = "GET"
+        listReq.timeoutInterval = 25
+
+        let (listData, listResp) = try await sendAuthorizedRequest(listReq, authManager: authManager)
+        let listBody = String(data: listData, encoding: .utf8) ?? ""
+
+        guard (200...299).contains(listResp.statusCode) else {
+            throw NSError(
+                domain: "GoogleDrive",
+                code: listResp.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: parseGoogleDriveError(httpCode: listResp.statusCode, responseBody: listBody)]
+            )
+        }
+
+        if let json = try? JSONSerialization.jsonObject(with: listData) as? [String: Any],
+           let filesArr = json["files"] as? [[String: Any]],
+           let first = filesArr.first,
+           let foundId = first["id"] as? String, !foundId.isEmpty {
+            await MainActor.run {
+                authManager.driveSyncFolderId = foundId
+                authManager.hasCloudSyncScope = true
+                authManager.saveToKeychain()
+            }
+            return foundId
+        }
+
+        // 3. Create 'ArtikelMeister Cloud Sync' folder if it doesn't exist yet
+        guard let createUrl = URL(string: "https://www.googleapis.com/drive/v3/files?fields=id") else {
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Klasör oluşturma URL'i geçersiz."])
+        }
+
+        var createReq = URLRequest(url: createUrl)
+        createReq.httpMethod = "POST"
+        createReq.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        createReq.timeoutInterval = 25
+        let createMeta: [String: Any] = [
+            "name": SYNC_FOLDER_NAME,
+            "mimeType": "application/vnd.google-apps.folder"
+        ]
+        createReq.httpBody = try? JSONSerialization.data(withJSONObject: createMeta)
+
+        let (createData, createResp) = try await sendAuthorizedRequest(createReq, authManager: authManager)
+        let createBody = String(data: createData, encoding: .utf8) ?? ""
+
+        guard (200...299).contains(createResp.statusCode) else {
+            throw NSError(
+                domain: "GoogleDrive",
+                code: createResp.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: parseGoogleDriveError(httpCode: createResp.statusCode, responseBody: createBody)]
+            )
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: createData) as? [String: Any],
+              let newFolderId = json["id"] as? String, !newFolderId.isEmpty else {
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Google Drive klasör kimliği alınamadı."])
+        }
+
+        await MainActor.run {
+            authManager.driveSyncFolderId = newFolderId
+            authManager.hasCloudSyncScope = true
+            authManager.saveToKeychain()
+        }
+        return newFolderId
+    }
+
+    static func fetchCloudSnapshot(authManager: GeminiAuthManager) async throws -> CloudSnapshot {
+        let folderId = try await ensureSyncFolder(authManager: authManager)
+
+        let query = "name = '\(SYNC_FILE_NAME)' and '\(folderId)' in parents and trashed = false"
+        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let listUrl = URL(string: "https://www.googleapis.com/drive/v3/files?q=\(encodedQuery)&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc") else {
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Geçersiz dosya sorgusu."])
+        }
+
+        var listReq = URLRequest(url: listUrl)
+        listReq.httpMethod = "GET"
+        listReq.timeoutInterval = 25
+
+        let (listData, listResp) = try await sendAuthorizedRequest(listReq, authManager: authManager)
+        let listBody = String(data: listData, encoding: .utf8) ?? ""
+
+        guard (200...299).contains(listResp.statusCode) else {
+            throw NSError(
+                domain: "GoogleDrive",
+                code: listResp.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: parseGoogleDriveError(httpCode: listResp.statusCode, responseBody: listBody)]
+            )
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: listData) as? [String: Any],
+              let filesArr = json["files"] as? [[String: Any]],
+              let first = filesArr.first,
+              let fileId = first["id"] as? String, !fileId.isEmpty else {
+            return CloudSnapshot(folderId: folderId, fileId: nil, backup: nil)
+        }
+
+        await MainActor.run {
+            authManager.driveSyncFileId = fileId
+            authManager.saveToKeychain()
+        }
+
+        guard let downloadUrl = URL(string: "https://www.googleapis.com/drive/v3/files/\(fileId)?alt=media") else {
+            return CloudSnapshot(folderId: folderId, fileId: fileId, backup: nil)
+        }
+
+        var dlReq = URLRequest(url: downloadUrl)
+        dlReq.httpMethod = "GET"
+        dlReq.timeoutInterval = 30
+
+        let (dlData, dlResp) = try await sendAuthorizedRequest(dlReq, authManager: authManager)
+        guard (200...299).contains(dlResp.statusCode), !dlData.isEmpty else {
+            return CloudSnapshot(folderId: folderId, fileId: fileId, backup: nil)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let parsedBackup = try? decoder.decode(ArtikelMeisterBackup.self, from: dlData)
+        return CloudSnapshot(folderId: folderId, fileId: fileId, backup: parsedBackup)
+    }
+
+    static func uploadCloudBackup(
+        authManager: GeminiAuthManager,
+        folderId: String,
+        existingFileId: String?,
+        backupJson: String
+    ) async throws -> String {
+        var targetFileId = existingFileId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        // Step 1: If no file exists yet in the folder, create the empty file metadata first
+        if targetFileId.isEmpty {
+            guard let createUrl = URL(string: "https://www.googleapis.com/drive/v3/files?fields=id") else {
+                throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Dosya oluşturma URL'i geçersiz."])
+            }
+
+            var createReq = URLRequest(url: createUrl)
+            createReq.httpMethod = "POST"
+            createReq.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+            createReq.timeoutInterval = 25
+            let createMeta: [String: Any] = [
+                "name": SYNC_FILE_NAME,
+                "mimeType": "application/json",
+                "parents": [folderId]
+            ]
+            createReq.httpBody = try? JSONSerialization.data(withJSONObject: createMeta)
+
+            let (createData, createResp) = try await sendAuthorizedRequest(createReq, authManager: authManager)
+            let createBody = String(data: createData, encoding: .utf8) ?? ""
+
+            guard (200...299).contains(createResp.statusCode) else {
+                throw NSError(
+                    domain: "GoogleDrive",
+                    code: createResp.statusCode,
+                    userInfo: [NSLocalizedDescriptionKey: parseGoogleDriveError(httpCode: createResp.statusCode, responseBody: createBody)]
+                )
+            }
+
+            if let json = try? JSONSerialization.jsonObject(with: createData) as? [String: Any],
+               let newId = json["id"] as? String, !newId.isEmpty {
+                targetFileId = newId
+            }
+        }
+
+        guard !targetFileId.isEmpty else {
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Google Drive dosya kimliği oluşturulamadı."])
+        }
+
+        // Step 2: Upload the JSON content via media upload PATCH
+        guard let uploadUrl = URL(string: "https://www.googleapis.com/upload/drive/v3/files/\(targetFileId)?uploadType=media") else {
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Yükleme URL'i geçersiz."])
+        }
+
+        var uploadReq = URLRequest(url: uploadUrl)
+        uploadReq.httpMethod = "PATCH"
+        uploadReq.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        uploadReq.timeoutInterval = 30
+        uploadReq.httpBody = backupJson.data(using: .utf8)
+
+        let (uploadData, uploadResp) = try await sendAuthorizedRequest(uploadReq, authManager: authManager)
+
+        if uploadResp.statusCode == 404 && existingFileId != nil {
+            // File was deleted remotely; recreate it
+            return try await uploadCloudBackup(authManager: authManager, folderId: folderId, existingFileId: nil, backupJson: backupJson)
+        }
+
+        guard (200...299).contains(uploadResp.statusCode) else {
+            let err = String(data: uploadData, encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "GoogleDrive",
+                code: uploadResp.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: parseGoogleDriveError(httpCode: uploadResp.statusCode, responseBody: err)]
+            )
+        }
+
+        authManager.driveSyncFileId = targetFileId
+        authManager.saveToKeychain()
+        return targetFileId
+    }
+
+    static func deleteAllCloudAccountData(authManager: GeminiAuthManager) async {
+        guard authManager.isGoogleAccountConnected else { return }
+
+        // Delete sync file if known
+        let fileId = authManager.driveSyncFileId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fileId.isEmpty, let delUrl = URL(string: "https://www.googleapis.com/drive/v3/files/\(fileId)") {
+            var delReq = URLRequest(url: delUrl)
+            delReq.httpMethod = "DELETE"
+            delReq.timeoutInterval = 15
+            _ = try? await sendAuthorizedRequest(delReq, authManager: authManager)
+        }
+
+        // Find and delete all 'ArtikelMeister Cloud Sync' folders
+        let query = "name = '\(SYNC_FOLDER_NAME)' and trashed = false"
+        if let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+           let listUrl = URL(string: "https://www.googleapis.com/drive/v3/files?q=\(encodedQuery)&fields=files(id)") {
+            var listReq = URLRequest(url: listUrl)
+            listReq.httpMethod = "GET"
+            listReq.timeoutInterval = 15
+
+            if let (listData, listResp) = try? await sendAuthorizedRequest(listReq, authManager: authManager),
+               (200...299).contains(listResp.statusCode),
+               let json = try? JSONSerialization.jsonObject(with: listData) as? [String: Any],
+               let filesArr = json["files"] as? [[String: Any]] {
+                for item in filesArr {
+                    if let fId = item["id"] as? String, !fId.isEmpty,
+                       let folderDelUrl = URL(string: "https://www.googleapis.com/drive/v3/files/\(fId)") {
+                        var folderDelReq = URLRequest(url: folderDelUrl)
+                        folderDelReq.httpMethod = "DELETE"
+                        folderDelReq.timeoutInterval = 15
+                        _ = try? await sendAuthorizedRequest(folderDelReq, authManager: authManager)
+                    }
+                }
+            }
+        }
+    }
+
+    static func openDriveSyncFolderInBrowser(folderId: String) {
+        let cleanId = folderId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetString = !cleanId.isEmpty
+            ? "https://drive.google.com/drive/folders/\(cleanId)"
+            : "https://drive.google.com/drive/my-drive"
+        if let url = URL(string: targetString) {
+            NSWorkspace.shared.open(url)
+        }
     }
 }

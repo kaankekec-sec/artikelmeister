@@ -93,6 +93,49 @@ enum ReviewRating: Int, CaseIterable {
     }
 }
 
+enum UniversalDateHelper {
+    static let isoFormatterWithFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    static func format(_ date: Date) -> String {
+        isoFormatter.string(from: date)
+    }
+
+    static func parse(_ raw: Any?) -> Date? {
+        guard let raw = raw else { return nil }
+        if let d = raw as? Date { return d }
+        if let str = raw as? String {
+            if let d = isoFormatterWithFraction.date(from: str) { return d }
+            if let d = isoFormatter.date(from: str) { return d }
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"
+            if let d = f.date(from: str) { return d }
+            f.dateFormat = "yyyy-MM-dd"
+            if let d = f.date(from: str) { return d }
+            return nil
+        }
+        if let num = raw as? NSNumber {
+            let val = num.doubleValue
+            if val > 1_000_000_000_000 {
+                return Date(timeIntervalSince1970: val / 1000.0)
+            } else {
+                return Date(timeIntervalSince1970: val)
+            }
+        }
+        return nil
+    }
+}
+
 struct Flashcard: Identifiable, Codable, Equatable {
     var id: UUID
     var artikel: Artikel
@@ -100,6 +143,7 @@ struct Flashcard: Identifiable, Codable, Equatable {
     var meaning: String
     var deckName: String
     var createdAt: Date
+    var updatedAt: Date
 
     // Spaced Repetition (Anki SM-2) state
     var stage: CardStage
@@ -111,6 +155,19 @@ struct Flashcard: Identifiable, Codable, Equatable {
     var lastReviewedAt: Date?
     var totalReviews: Int
 
+    var cleanDeckName: String {
+        let cleaned = deckName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "Genel" : cleaned
+    }
+
+    var fullGermanTerm: String {
+        "\(artikel.rawValue) \(word)"
+    }
+
+    var syncKey: String {
+        "\(artikel.rawValue.lowercased())_\(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    }
+
     init(
         id: UUID = UUID(),
         artikel: Artikel,
@@ -118,6 +175,7 @@ struct Flashcard: Identifiable, Codable, Equatable {
         meaning: String = "",
         deckName: String = "Genel",
         createdAt: Date = Date(),
+        updatedAt: Date? = nil,
         stage: CardStage = .new,
         easeFactor: Double = 2.5,
         intervalDays: Double = 0,
@@ -134,6 +192,7 @@ struct Flashcard: Identifiable, Codable, Equatable {
         let cleanedDeck = deckName.trimmingCharacters(in: .whitespacesAndNewlines)
         self.deckName = cleanedDeck.isEmpty ? "Genel" : cleanedDeck
         self.createdAt = createdAt
+        self.updatedAt = updatedAt ?? lastReviewedAt ?? createdAt
         self.stage = stage
         self.easeFactor = easeFactor
         self.intervalDays = intervalDays
@@ -145,31 +204,101 @@ struct Flashcard: Identifiable, Codable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, artikel, word, meaning, deckName, createdAt
+        case id, artikel, word, meaning, deckName, createdAt, updatedAt
         case stage, easeFactor, intervalDays, repetitions, lapses, dueDate, lastReviewedAt, totalReviews
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(UUID.self, forKey: .id)
+        if let uuid = try? container.decode(UUID.self, forKey: .id) {
+            self.id = uuid
+        } else if let idStr = try? container.decode(String.self, forKey: .id), let uuid = UUID(uuidString: idStr) {
+            self.id = uuid
+        } else {
+            self.id = UUID()
+        }
         self.artikel = try container.decode(Artikel.self, forKey: .artikel)
         self.word = try container.decode(String.self, forKey: .word)
         self.meaning = try container.decodeIfPresent(String.self, forKey: .meaning) ?? ""
         let rawDeck = try container.decodeIfPresent(String.self, forKey: .deckName)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Genel"
         self.deckName = rawDeck.isEmpty ? "Genel" : rawDeck
-        self.createdAt = try container.decode(Date.self, forKey: .createdAt)
+
+        let parsedCreatedAt: Date
+        if let dateVal = try? container.decode(Date.self, forKey: .createdAt) {
+            parsedCreatedAt = dateVal
+        } else if let strVal = try? container.decode(String.self, forKey: .createdAt), let d = UniversalDateHelper.parse(strVal) {
+            parsedCreatedAt = d
+        } else if let numVal = try? container.decode(Double.self, forKey: .createdAt) {
+            parsedCreatedAt = UniversalDateHelper.parse(numVal) ?? Date()
+        } else {
+            parsedCreatedAt = Date()
+        }
+        self.createdAt = parsedCreatedAt
+
+        let parsedLastReviewed: Date?
+        if let dateVal = try? container.decodeIfPresent(Date.self, forKey: .lastReviewedAt) {
+            parsedLastReviewed = dateVal
+        } else if let strVal = try? container.decodeIfPresent(String.self, forKey: .lastReviewedAt), let d = UniversalDateHelper.parse(strVal) {
+            parsedLastReviewed = d
+        } else if let numVal = try? container.decodeIfPresent(Double.self, forKey: .lastReviewedAt) {
+            parsedLastReviewed = UniversalDateHelper.parse(numVal)
+        } else {
+            parsedLastReviewed = nil
+        }
+        self.lastReviewedAt = parsedLastReviewed
+
+        let parsedUpdatedAt: Date
+        if let dateVal = try? container.decode(Date.self, forKey: .updatedAt) {
+            parsedUpdatedAt = dateVal
+        } else if let strVal = try? container.decode(String.self, forKey: .updatedAt), let d = UniversalDateHelper.parse(strVal) {
+            parsedUpdatedAt = d
+        } else if let numVal = try? container.decode(Double.self, forKey: .updatedAt) {
+            parsedUpdatedAt = UniversalDateHelper.parse(numVal) ?? (parsedLastReviewed ?? parsedCreatedAt)
+        } else {
+            parsedUpdatedAt = parsedLastReviewed ?? parsedCreatedAt
+        }
+        self.updatedAt = parsedUpdatedAt
+
         self.stage = try container.decode(CardStage.self, forKey: .stage)
         self.easeFactor = try container.decode(Double.self, forKey: .easeFactor)
         self.intervalDays = try container.decode(Double.self, forKey: .intervalDays)
         self.repetitions = try container.decode(Int.self, forKey: .repetitions)
         self.lapses = try container.decode(Int.self, forKey: .lapses)
-        self.dueDate = try container.decode(Date.self, forKey: .dueDate)
-        self.lastReviewedAt = try container.decodeIfPresent(Date.self, forKey: .lastReviewedAt)
+
+        let parsedDueDate: Date
+        if let dateVal = try? container.decode(Date.self, forKey: .dueDate) {
+            parsedDueDate = dateVal
+        } else if let strVal = try? container.decode(String.self, forKey: .dueDate), let d = UniversalDateHelper.parse(strVal) {
+            parsedDueDate = d
+        } else if let numVal = try? container.decode(Double.self, forKey: .dueDate) {
+            parsedDueDate = UniversalDateHelper.parse(numVal) ?? Date()
+        } else {
+            parsedDueDate = Date()
+        }
+        self.dueDate = parsedDueDate
+
         self.totalReviews = try container.decodeIfPresent(Int.self, forKey: .totalReviews) ?? 0
     }
 
-    var fullGermanTerm: String {
-        "\(artikel.rawValue) \(word)"
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id.uuidString, forKey: .id)
+        try container.encode(artikel, forKey: .artikel)
+        try container.encode(word, forKey: .word)
+        try container.encode(meaning, forKey: .meaning)
+        try container.encode(cleanDeckName, forKey: .deckName)
+        try container.encode(UniversalDateHelper.format(createdAt), forKey: .createdAt)
+        try container.encode(UniversalDateHelper.format(updatedAt), forKey: .updatedAt)
+        try container.encode(stage, forKey: .stage)
+        try container.encode(easeFactor, forKey: .easeFactor)
+        try container.encode(intervalDays, forKey: .intervalDays)
+        try container.encode(repetitions, forKey: .repetitions)
+        try container.encode(lapses, forKey: .lapses)
+        try container.encode(UniversalDateHelper.format(dueDate), forKey: .dueDate)
+        if let last = lastReviewedAt {
+            try container.encode(UniversalDateHelper.format(last), forKey: .lastReviewedAt)
+        }
+        try container.encode(totalReviews, forKey: .totalReviews)
     }
 }
 
@@ -179,10 +308,12 @@ struct AppSettings: Codable, Equatable {
     var autoPlayPronunciation: Bool = false
     var showMeaningOnFront: Bool = false
     var newCardOrderRandom: Bool = false
+    var isDarkMode: Bool = true
     var customDecks: [String] = ["Genel"]
+    var updatedAt: Date = Date()
 
     enum CodingKeys: String, CodingKey {
-        case dailyNewCardLimit, dailyReviewLimit, autoPlayPronunciation, showMeaningOnFront, newCardOrderRandom, customDecks
+        case dailyNewCardLimit, dailyReviewLimit, autoPlayPronunciation, showMeaningOnFront, newCardOrderRandom, isDarkMode, customDecks, updatedAt
     }
 
     init(
@@ -191,14 +322,18 @@ struct AppSettings: Codable, Equatable {
         autoPlayPronunciation: Bool = false,
         showMeaningOnFront: Bool = false,
         newCardOrderRandom: Bool = false,
-        customDecks: [String] = ["Genel"]
+        isDarkMode: Bool = true,
+        customDecks: [String] = ["Genel"],
+        updatedAt: Date = Date()
     ) {
         self.dailyNewCardLimit = dailyNewCardLimit
         self.dailyReviewLimit = dailyReviewLimit
         self.autoPlayPronunciation = autoPlayPronunciation
         self.showMeaningOnFront = showMeaningOnFront
         self.newCardOrderRandom = newCardOrderRandom
+        self.isDarkMode = isDarkMode
         self.customDecks = customDecks
+        self.updatedAt = updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -208,7 +343,30 @@ struct AppSettings: Codable, Equatable {
         self.autoPlayPronunciation = try c.decodeIfPresent(Bool.self, forKey: .autoPlayPronunciation) ?? false
         self.showMeaningOnFront = try c.decodeIfPresent(Bool.self, forKey: .showMeaningOnFront) ?? false
         self.newCardOrderRandom = try c.decodeIfPresent(Bool.self, forKey: .newCardOrderRandom) ?? false
+        self.isDarkMode = try c.decodeIfPresent(Bool.self, forKey: .isDarkMode) ?? true
         self.customDecks = try c.decodeIfPresent([String].self, forKey: .customDecks) ?? ["Genel"]
+
+        if let dateVal = try? c.decode(Date.self, forKey: .updatedAt) {
+            self.updatedAt = dateVal
+        } else if let strVal = try? c.decode(String.self, forKey: .updatedAt), let d = UniversalDateHelper.parse(strVal) {
+            self.updatedAt = d
+        } else if let numVal = try? c.decode(Double.self, forKey: .updatedAt) {
+            self.updatedAt = UniversalDateHelper.parse(numVal) ?? Date()
+        } else {
+            self.updatedAt = Date()
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(dailyNewCardLimit, forKey: .dailyNewCardLimit)
+        try c.encode(dailyReviewLimit, forKey: .dailyReviewLimit)
+        try c.encode(autoPlayPronunciation, forKey: .autoPlayPronunciation)
+        try c.encode(showMeaningOnFront, forKey: .showMeaningOnFront)
+        try c.encode(newCardOrderRandom, forKey: .newCardOrderRandom)
+        try c.encode(isDarkMode, forKey: .isDarkMode)
+        try c.encode(customDecks, forKey: .customDecks)
+        try c.encode(UniversalDateHelper.format(updatedAt), forKey: .updatedAt)
     }
 }
 
@@ -245,12 +403,95 @@ struct DailyProgress: Codable, Equatable {
 }
 
 struct ArtikelMeisterBackup: Codable {
-    var version: Int = 1
+    var version: Int = 2
     var exportedAt: Date = Date()
-    var includesProgress: Bool
+    var includesProgress: Bool = true
     var cards: [Flashcard]
-    var settings: AppSettings?
-    var studyHistory: [String: DailyProgress]?
+    var settings: AppSettings? = nil
+    var studyHistory: [String: DailyProgress]? = nil
+    var deletedCardKeys: [String: Date]? = nil
+    var userEmail: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case version, exportedAt, includesProgress, cards, settings, studyHistory, deletedCardKeys, userEmail
+    }
+
+    init(
+        version: Int = 2,
+        exportedAt: Date = Date(),
+        includesProgress: Bool = true,
+        cards: [Flashcard],
+        settings: AppSettings? = nil,
+        studyHistory: [String: DailyProgress]? = nil,
+        deletedCardKeys: [String: Date]? = nil,
+        userEmail: String? = nil
+    ) {
+        self.version = version
+        self.exportedAt = exportedAt
+        self.includesProgress = includesProgress
+        self.cards = cards
+        self.settings = settings
+        self.studyHistory = studyHistory
+        self.deletedCardKeys = deletedCardKeys
+        self.userEmail = userEmail
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        if let d = try? c.decode(Date.self, forKey: .exportedAt) {
+            self.exportedAt = d
+        } else if let s = try? c.decode(String.self, forKey: .exportedAt), let d = UniversalDateHelper.parse(s) {
+            self.exportedAt = d
+        } else if let n = try? c.decode(Double.self, forKey: .exportedAt) {
+            self.exportedAt = UniversalDateHelper.parse(n) ?? Date()
+        } else {
+            self.exportedAt = Date()
+        }
+        self.includesProgress = try c.decodeIfPresent(Bool.self, forKey: .includesProgress) ?? true
+        self.cards = try c.decodeIfPresent([Flashcard].self, forKey: .cards) ?? []
+        self.settings = try c.decodeIfPresent(AppSettings.self, forKey: .settings)
+        self.studyHistory = try c.decodeIfPresent([String: DailyProgress].self, forKey: .studyHistory)
+
+        if let rawDeleted = try? c.decodeIfPresent([String: String].self, forKey: .deletedCardKeys) {
+            var parsedMap: [String: Date] = [:]
+            for (k, v) in rawDeleted {
+                if let d = UniversalDateHelper.parse(v) {
+                    parsedMap[k] = d
+                }
+            }
+            self.deletedCardKeys = parsedMap
+        } else if let rawDeletedDates = try? c.decodeIfPresent([String: Date].self, forKey: .deletedCardKeys) {
+            self.deletedCardKeys = rawDeletedDates
+        } else {
+            self.deletedCardKeys = nil
+        }
+        self.userEmail = try c.decodeIfPresent(String.self, forKey: .userEmail)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(UniversalDateHelper.format(exportedAt), forKey: .exportedAt)
+        try c.encode(includesProgress, forKey: .includesProgress)
+        try c.encode(cards, forKey: .cards)
+        if let settings = settings {
+            try c.encode(settings, forKey: .settings)
+        }
+        if let studyHistory = studyHistory {
+            try c.encode(studyHistory, forKey: .studyHistory)
+        }
+        if let deletedCardKeys = deletedCardKeys {
+            var rawMap: [String: String] = [:]
+            for (k, v) in deletedCardKeys {
+                rawMap[k] = UniversalDateHelper.format(v)
+            }
+            try c.encode(rawMap, forKey: .deletedCardKeys)
+        }
+        if let userEmail = userEmail, !userEmail.isEmpty {
+            try c.encode(userEmail, forKey: .userEmail)
+        }
+    }
 }
 
 /// Anki SM-2 inspired spaced repetition scheduler
