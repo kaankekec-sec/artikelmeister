@@ -6,8 +6,9 @@
 .Spotlight-V100
 .Trashes
 
-# Build Artifacts
+# macOS Build Artifacts
 build/
+macos/build/
 *.dmg
 *.app
 *.dSYM
@@ -15,6 +16,24 @@ build/
 *.swp
 *.icns
 *.iconset
+
+# Android & Gradle Build Artifacts
+.gradle/
+android/.gradle/
+local.properties
+android/local.properties
+.idea/
+android/.idea/
+*.iml
+android/*.iml
+android/app/build/
+android/build/
+.externalNativeBuild/
+android/.externalNativeBuild/
+.cxx/
+android/.cxx/
+captures/
+android/captures/
 
 # Local scratch / test files
 .system_generated/

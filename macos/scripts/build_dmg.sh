@@ -1,6 +1,11 @@
 #!/bin/zsh
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MACOS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ROOT_DIR="$(cd "${MACOS_DIR}/.." && pwd)"
+cd "${MACOS_DIR}"
+
 APP_NAME="ArtikelMeister"
 BUNDLE_ID="com.artikelmeister.macos"
 BUILD_DIR="build"
@@ -106,8 +111,8 @@ codesign --force --deep --sign - "${APP_BUNDLE}"
 echo "[4/4] Creating ${DMG_OUTPUT} installer..."
 mkdir -p "${DMG_STAGING}"
 cp -R "${APP_BUNDLE}" "${DMG_STAGING}/"
-[ -f "examplesheet.csv" ] && cp "examplesheet.csv" "${DMG_STAGING}/" || true
-[ -f "wortschatzkapitel7-8.csv" ] && cp "wortschatzkapitel7-8.csv" "${DMG_STAGING}/" || true
+[ -f "${ROOT_DIR}/shared/samples/examplesheet.csv" ] && cp "${ROOT_DIR}/shared/samples/examplesheet.csv" "${DMG_STAGING}/" || true
+[ -f "${ROOT_DIR}/shared/samples/wortschatzkapitel7-8.csv" ] && cp "${ROOT_DIR}/shared/samples/wortschatzkapitel7-8.csv" "${DMG_STAGING}/" || true
 ln -s /Applications "${DMG_STAGING}/Applications"
 
 hdiutil create \
