@@ -245,10 +245,6 @@ struct AIGeneratorSheet: View {
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Uygulama hazır Google OAuth entegrasyonuyla gelir. Herhangi bir teknik kod veya anahtar girmenize gerek yoktur. Aşağıdaki butona tıklayarak tarayıcınızda Google hesabınızı seçmeniz yeterlidir; yapay zeka kotası kendi hesabınızdan harcanır.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-
                             HStack(spacing: 12) {
                                 Button {
                                     Task {
