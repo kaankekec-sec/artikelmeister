@@ -1,21 +1,24 @@
 # artikelmeister
 
-Got tired of guessing *der*, *die*, *das* so I made an app for it.
+got tired of guessing *der*, *die*, *das* so i made an app for it.
 
-It has a bloody brain icon because remembering German genders hurts.
+it has a bloody brain icon because remembering ef'ing artikels hurts.
 
 ### features
 
 -smart repetition system
+
 -google drive sync with your google account
+
 -ai generator
+
 -could be used offline
+
 -csv file support to import custom words
 
 #### android
    cd android
    ./gradlew assembleDebug
-   ```
 
 ---
 
@@ -28,7 +31,7 @@ mit
 google is forcing me to include a formal privacy policy for verification, so here is the serious legal text:
 
 ---
-
+```
 # Privacy Policy for ArtikelMeister
 
 **Last Updated:** October 24, 2026
@@ -102,3 +105,4 @@ Any updates to this policy will be reflected directly in this file in the GitHub
 ### 8. Contact
 If you have questions, feedback, or concerns regarding this Privacy Policy, please open an issue in the official GitHub repository:  
 https://github.com/kaankekec-sec/artikelmeister
+```
