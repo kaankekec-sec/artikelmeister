@@ -88,7 +88,6 @@ You retain full ownership and control over your credentials and data:
 - **Deleting Application Data:** To delete all study history, words, and settings, click "Tüm Kelimeleri Sil" (Delete All Cards) in the Application Settings, or delete the local storage directory:
   ```bash
   rm -rf ~/Library/Application\ Support/ArtikelMeister
-  ```
 
 ---
 
