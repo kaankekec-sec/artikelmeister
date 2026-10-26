@@ -1,5 +1,7 @@
 package com.artikelmeister.android.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -1235,6 +1237,21 @@ fun OnboardingSetupScreen(
     val scope = rememberCoroutineScope()
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        scope.launch {
+            errorMessage = null
+            runCatching {
+                authManager.handleGoogleSignInResult(result.data, context)
+                store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = false)
+                onComplete()
+            }.onFailure { err ->
+                errorMessage = err.localizedMessage ?: "Giriş yapılamadı."
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1379,16 +1396,8 @@ fun OnboardingSetupScreen(
             ) {
                 Button(
                     onClick = {
-                        scope.launch {
-                            errorMessage = null
-                            runCatching {
-                                authManager.startBrowserOAuthFlow(context)
-                                store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = false)
-                                onComplete()
-                            }.onFailure { err ->
-                                errorMessage = err.localizedMessage ?: "Giriş yapılamadı."
-                            }
-                        }
+                        errorMessage = null
+                        googleSignInLauncher.launch(authManager.getGoogleSignInIntent(context))
                     },
                     enabled = !authManager.isAuthenticating && !store.isSyncingCloud,
                     colors = ButtonDefaults.buttonColors(

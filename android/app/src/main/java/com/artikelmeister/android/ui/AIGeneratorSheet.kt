@@ -1,6 +1,8 @@
 package com.artikelmeister.android.ui
 
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -117,6 +119,21 @@ fun AIGeneratorDialog(
     var progressMessage by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var newlyAddedWords by remember { mutableStateOf<List<GeneratedWordItem>>(emptyList()) }
+
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        scope.launch {
+            runCatching {
+                errorMessage = null
+                authManager.handleGoogleSignInResult(result.data, context)
+                showAuthConfig = false
+                store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = true)
+            }.onFailure { err ->
+                errorMessage = err.localizedMessage
+            }
+        }
+    }
 
     var showModelPicker by remember { mutableStateOf(false) }
     var showTargetDeckMenu by remember { mutableStateOf(false) }
@@ -399,16 +416,8 @@ fun AIGeneratorDialog(
                                     ) {
                                         Button(
                                             onClick = {
-                                                scope.launch {
-                                                    runCatching {
-                                                        errorMessage = null
-                                                        authManager.startBrowserOAuthFlow(context)
-                                                        showAuthConfig = false
-                                                        store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = true)
-                                                    }.onFailure { err ->
-                                                        errorMessage = err.localizedMessage
-                                                    }
-                                                }
+                                                errorMessage = null
+                                                googleSignInLauncher.launch(authManager.getGoogleSignInIntent(context))
                                             },
                                             enabled = !authManager.isAuthenticating,
                                             colors = ButtonDefaults.buttonColors(

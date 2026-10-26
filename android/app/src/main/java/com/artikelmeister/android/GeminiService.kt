@@ -1,13 +1,24 @@
 package com.artikelmeister.android
 
+import android.accounts.Account
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
+import android.os.IBinder
 import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInClient
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -149,10 +160,6 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
     }
 
     init {
-        try {
-            System.setProperty("java.net.preferIPv4Stack", "true")
-            System.setProperty("java.net.preferIPv6Addresses", "false")
-        } catch (_: Exception) {}
         loadFromKeystore()
     }
 
@@ -266,6 +273,84 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
         }
     }
 
+    /**
+     * Native Google Sign-In with Google Play Services (Zero socket, zero browser redirect)
+     */
+    fun getGoogleSignInClient(context: Context): GoogleSignInClient {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestProfile()
+            .requestScopes(
+                Scope("https://www.googleapis.com/auth/drive.file")
+            )
+            .build()
+        return GoogleSignIn.getClient(context, gso)
+    }
+
+    fun getGoogleSignInIntent(context: Context): Intent {
+        return getGoogleSignInClient(context).signInIntent
+    }
+
+    suspend fun handleGoogleSignInResult(data: Intent?, context: Context) {
+        isAuthenticating = true
+        authStatusMessage = "Google hesabı doğrulanıyor..."
+        try {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(data)
+            val account = try {
+                task.getResult(ApiException::class.java)
+            } catch (e: ApiException) {
+                if (e.statusCode == CommonStatusCodes.SIGN_IN_REQUIRED || e.statusCode == 12501 || e.statusCode == CommonStatusCodes.CANCELED) {
+                    throw IllegalStateException("Giriş işlemi iptal edildi.")
+                }
+                val statusMsg = CommonStatusCodes.getStatusCodeString(e.statusCode)
+                throw IllegalStateException("Google girişi başarısız oldu: $statusMsg (Kod: ${e.statusCode})")
+            }
+
+            userEmail = account.email ?: ""
+            userName = account.displayName ?: ""
+            userPictureUrl = account.photoUrl?.toString() ?: ""
+
+            val rawAccount = account.account
+                ?: Account(userEmail, "com.google")
+
+            authStatusMessage = "Bulut senkronizasyonu için erişim anahtarı alınıyor..."
+            val scopeString = "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+
+            val token = withContext(Dispatchers.IO) {
+                GoogleAuthUtil.getToken(context.applicationContext, rawAccount, scopeString)
+            }
+
+            oauthAccessToken = token
+            authMode = GeminiAuthMode.GOOGLE_OAUTH
+            hasCloudSyncScope = true
+            hasCompletedOnboarding = true
+            hasDismissedStartupSignIn = true
+            saveToKeystore()
+            authStatusMessage = "Google Hesabı ($userEmail) başarıyla bağlandı!"
+        } finally {
+            isAuthenticating = false
+        }
+    }
+
+    fun signOut(context: Context, onComplete: () -> Unit = {}) {
+        val client = getGoogleSignInClient(context)
+        client.signOut().addOnCompleteListener {
+            clearAuthorization()
+            onComplete()
+        }
+    }
+
+    fun invalidateToken() {
+        val token = oauthAccessToken.trim()
+        if (token.isNotEmpty()) {
+            runCatching {
+                CoroutineScope(Dispatchers.IO).launch {
+                    GoogleAuthUtil.clearToken(appContext, token)
+                }
+            }
+        }
+    }
+
     suspend fun startBrowserOAuthFlow(context: Context) {
         val clientId = effectiveClientId
         if (clientId.isEmpty()) {
@@ -324,8 +409,11 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             withContext(Dispatchers.Main) {
                 // Launch via Chrome / Samsung Internet Custom Tabs to keep app alive in foreground
                 val intent = Intent(Intent.ACTION_VIEW, authUri).apply {
-                    putExtra("android.support.customtabs.extra.SESSION", null as android.os.IBinder?)
-                    putExtra("androidx.browser.customtabs.extra.SESSION", null as android.os.IBinder?)
+                    val bundle = Bundle().apply {
+                        putBinder("android.support.customtabs.extra.SESSION", null as IBinder?)
+                        putBinder("androidx.browser.customtabs.extra.SESSION", null as IBinder?)
+                    }
+                    putExtras(bundle)
                     putExtra("android.support.customtabs.extra.TOOLBAR_COLOR", 0xFF18181B.toInt())
                     putExtra("androidx.browser.customtabs.extra.TOOLBAR_COLOR", 0xFF18181B.toInt())
                     putExtra("android.support.customtabs.extra.TITLE_VISIBILITY", 1)
@@ -597,9 +685,25 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
     }
 
     suspend fun validOAuthAccessToken(): String {
+        val email = userEmail.trim()
+        if (email.isNotEmpty()) {
+            val freshToken = runCatching {
+                val rawAccount = Account(email, "com.google")
+                val scopeString = "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+                withContext(Dispatchers.IO) {
+                    GoogleAuthUtil.getToken(appContext, rawAccount, scopeString)
+                }
+            }.getOrNull()
+
+            if (!freshToken.isNullOrEmpty()) {
+                oauthAccessToken = freshToken
+                return freshToken
+            }
+        }
+
         val expiry = oauthTokenExpiry
         if (expiry != null && expiry <= System.currentTimeMillis() && oauthRefreshToken.isNotEmpty() && effectiveClientId.isNotEmpty()) {
-            refreshOAuthToken()
+            runCatching { refreshOAuthToken() }
         }
         val token = oauthAccessToken.trim()
         if (token.isEmpty()) {
@@ -1232,7 +1336,8 @@ object GoogleDriveSyncService {
                 readTimeout = 20_000
                 setRequestProperty("Authorization", "Bearer $token")
             }
-            if (checkConn.responseCode == 401 && authManager.oauthRefreshToken.isNotEmpty()) {
+            if (checkConn.responseCode == 401) {
+                authManager.invalidateToken()
                 runCatching { authManager.refreshOAuthToken() }
                 token = authManager.validOAuthAccessToken()
                 checkConn = (checkUrl.openConnection() as HttpURLConnection).apply {
@@ -1263,7 +1368,8 @@ object GoogleDriveSyncService {
             setRequestProperty("Authorization", "Bearer $token")
         }
         var listCode = listConn.responseCode
-        if (listCode == 401 && authManager.oauthRefreshToken.isNotEmpty()) {
+        if (listCode == 401) {
+            authManager.invalidateToken()
             runCatching { authManager.refreshOAuthToken() }
             token = authManager.validOAuthAccessToken()
             listConn = (listUrl.openConnection() as HttpURLConnection).apply {
@@ -1360,7 +1466,8 @@ object GoogleDriveSyncService {
             setRequestProperty("Authorization", "Bearer $token")
         }
         var listCode = listConn.responseCode
-        if (listCode == 401 && authManager.oauthRefreshToken.isNotEmpty()) {
+        if (listCode == 401) {
+            authManager.invalidateToken()
             runCatching { authManager.refreshOAuthToken() }
             token = authManager.validOAuthAccessToken()
             listConn = (listUrl.openConnection() as HttpURLConnection).apply {
@@ -1402,7 +1509,8 @@ object GoogleDriveSyncService {
             setRequestProperty("Authorization", "Bearer $token")
         }
         var dlCode = dlConn.responseCode
-        if (dlCode == 401 && authManager.oauthRefreshToken.isNotEmpty()) {
+        if (dlCode == 401) {
+            authManager.invalidateToken()
             runCatching { authManager.refreshOAuthToken() }
             token = authManager.validOAuthAccessToken()
             dlConn = (downloadUrl.openConnection() as HttpURLConnection).apply {
@@ -1451,7 +1559,8 @@ object GoogleDriveSyncService {
             }
             createConn.outputStream.use { it.write(createMeta.toString().toByteArray(Charsets.UTF_8)) }
             var createCode = createConn.responseCode
-            if (createCode == 401 && authManager.oauthRefreshToken.isNotEmpty()) {
+            if (createCode == 401) {
+                authManager.invalidateToken()
                 runCatching { authManager.refreshOAuthToken() }
                 token = authManager.validOAuthAccessToken()
                 createConn = (URL("https://www.googleapis.com/drive/v3/files?fields=id").openConnection() as HttpURLConnection).apply {
@@ -1492,7 +1601,8 @@ object GoogleDriveSyncService {
         val payloadBytes = backupJson.toByteArray(Charsets.UTF_8)
         uploadConn.outputStream.use { it.write(payloadBytes) }
         var uploadCode = uploadConn.responseCode
-        if (uploadCode == 401 && authManager.oauthRefreshToken.isNotEmpty()) {
+        if (uploadCode == 401) {
+            authManager.invalidateToken()
             runCatching { authManager.refreshOAuthToken() }
             token = authManager.validOAuthAccessToken()
             uploadConn = (uploadUrl.openConnection() as HttpURLConnection).apply {

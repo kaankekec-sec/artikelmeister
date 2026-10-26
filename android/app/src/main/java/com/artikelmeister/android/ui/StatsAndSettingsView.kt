@@ -548,6 +548,20 @@ fun SettingsView(
         }
     }
 
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        scope.launch {
+            runCatching {
+                authManager.handleGoogleSignInResult(result.data, context)
+                store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = false)
+            }.onFailure { err ->
+                store.cloudSyncStatusMessage = err.localizedMessage ?: "Google girişi başarısız oldu."
+                store.cloudSyncIsError = true
+            }
+        }
+    }
+
     Column(
         verticalArrangement = Arrangement.spacedBy(20.dp),
         modifier = Modifier
@@ -667,9 +681,10 @@ fun SettingsView(
 
                         OutlinedButton(
                             onClick = {
-                                authManager.clearAuthorization()
-                                store.cloudSyncStatusMessage = "Google hesabından çıkış yapıldı (yerel veriler korundu)."
-                                store.cloudSyncIsError = false
+                                authManager.signOut(context) {
+                                    store.cloudSyncStatusMessage = "Google hesabından çıkış yapıldı (yerel veriler korundu)."
+                                    store.cloudSyncIsError = false
+                                }
                             },
                             shape = RoundedCornerShape(8.dp)
                         ) {
@@ -687,12 +702,7 @@ fun SettingsView(
 
                     Button(
                         onClick = {
-                            scope.launch {
-                                runCatching {
-                                    authManager.startBrowserOAuthFlow(context)
-                                    store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = false)
-                                }
-                            }
+                            googleSignInLauncher.launch(authManager.getGoogleSignInIntent(context))
                         },
                         enabled = !authManager.isAuthenticating && !store.isSyncingCloud,
                         colors = ButtonDefaults.buttonColors(
