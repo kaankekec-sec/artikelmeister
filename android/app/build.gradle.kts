@@ -53,5 +53,6 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.play.services.auth)
     debugImplementation(libs.androidx.ui.tooling)
 }
