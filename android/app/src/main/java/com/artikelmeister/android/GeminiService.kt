@@ -1,5 +1,6 @@
 package com.artikelmeister.android
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -7,9 +8,14 @@ import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -17,11 +23,14 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.Socket
+import java.net.SocketException
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Locale
+import javax.net.ssl.SSLException
 import kotlin.math.max
 import kotlin.math.min
 
@@ -120,6 +129,24 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
     private val prefs = appContext.getSharedPreferences("com.artikelmeister.gemini.auth", Context.MODE_PRIVATE)
     @Volatile
     private var activeServerSocket: ServerSocket? = null
+    @Volatile
+    private var pendingAuthDeferred: CompletableDeferred<String>? = null
+
+    fun handleOAuthDeepLink(uri: Uri): Boolean {
+        val code = uri.getQueryParameter("code")
+        val error = uri.getQueryParameter("error")
+        val deferred = pendingAuthDeferred
+        if (deferred != null && deferred.isActive) {
+            if (!code.isNullOrEmpty()) {
+                deferred.complete(code)
+                return true
+            } else if (!error.isNullOrEmpty()) {
+                deferred.completeExceptionally(IllegalStateException("Google OAuth hatası: $error"))
+                return true
+            }
+        }
+        return false
+    }
 
     init {
         try {
@@ -252,15 +279,33 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             val codeVerifier = generateCodeVerifier()
             val codeChallenge = generateCodeChallenge(codeVerifier)
 
+            val deferred = CompletableDeferred<String>()
+            pendingAuthDeferred = deferred
+
             val serverSocket = withContext(Dispatchers.IO) {
                 runCatching { activeServerSocket?.close() }
-                ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).also {
+                ServerSocket(0, 10, InetAddress.getByName("127.0.0.1")).also {
                     it.soTimeout = 180_000 // 3 min timeout
                     activeServerSocket = it
                 }
             }
             val port = serverSocket.localPort
             val redirectURI = "http://127.0.0.1:$port/callback"
+
+            // Asynchronous multi-request accept loop that handles Chrome PNA, preconnect, and /callback
+            val serverScope = CoroutineScope(Dispatchers.IO)
+            val serverJob = serverScope.launch {
+                while (isActive && !deferred.isCompleted) {
+                    val client = try {
+                        serverSocket.accept()
+                    } catch (_: Exception) {
+                        break
+                    }
+                    launch {
+                        handleLoopbackClient(client, deferred)
+                    }
+                }
+            }
 
             val authUri = Uri.parse("https://accounts.google.com/o/oauth2/v2/auth").buildUpon()
                 .appendQueryParameter("client_id", clientId)
@@ -277,62 +322,29 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 .build()
 
             withContext(Dispatchers.Main) {
+                // Launch via Chrome / Samsung Internet Custom Tabs to keep app alive in foreground
                 val intent = Intent(Intent.ACTION_VIEW, authUri).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra("android.support.customtabs.extra.SESSION", null as android.os.IBinder?)
+                    putExtra("androidx.browser.customtabs.extra.SESSION", null as android.os.IBinder?)
+                    putExtra("android.support.customtabs.extra.TOOLBAR_COLOR", 0xFF18181B.toInt())
+                    putExtra("androidx.browser.customtabs.extra.TOOLBAR_COLOR", 0xFF18181B.toInt())
+                    putExtra("android.support.customtabs.extra.TITLE_VISIBILITY", 1)
+                    putExtra("androidx.browser.customtabs.extra.TITLE_VISIBILITY", 1)
+                    if (context !is Activity) {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
                 }
                 context.startActivity(intent)
             }
 
-            val authCode = withContext(Dispatchers.IO) {
-                serverSocket.use { server ->
-                    val client = server.accept()
-                    client.use { sock ->
-                        val reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
-                        val firstLine = reader.readLine() ?: ""
-                        val parts = firstLine.split(" ")
-                        var extractedCode: String? = null
-                        var extractedError: String? = null
-
-                        if (parts.size >= 2) {
-                            val reqUri = Uri.parse("http://127.0.0.1${parts[1]}")
-                            extractedCode = reqUri.getQueryParameter("code")
-                            extractedError = reqUri.getQueryParameter("error")
-                        }
-
-                        val htmlBody = if (extractedCode != null) {
-                            """
-                            <html><head><meta charset="utf-8"><title>ArtikelMeister Evrensel Profil &amp; AI</title></head>
-                            <body style="font-family: -apple-system, Roboto, sans-serif; text-align: center; padding: 60px; background: #121214; color: #fff;">
-                            <h2 style="color: #28a745;">✓ Google Hesabı, Bulut Senkronizasyonu ve Gemini AI Bağlandı!</h2>
-                            <p>Bu tarayıcı sekmesini kapatıp <b>ArtikelMeister</b> uygulamasına dönebilirsiniz.</p>
-                            </body></html>
-                            """.trimIndent()
-                        } else {
-                            """
-                            <html><head><meta charset="utf-8"><title>ArtikelMeister Yetkilendirme Hatası</title></head>
-                            <body style="font-family: -apple-system, Roboto, sans-serif; text-align: center; padding: 60px; background: #121214; color: #fff;">
-                            <h2 style="color: #dc3545;">Yetkilendirme Tamamlanamadı</h2>
-                            <p>${extractedError ?: "Kod alınamadı."}</p>
-                            </body></html>
-                            """.trimIndent()
-                        }
-
-                        val bodyBytes = htmlBody.toByteArray(Charsets.UTF_8)
-                        val responseHeaders =
-                            "HTTP/1.1 200 OK\r\n" +
-                                "Content-Type: text/html; charset=utf-8\r\n" +
-                                "Content-Length: ${bodyBytes.size}\r\n" +
-                                "Connection: close\r\n\r\n"
-                        val out = sock.getOutputStream()
-                        out.write(responseHeaders.toByteArray(Charsets.UTF_8))
-                        out.write(bodyBytes)
-                        out.flush()
-
-                        extractedCode ?: throw IllegalStateException(
-                            "Google OAuth hatası: ${extractedError ?: "Bilinmeyen hata"}"
-                        )
-                    }
+            val authCode = try {
+                withTimeout(180_000) {
+                    deferred.await()
                 }
+            } finally {
+                pendingAuthDeferred = null
+                runCatching { serverSocket.close() }
+                serverJob.cancel()
             }
 
             authStatusMessage = "Yetkilendirme kodu alındı, erişim anahtarı (Access Token) alınıyor..."
@@ -365,6 +377,140 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
         }
     }
 
+    private fun handleLoopbackClient(sock: Socket, deferred: CompletableDeferred<String>) {
+        try {
+            sock.soTimeout = 15_000
+            val reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
+            val firstLine = reader.readLine() ?: ""
+            val parts = firstLine.split(" ")
+            if (parts.size < 2) {
+                sock.close()
+                return
+            }
+
+            val method = parts[0].uppercase(Locale.ROOT)
+            val path = parts[1]
+
+            // 1. Chrome on Android Private Network Access (PNA) preflight check
+            if (method == "OPTIONS") {
+                val pnaResponse =
+                    "HTTP/1.1 204 No Content\r\n" +
+                    "Access-Control-Allow-Origin: *\r\n" +
+                    "Access-Control-Allow-Methods: GET, OPTIONS\r\n" +
+                    "Access-Control-Allow-Headers: *\r\n" +
+                    "Access-Control-Allow-Private-Network: true\r\n" +
+                    "Connection: close\r\n\r\n"
+                runCatching {
+                    sock.getOutputStream().apply {
+                        write(pnaResponse.toByteArray(Charsets.UTF_8))
+                        flush()
+                    }
+                }
+                sock.close()
+                return
+            }
+
+            // 2. Ignore static favicon or preconnect noise
+            if (path.startsWith("/favicon")) {
+                val notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                runCatching {
+                    sock.getOutputStream().apply {
+                        write(notFound.toByteArray(Charsets.UTF_8))
+                        flush()
+                    }
+                }
+                sock.close()
+                return
+            }
+
+            // 3. Handle /callback
+            val reqUri = Uri.parse("http://127.0.0.1$path")
+            val code = reqUri.getQueryParameter("code")
+            val error = reqUri.getQueryParameter("error")
+
+            if (code != null) {
+                deferred.complete(code)
+                val html = """
+                    <!DOCTYPE html>
+                    <html><head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <title>ArtikelMeister Giriş Başarılı</title>
+                    <style>
+                      body { font-family: -apple-system, Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #121214; color: #fff; }
+                      .card { max-width: 440px; margin: 40px auto; background: #1c1c1f; border-radius: 18px; padding: 28px; border: 1px solid #2e2e33; }
+                      h2 { color: #22c55e; margin-bottom: 12px; font-size: 22px; }
+                      p { color: #a1a1aa; font-size: 14px; line-height: 1.5; }
+                      .btn { display: inline-block; margin-top: 24px; padding: 12px 24px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 12px; font-weight: bold; }
+                    </style>
+                    <script>
+                      window.onload = function() {
+                        setTimeout(function() {
+                          window.location.href = "artikelmeister://oauth2redirect?status=success";
+                        }, 250);
+                      };
+                    </script>
+                    </head>
+                    <body>
+                      <div class="card">
+                        <h2>✓ Google Hesabı Bağlandı!</h2>
+                        <p>Bulut senkronizasyonu ve Gemini AI yetkilendirmesi tamamlandı. Uygulamaya dönülüyor...</p>
+                        <a class="btn" href="artikelmeister://oauth2redirect?status=success">Uygulamaya Dön</a>
+                      </div>
+                    </body></html>
+                """.trimIndent()
+
+                val bodyBytes = html.toByteArray(Charsets.UTF_8)
+                val response =
+                    "HTTP/1.1 200 OK\r\n" +
+                    "Content-Type: text/html; charset=utf-8\r\n" +
+                    "Content-Length: ${bodyBytes.size}\r\n" +
+                    "Access-Control-Allow-Origin: *\r\n" +
+                    "Access-Control-Allow-Private-Network: true\r\n" +
+                    "Connection: close\r\n\r\n"
+
+                runCatching {
+                    sock.getOutputStream().apply {
+                        write(response.toByteArray(Charsets.UTF_8))
+                        write(bodyBytes)
+                        flush()
+                    }
+                }
+            } else if (error != null) {
+                deferred.completeExceptionally(IllegalStateException("Google OAuth hatası: $error"))
+                val html = """
+                    <!DOCTYPE html>
+                    <html><head>
+                    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+                    <title>Yetkilendirme Hatası</title>
+                    <body style="font-family: -apple-system, sans-serif; text-align: center; padding: 40px; background: #121214; color: #fff;">
+                    <h2 style="color: #ef4444;">Yetkilendirme Tamamlanamadı</h2>
+                    <p style="color: #a1a1aa;">$error</p>
+                    </body></html>
+                """.trimIndent()
+                val bodyBytes = html.toByteArray(Charsets.UTF_8)
+                val response =
+                    "HTTP/1.1 200 OK\r\n" +
+                    "Content-Type: text/html; charset=utf-8\r\n" +
+                    "Content-Length: ${bodyBytes.size}\r\n" +
+                    "Access-Control-Allow-Origin: *\r\n" +
+                    "Access-Control-Allow-Private-Network: true\r\n" +
+                    "Connection: close\r\n\r\n"
+                runCatching {
+                    sock.getOutputStream().apply {
+                        write(response.toByteArray(Charsets.UTF_8))
+                        write(bodyBytes)
+                        flush()
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Ignored, Broken pipe or connection reset during socket writes
+        } finally {
+            runCatching { sock.close() }
+        }
+    }
+
     private suspend fun <T> withNetworkRetry(
         maxAttempts: Int = 4,
         operation: String = "Ağ isteği",
@@ -380,8 +526,12 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 val isNetworkOrDns = e is java.net.UnknownHostException ||
                         e is java.net.SocketTimeoutException ||
                         e is java.net.ConnectException ||
+                        e is SocketException ||
+                        e is SSLException ||
                         msg.contains("Unable to resolve host", ignoreCase = true) ||
-                        msg.contains("No address associated", ignoreCase = true)
+                        msg.contains("No address associated", ignoreCase = true) ||
+                        msg.contains("Broken pipe", ignoreCase = true) ||
+                        msg.contains("Connection reset", ignoreCase = true)
                 if (isNetworkOrDns && attempt < maxAttempts) {
                     delay(1200L * attempt)
                     continue
@@ -421,6 +571,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 connectTimeout = 30_000
                 readTimeout = 30_000
                 setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                setRequestProperty("Connection", "close")
             }
 
             conn.outputStream.use { it.write(formBody.toByteArray(Charsets.UTF_8)) }
@@ -478,6 +629,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 connectTimeout = 30_000
                 readTimeout = 30_000
                 setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                setRequestProperty("Connection", "close")
             }
             conn.outputStream.use { it.write(formBody.toByteArray(Charsets.UTF_8)) }
             val status = conn.responseCode

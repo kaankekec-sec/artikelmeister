@@ -1,5 +1,6 @@
 package com.artikelmeister.android
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -14,6 +15,7 @@ import com.artikelmeister.android.ui.RootContainerView
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleOAuthIntent(intent)
 
         // Initialize German Text-To-Speech synthesizer
         SpeechManager.getInstance(applicationContext)
@@ -46,6 +48,19 @@ class MainActivity : ComponentActivity() {
                     authManager = authManager
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleOAuthIntent(intent)
+    }
+
+    private fun handleOAuthIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme == "artikelmeister" && uri.host == "oauth2redirect") {
+            GeminiAuthManager.getInstance(applicationContext).handleOAuthDeepLink(uri)
         }
     }
 }
