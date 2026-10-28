@@ -7,14 +7,20 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import com.artikelmeister.android.ui.ArtikelMeisterTheme
 import com.artikelmeister.android.ui.RootContainerView
+import com.artikelmeister.android.ui.UiPreferences
+import com.artikelmeister.android.ui.resolveDarkTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The Android 12+ system splash (values-v31/themes.xml) covers cold start; on older
+        // versions the dark brand windowBackground does. Edge-to-edge is set up before content.
+        applySystemBars(isDark = true)
         super.onCreate(savedInstanceState)
+        UiPreferences.init(applicationContext)
         handleOAuthIntent(intent)
 
         // Initialize German Text-To-Speech synthesizer
@@ -23,23 +29,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             val store = remember { DeckStore(applicationContext) }
             val authManager = remember { GeminiAuthManager.getInstance(applicationContext) }
-            val isDark = store.settings.isDarkMode
+            val isDark = resolveDarkTheme(legacyIsDark = store.settings.isDarkMode)
 
-            LaunchedEffect(isDark) {
-                if (isDark) {
-                    val darkBarColor = Color.parseColor("#212124")
-                    enableEdgeToEdge(
-                        statusBarStyle = SystemBarStyle.dark(darkBarColor),
-                        navigationBarStyle = SystemBarStyle.dark(darkBarColor)
-                    )
-                } else {
-                    val lightBarColor = Color.parseColor("#FFFFFF")
-                    val lightDividerScrim = Color.parseColor("#E5E7EB")
-                    enableEdgeToEdge(
-                        statusBarStyle = SystemBarStyle.light(lightBarColor, lightDividerScrim),
-                        navigationBarStyle = SystemBarStyle.light(lightBarColor, lightDividerScrim)
-                    )
-                }
+            // Single source of truth for system bar appearance. Bars are transparent;
+            // Compose draws the surfaces behind them.
+            DisposableEffect(isDark) {
+                applySystemBars(isDark)
+                onDispose { }
             }
 
             ArtikelMeisterTheme(darkTheme = isDark) {
@@ -49,6 +45,15 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun applySystemBars(isDark: Boolean) {
+        val style = if (isDark) {
+            SystemBarStyle.dark(Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(Color.TRANSPARENT, LIGHT_BARS_FALLBACK_SCRIM)
+        }
+        enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -62,5 +67,10 @@ class MainActivity : ComponentActivity() {
         if (uri.scheme == "artikelmeister" && uri.host == "oauth2redirect") {
             GeminiAuthManager.getInstance(applicationContext).handleOAuthDeepLink(uri)
         }
+    }
+
+    private companion object {
+        /** Used only on API levels that cannot draw dark icons on a light navigation bar. */
+        val LIGHT_BARS_FALLBACK_SCRIM: Int = Color.argb(0x80, 0x1B, 0x1B, 0x1B)
     }
 }

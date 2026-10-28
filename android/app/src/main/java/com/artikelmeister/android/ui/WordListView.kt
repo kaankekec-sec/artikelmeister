@@ -1,16 +1,18 @@
 package com.artikelmeister.android.ui
 
+import android.content.res.Resources
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -20,19 +22,23 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Check
@@ -42,29 +48,52 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,25 +101,61 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.artikelmeister.android.Artikel
 import com.artikelmeister.android.CardStage
 import com.artikelmeister.android.DeckStore
 import com.artikelmeister.android.Flashcard
 import com.artikelmeister.android.GeminiAuthManager
+import com.artikelmeister.android.R
 import com.artikelmeister.android.SpeechManager
+import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+// =====================================================================================
+// Article filter options (UI-side). Designed for 4 article groups: der / die / das / '-'.
+// =====================================================================================
+
+private const val FILTER_ALL = ""
+
+/**
+ * Key used for the article-less ('-') filter option.
+ *
+ * TODO(CONTRACT.md): the engineer is adding article-less words to the data layer. When the
+ *  contract lands: (1) flip [SHOW_NO_ARTICLE_FILTER] to true, (2) implement
+ *  [matchesNoArticle] against the real model field. The chip row / segmented pickers already
+ *  reserve layout space for a 5th segment (Tümü + der + die + das + '-').
+ */
+private const val FILTER_NO_ARTICLE = "-"
+private const val SHOW_NO_ARTICLE_FILTER = false
+
+@Suppress("UNUSED_PARAMETER")
+private fun matchesNoArticle(card: Flashcard): Boolean {
+    // TODO(CONTRACT.md): return true for article-less cards once the model supports them.
+    return false
+}
+
+private val trLocale = Locale("tr", "TR")
+
+private const val WIDE_LAYOUT_MIN_WIDTH_DP = 600
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun WordListView(
     store: DeckStore,
@@ -99,53 +164,92 @@ fun WordListView(
 ) {
     val colors = LocalAppColors.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    var searchText by remember { mutableStateOf("") }
-    var selectedDeckFilter by remember { mutableStateOf<String?>(null) }
-    var selectedArtikelFilter by remember { mutableStateOf<Artikel?>(null) }
-    var selectedStageFilter by remember { mutableStateOf<CardStage?>(null) }
+    var searchText by rememberSaveable { mutableStateOf("") }
+    var selectedDeckFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var artikelFilterKey by rememberSaveable { mutableStateOf(FILTER_ALL) }
+    var selectedStageFilter by rememberSaveable { mutableStateOf<CardStage?>(null) }
 
-    // Manual new word form state
-    var newArtikel by remember { mutableStateOf(Artikel.DER) }
-    var newWord by remember { mutableStateOf("") }
-    var newMeaning by remember { mutableStateOf("") }
-    var newDeckName by remember { mutableStateOf("Genel") }
+    // Quick-add form state (shared between the inline bar on wide screens and the dialog on phones)
+    var newArtikel by rememberSaveable { mutableStateOf(Artikel.DER) }
+    var newWord by rememberSaveable { mutableStateOf("") }
+    var newMeaning by rememberSaveable { mutableStateOf("") }
+    var newDeckName by rememberSaveable { mutableStateOf("Genel") }
 
-    // Editing word & deck creation state
     var editingCard by remember { mutableStateOf<Flashcard?>(null) }
+    var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var showNewDeckSheet by remember { mutableStateOf(false) }
     var deckToRename by remember { mutableStateOf<String?>(null) }
-
     var alertMessage by remember { mutableStateOf<String?>(null) }
-    var showAlert by remember { mutableStateOf(false) }
     var showAIGenerator by remember { mutableStateOf(false) }
 
-    var showNewWordDeckMenu by remember { mutableStateOf(false) }
-    var showArtikelFilterMenu by remember { mutableStateOf(false) }
-    var showStageFilterMenu by remember { mutableStateOf(false) }
+    // Deferred deletion: cards are hidden immediately and only removed from the store when the
+    // Undo snackbar times out / is dismissed (or when the screen leaves composition). This keeps
+    // SRS progress & avoids writing a sync tombstone if the user taps "Geri al".
+    val pendingDeleteIds = remember { mutableStateListOf<String>() }
+
+    fun commitDelete(id: String) {
+        if (pendingDeleteIds.remove(id)) store.deleteCard(id)
+    }
+
+    fun requestDelete(card: Flashcard) {
+        if (pendingDeleteIds.contains(card.id)) return
+        // Finish (commit) any previous pending delete before starting a new undo window.
+        snackbarHostState.currentSnackbarData?.dismiss()
+        pendingDeleteIds.add(card.id)
+        scope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = context.getString(R.string.words_deleted_snackbar, card.fullGermanTerm),
+                actionLabel = context.getString(R.string.action_undo),
+                duration = SnackbarDuration.Long
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                pendingDeleteIds.remove(card.id)
+            } else {
+                commitDelete(card.id)
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            pendingDeleteIds.toList().forEach { store.deleteCard(it) }
+            pendingDeleteIds.clear()
+        }
+    }
 
     val filteredCards = remember(
         store.cards,
         selectedDeckFilter,
-        selectedArtikelFilter,
+        artikelFilterKey,
         selectedStageFilter,
-        searchText
+        searchText,
+        pendingDeleteIds.toList()
     ) {
+        val q = searchText.trim().lowercase(trLocale)
         store.cards.filter { card ->
+            if (pendingDeleteIds.contains(card.id)) return@filter false
             if (selectedDeckFilter != null && card.deckName != selectedDeckFilter) return@filter false
-            if (selectedArtikelFilter != null && card.artikel != selectedArtikelFilter) return@filter false
+            when (artikelFilterKey) {
+                FILTER_ALL -> Unit
+                FILTER_NO_ARTICLE -> if (!matchesNoArticle(card)) return@filter false
+                else -> if (card.artikel.rawValue != artikelFilterKey) return@filter false
+            }
             if (selectedStageFilter != null && card.stage != selectedStageFilter) return@filter false
-            val q = searchText.trim().lowercase(Locale("tr", "TR"))
             if (q.isNotEmpty()) {
-                val matchesWord = card.word.lowercase(Locale("tr", "TR")).contains(q)
-                val matchesMeaning = card.meaning.lowercase(Locale("tr", "TR")).contains(q)
-                val matchesArtikel = card.artikel.rawValue.lowercase(Locale.ROOT).contains(q)
-                val matchesDeck = card.deckName.lowercase(Locale("tr", "TR")).contains(q)
-                return@filter matchesWord || matchesMeaning || matchesArtikel || matchesDeck
+                return@filter card.word.lowercase(trLocale).contains(q) ||
+                    card.meaning.lowercase(trLocale).contains(q) ||
+                    card.artikel.rawValue.lowercase(Locale.ROOT).contains(q) ||
+                    card.deckName.lowercase(trLocale).contains(q)
             }
             true
         }
     }
+    val visibleTotal = store.cards.size - pendingDeleteIds.size
+    val hasActiveFilters = searchText.isNotBlank() || artikelFilterKey != FILTER_ALL ||
+        selectedStageFilter != null || selectedDeckFilter != null
 
     val importCsvLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -154,16 +258,12 @@ fun WordListView(
             runCatching {
                 val targetDeck = selectedDeckFilter ?: newDeckName
                 val res = store.importCSVFromUri(uri, defaultDeckName = targetDeck)
-                alertMessage = """
-                    Yeni eklenen: ${res.addedCount}
-                    Güncellenen: ${res.updatedCount}
-                    Atlanan (mevcut): ${res.skippedCount}
-                    Geçersiz satır: ${res.invalidLines}
-                """.trimIndent()
-                showAlert = true
+                alertMessage = context.getString(
+                    R.string.words_import_result,
+                    res.addedCount, res.updatedCount, res.skippedCount, res.invalidLines
+                )
             }.onFailure { err ->
-                alertMessage = err.localizedMessage ?: "CSV okunamadı."
-                showAlert = true
+                alertMessage = err.localizedMessage ?: context.getString(R.string.words_import_failed)
             }
         }
     }
@@ -177,545 +277,232 @@ fun WordListView(
                 context.contentResolver.openOutputStream(uri)?.use { out ->
                     out.write(csvContent.toByteArray(Charsets.UTF_8))
                 }
-                alertMessage = "Kelimeler başarıyla CSV olarak dışa aktarıldı."
-                showAlert = true
+            }.onSuccess {
+                scope.launch {
+                    snackbarHostState.showSnackbar(context.getString(R.string.words_export_success))
+                }
             }.onFailure { err ->
-                alertMessage = "Dışa aktarma hatası: ${err.localizedMessage}"
-                showAlert = true
+                alertMessage = context.getString(R.string.words_export_failed, err.localizedMessage ?: "")
             }
         }
     }
 
-    Column(
+    val launchImport = { importCsvLauncher.launch(arrayOf("text/*", "application/csv", "*/*")) }
+    val launchExport = { exportCsvLauncher.launch(context.getString(R.string.words_export_file_name)) }
+
+    fun submitQuickAdd(): Boolean? {
+        val word = newWord.trim()
+        if (word.isEmpty()) return null
+        val added = store.addCard(newArtikel, word, newMeaning, newDeckName)
+        if (added) {
+            newWord = ""
+            newMeaning = ""
+        }
+        return added
+    }
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.windowBackground)
     ) {
-        // Top Toolbar: Header + Quick Add + Deck Chips + Search/Filters
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(colors.controlBackground)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            // Row 1: Title + Main Actions
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-            ) {
-                if (onOpenDrawer != null) {
-                    IconButton(
-                        onClick = onOpenDrawer,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Menu,
-                            contentDescription = "Menü",
-                            tint = colors.primaryText
-                        )
-                    }
-                }
+        val isWide = maxWidth >= WIDE_LAYOUT_MIN_WIDTH_DP.dp
 
-                Text(
-                    text = "Kelime Havuzu",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.primaryText
-                )
-
-                Text(
-                    text = "${store.cards.size} kelime",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.accentBlue,
-                    modifier = Modifier
-                        .background(colors.accentBlue.copy(alpha = 0.15f), CircleShape)
-                        .padding(horizontal = 9.dp, vertical = 3.dp)
-                )
-
-                Button(
-                    onClick = { showAIGenerator = true },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.accentPurple,
-                        contentColor = Color.White
-                    ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text("AI Kelime Üret", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
-
-                Button(
-                    onClick = { importCsvLauncher.launch(arrayOf("text/*", "application/csv", "*/*")) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.accentBlue,
-                        contentColor = Color.White
-                    ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text("CSV İçe Aktar", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
-
-                OutlinedButton(
-                    onClick = { exportCsvLauncher.launch("almanca_kelimeler.csv") },
-                    enabled = store.cards.isNotEmpty(),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, colors.cardBorderSubtle),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.FileDownload,
-                        contentDescription = null,
-                        tint = colors.primaryText,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text("CSV Dışa Aktar", fontSize = 12.sp, color = colors.primaryText)
-                }
-            }
-
-            // Row 2: Quick manual word entry bar
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Column(modifier = Modifier.fillMaxSize()) {
+            // ------------------------------------------------------------------ Header
+            Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                // Segmented Artikel Picker
-                Row(
-                    modifier = Modifier
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(colors.textBackground)
-                        .border(1.dp, colors.cardBorderSubtle, RoundedCornerShape(8.dp))
-                ) {
-                    Artikel.entries.forEach { art ->
-                        val isSelected = newArtikel == art
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .height(36.dp)
-                                .padding(2.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (isSelected) art.color else Color.Transparent)
-                                .clickable { newArtikel = art }
-                                .padding(horizontal = 12.dp)
-                        ) {
-                            Text(
-                                text = art.rawValue,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSelected) Color.White else colors.primaryText
-                            )
-                        }
-                    }
-                }
-
-                // German Word Input
-                CompactTextField(
-                    value = newWord,
-                    onValueChange = { newWord = it },
-                    placeholder = "Almanca kelime (örn: Tisch)",
-                    modifier = Modifier
-                        .widthIn(min = 140.dp)
-                        .weight(1f)
-                )
-
-                // Turkish Meaning Input
-                CompactTextField(
-                    value = newMeaning,
-                    onValueChange = { newMeaning = it },
-                    placeholder = "Türkçe anlamı / açıklama",
-                    modifier = Modifier
-                        .widthIn(min = 140.dp)
-                        .weight(1f)
-                )
-
-                // Deck Selector Menu for New Word
-                Box {
-                    Surface(
-                        color = colors.textBackground,
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, colors.cardBorderSubtle),
-                        modifier = Modifier
-                            .height(36.dp)
-                            .clickable { showNewWordDeckMenu = true }
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Folder,
-                                contentDescription = null,
-                                tint = colors.accentBlue,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = newDeckName,
-                                fontSize = 12.sp,
-                                color = colors.primaryText,
-                                maxLines = 1
-                            )
-                        }
-                    }
-
-                    DropdownMenu(
-                        expanded = showNewWordDeckMenu,
-                        onDismissRequest = { showNewWordDeckMenu = false }
-                    ) {
-                        store.allDeckNames.forEach { deck ->
-                            DropdownMenuItem(
-                                text = { Text(deck) },
-                                trailingIcon = {
-                                    if (newDeckName == deck) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
-                                    }
-                                },
-                                onClick = {
-                                    newDeckName = deck
-                                    showNewWordDeckMenu = false
-                                }
-                            )
-                        }
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("Yeni Deste Ekle...") },
-                            leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
-                            onClick = {
-                                showNewWordDeckMenu = false
-                                showNewDeckSheet = true
-                            }
-                        )
-                    }
-                }
-
-                // Add Button
-                Button(
-                    onClick = {
-                        if (store.addCard(newArtikel, newWord, newMeaning, newDeckName)) {
-                            newWord = ""
-                            newMeaning = ""
-                        }
-                    },
-                    enabled = newWord.trim().isNotEmpty(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.accentBlue,
-                        contentColor = Color.White
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Ekle", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            // Row 3: Decks Bar with "+ Yeni Deste Ekle" button right alongside decks
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
+                    .background(colors.controlBackground)
+                    .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 10.dp)
             ) {
-                DeckFilterChip(
-                    title = "Tüm Desteler",
-                    count = store.cards.size,
-                    isSelected = selectedDeckFilter == null,
-                    onClick = { selectedDeckFilter = null }
+                WordPoolTitleRow(
+                    totalCount = visibleTotal,
+                    filteredCount = filteredCards.size,
+                    isFiltered = hasActiveFilters,
+                    isWide = isWide,
+                    canExport = store.cards.isNotEmpty(),
+                    selectedDeck = selectedDeckFilter,
+                    onOpenDrawer = onOpenDrawer,
+                    onAiGenerate = { showAIGenerator = true },
+                    onImport = launchImport,
+                    onExport = launchExport,
+                    onNewDeck = { showNewDeckSheet = true },
+                    onRenameDeck = { deckToRename = it },
+                    onDeleteDeck = { deck ->
+                        store.deleteDeck(name = deck, deleteWords = false)
+                        if (selectedDeckFilter == deck) selectedDeckFilter = null
+                    }
                 )
 
-                store.allDeckNames.forEach { deck ->
-                    var showChipMenu by remember { mutableStateOf(false) }
-                    Box {
-                        DeckFilterChip(
-                            title = deck,
-                            count = store.cardCount(deck),
-                            isSelected = selectedDeckFilter == deck,
-                            onClick = {
-                                selectedDeckFilter = deck
-                                newDeckName = deck
-                            },
-                            onLongClick = { showChipMenu = true }
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                ) {
+                    if (isWide) {
+                        QuickAddInlineBar(
+                            store = store,
+                            artikel = newArtikel,
+                            onArtikelChange = { newArtikel = it },
+                            word = newWord,
+                            onWordChange = { newWord = it },
+                            meaning = newMeaning,
+                            onMeaningChange = { newMeaning = it },
+                            deckName = newDeckName,
+                            onDeckChange = { newDeckName = it },
+                            onNewDeck = { showNewDeckSheet = true },
+                            onSubmit = { submitQuickAdd() }
                         )
-
-                        DropdownMenu(
-                            expanded = showChipMenu,
-                            onDismissRequest = { showChipMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Deste Adını Değiştir...") },
-                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                onClick = {
-                                    showChipMenu = false
-                                    deckToRename = deck
-                                }
-                            )
-                            if (deck != "Genel") {
-                                DropdownMenuItem(
-                                    text = { Text("Desteyi Sil (Kelimeleri 'Genel'e Taşı)", color = colors.vividRed) },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Delete, contentDescription = null, tint = colors.vividRed)
-                                    },
-                                    onClick = {
-                                        showChipMenu = false
-                                        store.deleteDeck(name = deck, deleteWords = false)
-                                        if (selectedDeckFilter == deck) {
-                                            selectedDeckFilter = null
-                                        }
-                                    }
-                                )
-                            }
-                        }
                     }
-                }
 
-                // "+ Yeni Deste Ekle" Pill
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(colors.accentBlue.copy(alpha = 0.15f))
-                        .border(1.dp, colors.accentBlue.copy(alpha = 0.35f), CircleShape)
-                        .clickable { showNewDeckSheet = true }
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AddCircle,
-                        contentDescription = null,
-                        tint = colors.accentBlue,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Yeni Deste Ekle",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.accentBlue
-                    )
-                }
-            }
-
-            // Row 4: Search & Artikel / Stage Filters
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                // Search Bar
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(colors.textBackground)
-                        .border(1.dp, colors.cardBorderSubtle, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Box(modifier = Modifier.weight(1f)) {
-                        if (searchText.isEmpty()) {
-                            Text(
-                                text = "Kelime, anlam veya deste ara...",
-                                fontSize = 12.sp,
-                                color = colors.secondaryText.copy(alpha = 0.6f),
-                                maxLines = 1
-                            )
-                        }
-                        BasicTextField(
+                    // Search + stage filter
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        SearchField(
                             value = searchText,
                             onValueChange = { searchText = it },
-                            singleLine = true,
-                            textStyle = TextStyle(
-                                fontSize = 12.sp,
-                                color = colors.primaryText
-                            ),
-                            cursorBrush = SolidColor(colors.accentBlue),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.weight(1f)
+                        )
+                        StageFilterButton(
+                            selected = selectedStageFilter,
+                            onSelect = { selectedStageFilter = it }
                         )
                     }
-                    if (searchText.isNotEmpty()) {
-                        Icon(
-                            imageVector = Icons.Default.Cancel,
-                            contentDescription = "Temizle",
-                            tint = colors.secondaryText,
-                            modifier = Modifier
-                                .size(15.dp)
-                                .clickable { searchText = "" }
-                        )
-                    }
-                }
 
-                // Artikel Filter Dropdown
-                Box {
-                    Surface(
-                        color = colors.textBackground,
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                    // Article filter: Tümü / der / die / das (/ '-')
+                    ArtikelFilterSegments(
+                        selectedKey = artikelFilterKey,
+                        onSelect = { artikelFilterKey = it },
                         modifier = Modifier
-                            .height(34.dp)
-                            .clickable { showArtikelFilterMenu = true }
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.padding(horizontal = 10.dp)
-                        ) {
-                            Text(
-                                text = selectedArtikelFilter?.rawValue ?: "Tüm Artikeller",
-                                fontSize = 12.sp,
-                                color = colors.primaryText
-                            )
-                        }
-                    }
-
-                    DropdownMenu(
-                        expanded = showArtikelFilterMenu,
-                        onDismissRequest = { showArtikelFilterMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Tüm Artikeller") },
-                            onClick = {
-                                selectedArtikelFilter = null
-                                showArtikelFilterMenu = false
-                            }
-                        )
-                        Artikel.entries.forEach { art ->
-                            DropdownMenuItem(
-                                text = { Text(art.rawValue) },
-                                onClick = {
-                                    selectedArtikelFilter = art
-                                    showArtikelFilterMenu = false
-                                }
-                            )
-                        }
-                    }
+                            .fillMaxWidth()
+                            .then(if (isWide) Modifier.widthIn(max = 520.dp) else Modifier)
+                    )
                 }
 
-                // Stage Filter Dropdown
-                Box {
-                    Surface(
-                        color = colors.textBackground,
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, colors.cardBorderSubtle),
-                        modifier = Modifier
-                            .height(34.dp)
-                            .clickable { showStageFilterMenu = true }
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.padding(horizontal = 10.dp)
-                        ) {
-                            Text(
-                                text = selectedStageFilter?.title ?: "Tüm Durumlar",
-                                fontSize = 12.sp,
-                                color = colors.primaryText
-                            )
-                        }
+                // Deck filter chips — "Yeni deste" is the leading item, so it's always visible.
+                DeckChipRow(
+                    store = store,
+                    selectedDeck = selectedDeckFilter,
+                    onSelectDeck = { deck ->
+                        selectedDeckFilter = deck
+                        if (deck != null) newDeckName = deck
+                    },
+                    onNewDeck = { showNewDeckSheet = true },
+                    onRenameDeck = { deckToRename = it },
+                    onDeleteDeck = { deck ->
+                        store.deleteDeck(name = deck, deleteWords = false)
+                        if (selectedDeckFilter == deck) selectedDeckFilter = null
                     }
-
-                    DropdownMenu(
-                        expanded = showStageFilterMenu,
-                        onDismissRequest = { showStageFilterMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Tüm Durumlar") },
-                            onClick = {
-                                selectedStageFilter = null
-                                showStageFilterMenu = false
-                            }
-                        )
-                        CardStage.entries.forEach { stg ->
-                            DropdownMenuItem(
-                                text = { Text(stg.title) },
-                                onClick = {
-                                    selectedStageFilter = stg
-                                    showStageFilterMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        HorizontalDivider(color = colors.cardBorderSubtle)
-
-        // Word Table List
-        if (filteredCards.isEmpty()) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Inbox,
-                    contentDescription = null,
-                    tint = colors.secondaryText,
-                    modifier = Modifier.size(42.dp)
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-                if (selectedDeckFilter != null) {
-                    Text(
-                        text = "'$selectedDeckFilter' destesinde henüz kelime yok.",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.secondaryText
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Yukarıdaki ekleme çubuğundan veya Gemini AI ile bu desteye yeni kelimeler ekleyebilirsiniz.",
-                        fontSize = 12.sp,
-                        color = colors.secondaryText
-                    )
-                } else {
-                    Text(
-                        text = if (store.cards.isEmpty()) "Henüz kayıtlı kelime yok."
-                        else "Arama kriterlerine uygun kelime bulunamadı.",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.secondaryText
-                    )
-                }
             }
-        } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(filteredCards, key = { _, card -> card.id }) { index, card ->
-                    WordRowItem(
-                        card = card,
-                        index = index,
-                        dueText = dueDescription(card, store.currentTime),
-                        onSpeak = { SpeechManager.speak(card.fullGermanTerm) },
-                        onEdit = { editingCard = card },
-                        onDelete = { store.deleteCard(card.id) }
-                    )
-                    HorizontalDivider(color = colors.cardBorderSubtle.copy(alpha = 0.4f))
+
+            HorizontalDivider(color = colors.cardBorderSubtle)
+
+            // ------------------------------------------------------------------ Content
+            if (filteredCards.isEmpty()) {
+                val emptyModifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = if (isWide) 0.dp else 72.dp)
+                Box(contentAlignment = Alignment.Center, modifier = emptyModifier) {
+                    when {
+                        visibleTotal == 0 -> StateMessageView(
+                            icon = Icons.Default.Inbox,
+                            title = stringResource(R.string.words_empty_title),
+                            message = stringResource(R.string.words_empty_message),
+                            primaryActionLabel = stringResource(R.string.words_ai_generate),
+                            primaryActionIcon = Icons.Default.AutoAwesome,
+                            onPrimaryAction = { showAIGenerator = true },
+                            secondaryActionLabel = stringResource(R.string.words_csv_import),
+                            onSecondaryAction = launchImport
+                        )
+                        selectedDeckFilter != null && searchText.isBlank() &&
+                            artikelFilterKey == FILTER_ALL && selectedStageFilter == null -> StateMessageView(
+                            icon = Icons.Default.Folder,
+                            title = stringResource(R.string.words_empty_deck_title, selectedDeckFilter ?: ""),
+                            message = stringResource(R.string.words_empty_deck_message),
+                            primaryActionLabel = stringResource(R.string.words_add_word),
+                            primaryActionIcon = Icons.Default.Add,
+                            onPrimaryAction = { showAddDialog = true },
+                            secondaryActionLabel = stringResource(R.string.words_ai_generate),
+                            onSecondaryAction = { showAIGenerator = true }
+                        )
+                        else -> StateMessageView(
+                            icon = Icons.Default.SearchOff,
+                            title = stringResource(R.string.words_no_results_title),
+                            message = stringResource(R.string.words_no_results_message),
+                            primaryActionLabel = stringResource(R.string.words_clear_filters),
+                            onPrimaryAction = {
+                                searchText = ""
+                                artikelFilterKey = FILTER_ALL
+                                selectedStageFilter = null
+                                selectedDeckFilter = null
+                            }
+                        )
+                    }
+                }
+            } else {
+                val resources = context.resources
+                LazyColumn(
+                    contentPadding = PaddingValues(bottom = if (isWide) 16.dp else 96.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    itemsIndexed(filteredCards, key = { _, card -> card.id }) { index, card ->
+                        WordRowItem(
+                            card = card,
+                            index = index,
+                            dueText = dueDescription(resources, card, store.currentTime),
+                            onSpeak = { SpeechManager.speak(card.fullGermanTerm) },
+                            onEdit = { editingCard = card },
+                            onDelete = { requestDelete(card) }
+                        )
+                        HorizontalDivider(color = colors.cardBorderSubtle.copy(alpha = 0.4f))
+                    }
                 }
             }
         }
+
+        if (!isWide) {
+            ExtendedFloatingActionButton(
+                onClick = { showAddDialog = true },
+                icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                text = { Text(stringResource(R.string.words_add_word)) },
+                containerColor = colors.accentBlue,
+                contentColor = colors.onAccent,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            )
+        }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (isWide) 8.dp else 80.dp)
+                .widthIn(max = 560.dp)
+        )
+    }
+
+    // ---------------------------------------------------------------------- Dialogs
+    if (showAddDialog) {
+        AddWordDialog(
+            store = store,
+            artikel = newArtikel,
+            onArtikelChange = { newArtikel = it },
+            word = newWord,
+            onWordChange = { newWord = it },
+            meaning = newMeaning,
+            onMeaningChange = { newMeaning = it },
+            deckName = newDeckName,
+            onDeckChange = { newDeckName = it },
+            onNewDeck = { showNewDeckSheet = true },
+            onSubmit = { submitQuickAdd() },
+            onDismiss = { showAddDialog = false }
+        )
     }
 
     if (showAIGenerator) {
@@ -730,7 +517,11 @@ fun WordListView(
         EditWordDialog(
             store = store,
             card = cardToEdit,
-            onDismiss = { editingCard = null }
+            onDismiss = { editingCard = null },
+            onDelete = {
+                editingCard = null
+                requestDelete(cardToEdit)
+            }
         )
     }
 
@@ -759,21 +550,790 @@ fun WordListView(
         )
     }
 
-    if (showAlert) {
+    alertMessage?.let { message ->
         AlertDialog(
-            onDismissRequest = { showAlert = false },
-            title = { Text("Bilgi", fontWeight = FontWeight.Bold) },
-            text = { Text(alertMessage ?: "") },
+            onDismissRequest = { alertMessage = null },
+            title = { Text(stringResource(R.string.dialog_info_title)) },
+            text = { Text(message, style = MaterialTheme.typography.bodyMedium) },
             confirmButton = {
-                TextButton(onClick = { showAlert = false }) {
-                    Text("Tamam")
+                TextButton(onClick = { alertMessage = null }) {
+                    Text(stringResource(R.string.action_ok))
                 }
             }
         )
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+// =====================================================================================
+// Header pieces
+// =====================================================================================
+
+@Composable
+private fun WordPoolTitleRow(
+    totalCount: Int,
+    filteredCount: Int,
+    isFiltered: Boolean,
+    isWide: Boolean,
+    canExport: Boolean,
+    selectedDeck: String?,
+    onOpenDrawer: (() -> Unit)?,
+    onAiGenerate: () -> Unit,
+    onImport: () -> Unit,
+    onExport: () -> Unit,
+    onNewDeck: () -> Unit,
+    onRenameDeck: (String) -> Unit,
+    onDeleteDeck: (String) -> Unit
+) {
+    val colors = LocalAppColors.current
+    var showOverflow by remember { mutableStateOf(false) }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+    ) {
+        if (onOpenDrawer != null) {
+            IconButton(onClick = onOpenDrawer) {
+                Icon(
+                    imageVector = Icons.Default.Menu,
+                    contentDescription = stringResource(R.string.action_open_menu),
+                    tint = colors.primaryText
+                )
+            }
+        } else {
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.words_title),
+                style = MaterialTheme.typography.titleLarge,
+                color = colors.primaryText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.semantics { heading() }
+            )
+            Text(
+                text = if (isFiltered) {
+                    stringResource(R.string.words_count_filtered, filteredCount, totalCount)
+                } else {
+                    stringResource(R.string.words_count, totalCount)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.secondaryText,
+                maxLines = 1
+            )
+        }
+
+        // Primary action (always visible): AI generation.
+        Button(
+            onClick = onAiGenerate,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = colors.accentPurple,
+                contentColor = colors.onAccent
+            ),
+            contentPadding = PaddingValues(start = 12.dp, end = 14.dp),
+            modifier = Modifier.padding(start = 8.dp)
+        ) {
+            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = stringResource(if (isWide) R.string.words_ai_generate else R.string.words_ai_generate_short),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        if (isWide) {
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(onClick = onImport) {
+                Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(stringResource(R.string.words_csv_import), style = MaterialTheme.typography.labelLarge)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(onClick = onExport, enabled = canExport) {
+                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(stringResource(R.string.words_csv_export), style = MaterialTheme.typography.labelLarge)
+            }
+        }
+
+        // Overflow: everything else, so nothing requires horizontal scrolling on a phone.
+        Box {
+            IconButton(onClick = { showOverflow = true }) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = stringResource(R.string.action_more_options),
+                    tint = colors.primaryText
+                )
+            }
+            DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
+                if (!isWide) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.words_csv_import)) },
+                        leadingIcon = { Icon(Icons.Default.FileUpload, contentDescription = null) },
+                        onClick = { showOverflow = false; onImport() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.words_csv_export)) },
+                        leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null) },
+                        enabled = canExport,
+                        onClick = { showOverflow = false; onExport() }
+                    )
+                    HorizontalDivider()
+                }
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.words_new_deck_ellipsis)) },
+                    leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
+                    onClick = { showOverflow = false; onNewDeck() }
+                )
+                if (selectedDeck != null) {
+                    DeckActionMenuItems(
+                        deck = selectedDeck,
+                        onRename = { showOverflow = false; onRenameDeck(selectedDeck) },
+                        onDelete = { showOverflow = false; onDeleteDeck(selectedDeck) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeckActionMenuItems(
+    deck: String,
+    onRename: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val colors = LocalAppColors.current
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.words_rename_deck)) },
+        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+        onClick = onRename
+    )
+    if (deck != "Genel") {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.words_delete_deck), color = colors.error) },
+            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = colors.error) },
+            onClick = onDelete
+        )
+    }
+}
+
+@Composable
+private fun SearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalAppColors.current
+    val hint = stringResource(R.string.words_search_hint)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.textBackground)
+            .border(1.dp, colors.cardBorderSubtle, RoundedCornerShape(12.dp))
+            .padding(start = 12.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Search,
+            contentDescription = null,
+            tint = colors.secondaryText,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Box(
+            contentAlignment = Alignment.CenterStart,
+            modifier = Modifier.weight(1f)
+        ) {
+            if (value.isEmpty()) {
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.secondaryText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
+                cursorBrush = SolidColor(colors.accentBlue),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = hint }
+            )
+        }
+        if (value.isNotEmpty()) {
+            IconButton(onClick = { onValueChange("") }) {
+                Icon(
+                    imageVector = Icons.Default.Cancel,
+                    contentDescription = stringResource(R.string.words_search_clear),
+                    tint = colors.secondaryText,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        } else {
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun StageFilterButton(
+    selected: CardStage?,
+    onSelect: (CardStage?) -> Unit
+) {
+    val colors = LocalAppColors.current
+    var expanded by remember { mutableStateOf(false) }
+    val a11yLabel = stringResource(R.string.words_filter_stage)
+    val a11yState = selected?.let { stringResource(R.string.words_filter_stage_active, it.title) }
+        ?: stringResource(R.string.words_filter_all_stages)
+
+    Box {
+        IconButton(
+            onClick = { expanded = true },
+            modifier = Modifier.semantics { stateDescription = a11yState }
+        ) {
+            BadgedBox(badge = { if (selected != null) Badge(containerColor = colors.accentBlue) }) {
+                Icon(
+                    imageVector = Icons.Default.FilterList,
+                    contentDescription = a11yLabel,
+                    tint = if (selected != null) colors.accentBlue else colors.primaryText
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.words_filter_all_stages)) },
+                trailingIcon = { if (selected == null) Icon(Icons.Default.Check, contentDescription = null) },
+                onClick = { onSelect(null); expanded = false }
+            )
+            CardStage.entries.forEach { stage ->
+                DropdownMenuItem(
+                    text = { Text(stage.title) },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .background(stage.color, CircleShape)
+                        )
+                    },
+                    trailingIcon = { if (selected == stage) Icon(Icons.Default.Check, contentDescription = null) },
+                    onClick = { onSelect(stage); expanded = false }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Segmented filter: Tümü / der / die / das, plus a reserved '-' segment for article-less words.
+ * Uses equal-weight segments so 5 options still fit a 360dp phone without scrolling.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ArtikelFilterSegments(
+    selectedKey: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalAppColors.current
+    data class Option(val key: String, val label: String, val a11y: String, val color: Color)
+
+    val options = buildList {
+        add(Option(FILTER_ALL, stringResource(R.string.words_filter_all), stringResource(R.string.words_filter_all), colors.accentBlue))
+        Artikel.entries.forEach { art ->
+            add(Option(art.rawValue, art.rawValue, art.rawValue, art.themeColor()))
+        }
+        // TODO(CONTRACT.md): 4th article group ('-') — enable via SHOW_NO_ARTICLE_FILTER.
+        if (SHOW_NO_ARTICLE_FILTER) {
+            add(
+                Option(
+                    FILTER_NO_ARTICLE,
+                    stringResource(R.string.words_filter_no_article),
+                    stringResource(R.string.words_filter_no_article_a11y),
+                    colors.artikelNone
+                )
+            )
+        }
+    }
+    val groupLabel = stringResource(R.string.words_filter_artikel_a11y)
+
+    SingleChoiceSegmentedButtonRow(
+        modifier = modifier.semantics { contentDescription = groupLabel }
+    ) {
+        options.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = selectedKey == option.key,
+                onClick = { onSelect(option.key) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                icon = {},
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = option.color.copy(alpha = 0.18f),
+                    activeContentColor = option.color,
+                    activeBorderColor = colors.cardBorderSubtle,
+                    inactiveContainerColor = colors.textBackground,
+                    inactiveContentColor = colors.primaryText,
+                    inactiveBorderColor = colors.cardBorderSubtle
+                ),
+                modifier = Modifier.semantics { contentDescription = option.a11y }
+            ) {
+                Text(
+                    text = option.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeckChipRow(
+    store: DeckStore,
+    selectedDeck: String?,
+    onSelectDeck: (String?) -> Unit,
+    onNewDeck: () -> Unit,
+    onRenameDeck: (String) -> Unit,
+    onDeleteDeck: (String) -> Unit
+) {
+    val colors = LocalAppColors.current
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        item(key = "__new_deck") {
+            FilterChip(
+                selected = false,
+                onClick = onNewDeck,
+                label = { Text(stringResource(R.string.words_new_deck), style = MaterialTheme.typography.labelMedium) },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        tint = colors.accentBlue,
+                        modifier = Modifier.size(FilterChipDefaults.IconSize)
+                    )
+                },
+                border = BorderStroke(1.dp, colors.accentBlue.copy(alpha = 0.45f)),
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = colors.accentBlue.copy(alpha = 0.10f),
+                    labelColor = colors.accentBlue
+                )
+            )
+        }
+        item(key = "__all_decks") {
+            DeckChip(
+                title = stringResource(R.string.words_all_decks),
+                count = store.cards.size,
+                isSelected = selectedDeck == null,
+                onClick = { onSelectDeck(null) }
+            )
+        }
+        items(store.allDeckNames, key = { it }) { deck ->
+            var showMenu by remember { mutableStateOf(false) }
+            val isSelected = selectedDeck == deck
+            Box {
+                DeckChip(
+                    title = deck,
+                    count = store.cardCount(deck),
+                    isSelected = isSelected,
+                    showMenuAffordance = isSelected,
+                    // Tapping the already-selected deck opens its actions (discoverable via ▾).
+                    onClick = { if (isSelected) showMenu = true else onSelectDeck(deck) }
+                )
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DeckActionMenuItems(
+                        deck = deck,
+                        onRename = { showMenu = false; onRenameDeck(deck) },
+                        onDelete = { showMenu = false; onDeleteDeck(deck) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeckChip(
+    title: String,
+    count: Int,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    showMenuAffordance: Boolean = false
+) {
+    val colors = LocalAppColors.current
+    val a11y = stringResource(R.string.words_deck_chip_a11y, title, count)
+    val menuHint = if (showMenuAffordance) stringResource(R.string.words_deck_options, title) else null
+    FilterChip(
+        selected = isSelected,
+        onClick = onClick,
+        label = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 160.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "$count",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .background(
+                        if (isSelected) colors.onAccent.copy(alpha = 0.22f) else colors.secondaryText.copy(alpha = 0.15f),
+                        CircleShape
+                    )
+                    .padding(horizontal = 6.dp)
+            )
+        },
+        trailingIcon = if (showMenuAffordance) {
+            {
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(FilterChipDefaults.IconSize)
+                )
+            }
+        } else null,
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = colors.textBackground,
+            labelColor = colors.primaryText,
+            iconColor = colors.secondaryText,
+            selectedContainerColor = colors.accentBlue,
+            selectedLabelColor = colors.onAccent,
+            selectedTrailingIconColor = colors.onAccent,
+            selectedLeadingIconColor = colors.onAccent
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = isSelected,
+            borderColor = colors.cardBorderSubtle,
+            selectedBorderColor = colors.accentBlue
+        ),
+        modifier = Modifier.semantics {
+            contentDescription = if (menuHint != null) "$a11y. $menuHint" else a11y
+        }
+    )
+}
+
+// =====================================================================================
+// Quick add (inline on wide screens, dialog on phones)
+// =====================================================================================
+
+/** Segmented der/die/das picker for creating/editing a word. Room reserved for a 4th '-' option. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ArtikelPicker(
+    selected: Artikel,
+    onSelect: (Artikel) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalAppColors.current
+    // TODO(CONTRACT.md): add the article-less ('-') option here once the model supports it.
+    val options = Artikel.entries
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        options.forEachIndexed { index, art ->
+            val artColor = art.themeColor()
+            SegmentedButton(
+                selected = selected == art,
+                onClick = { onSelect(art) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                icon = {},
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = artColor,
+                    activeContentColor = colors.onAccent,
+                    activeBorderColor = artColor,
+                    inactiveContainerColor = colors.textBackground,
+                    inactiveContentColor = artColor,
+                    inactiveBorderColor = colors.cardBorderSubtle
+                )
+            ) {
+                Text(
+                    text = art.rawValue,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeckSelector(
+    store: DeckStore,
+    deckName: String,
+    onDeckChange: (String) -> Unit,
+    onNewDeck: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalAppColors.current
+    var expanded by remember { mutableStateOf(false) }
+    val label = stringResource(R.string.words_deck_label)
+    Box(modifier = modifier) {
+        Surface(
+            color = colors.textBackground,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, colors.cardBorderSubtle),
+            onClick = { expanded = true },
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .semantics { contentDescription = "$label: $deckName" }
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Folder,
+                    contentDescription = null,
+                    tint = colors.accentBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = deckName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    tint = colors.secondaryText
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            store.allDeckNames.forEach { deck ->
+                DropdownMenuItem(
+                    text = { Text(deck) },
+                    trailingIcon = { if (deckName == deck) Icon(Icons.Default.Check, contentDescription = null) },
+                    onClick = { onDeckChange(deck); expanded = false }
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.words_new_deck_ellipsis)) },
+                leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
+                onClick = { expanded = false; onNewDeck() }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun QuickAddInlineBar(
+    store: DeckStore,
+    artikel: Artikel,
+    onArtikelChange: (Artikel) -> Unit,
+    word: String,
+    onWordChange: (String) -> Unit,
+    meaning: String,
+    onMeaningChange: (String) -> Unit,
+    deckName: String,
+    onDeckChange: (String) -> Unit,
+    onNewDeck: () -> Unit,
+    onSubmit: () -> Boolean?
+) {
+    val colors = LocalAppColors.current
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        ArtikelPicker(
+            selected = artikel,
+            onSelect = onArtikelChange,
+            modifier = Modifier.width(210.dp)
+        )
+        CompactTextField(
+            value = word,
+            onValueChange = onWordChange,
+            placeholder = stringResource(R.string.words_german_word_hint),
+            imeAction = ImeAction.Next,
+            modifier = Modifier
+                .widthIn(min = 160.dp)
+                .weight(1f)
+        )
+        CompactTextField(
+            value = meaning,
+            onValueChange = onMeaningChange,
+            placeholder = stringResource(R.string.words_meaning_hint),
+            imeAction = ImeAction.Done,
+            onImeAction = { onSubmit() },
+            modifier = Modifier
+                .widthIn(min = 160.dp)
+                .weight(1f)
+        )
+        DeckSelector(
+            store = store,
+            deckName = deckName,
+            onDeckChange = onDeckChange,
+            onNewDeck = onNewDeck,
+            modifier = Modifier.widthIn(max = 200.dp)
+        )
+        Button(
+            onClick = { onSubmit() },
+            enabled = word.trim().isNotEmpty(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = colors.accentBlue,
+                contentColor = colors.onAccent
+            ),
+            modifier = Modifier.height(48.dp)
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(stringResource(R.string.words_add), style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+@Composable
+private fun AddWordDialog(
+    store: DeckStore,
+    artikel: Artikel,
+    onArtikelChange: (Artikel) -> Unit,
+    word: String,
+    onWordChange: (String) -> Unit,
+    meaning: String,
+    onMeaningChange: (String) -> Unit,
+    deckName: String,
+    onDeckChange: (String) -> Unit,
+    onNewDeck: () -> Unit,
+    onSubmit: () -> Boolean?,
+    onDismiss: () -> Unit
+) {
+    val colors = LocalAppColors.current
+    var feedback by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    val addedTemplate = stringResource(R.string.words_added_feedback, "%s")
+    val duplicateTemplate = stringResource(R.string.words_duplicate_feedback, "%s")
+
+    fun submit() {
+        val term = "${artikel.rawValue} ${word.trim()}"
+        when (onSubmit()) {
+            true -> feedback = addedTemplate.replace("%s", term) to true
+            false -> feedback = duplicateTemplate.replace("%s", term) to false
+            null -> Unit
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            color = colors.controlBackground,
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, colors.cardBorderSubtle),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(20.dp)
+            ) {
+                DialogHeader(
+                    icon = Icons.Default.Add,
+                    title = stringResource(R.string.words_add_word),
+                    onClose = onDismiss
+                )
+
+                ArtikelPicker(
+                    selected = artikel,
+                    onSelect = onArtikelChange,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = word,
+                    onValueChange = { onWordChange(it); feedback = null },
+                    label = { Text(stringResource(R.string.words_german_word_label)) },
+                    placeholder = { Text(stringResource(R.string.words_german_word_hint)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = meaning,
+                    onValueChange = onMeaningChange,
+                    label = { Text(stringResource(R.string.words_meaning_hint)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submit() }),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                DeckSelector(
+                    store = store,
+                    deckName = deckName,
+                    onDeckChange = onDeckChange,
+                    onNewDeck = onNewDeck,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                AnimatedVisibility(visible = feedback != null, enter = fadeIn(), exit = fadeOut()) {
+                    val (text, ok) = feedback ?: ("" to true)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Inbox,
+                            contentDescription = null,
+                            tint = if (ok) colors.success else colors.warning,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (ok) colors.success else colors.warning
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_close))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { submit() },
+                        enabled = word.trim().isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.accentBlue,
+                            contentColor = colors.onAccent
+                        )
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(stringResource(R.string.words_add))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =====================================================================================
+// Word row
+// =====================================================================================
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun WordRowItem(
     card: Flashcard,
@@ -784,151 +1344,199 @@ private fun WordRowItem(
     onDelete: () -> Unit
 ) {
     val colors = LocalAppColors.current
-    val bg = if (index % 2 == 0) Color.Transparent else colors.primaryText.copy(alpha = 0.035f)
+    // Opaque row background so the red swipe-to-delete layer never shows through.
+    val bg = if (index % 2 == 0) {
+        colors.windowBackground
+    } else {
+        colors.primaryText.copy(alpha = 0.035f).compositeOver(colors.windowBackground)
+    }
+    var showMenu by remember { mutableStateOf(false) }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(bg)
-            .combinedClickable(
-                onClick = {},
-                onDoubleClick = onEdit
-            )
-            .padding(horizontal = 14.dp, vertical = 10.dp)
-    ) {
-        // Artikel Badge
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .width(44.dp)
-                .background(card.artikel.badgeBackground, RoundedCornerShape(6.dp))
-                .padding(vertical = 5.dp)
-        ) {
-            Text(
-                text = card.artikel.rawValue,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = card.artikel.color
-            )
-        }
+    val speakLabel = stringResource(R.string.words_row_speak)
+    val editLabel = stringResource(R.string.words_row_edit)
+    val deleteLabel = stringResource(R.string.words_row_delete)
 
-        // Word, Meaning & Metadata Badges
-        Column(
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            Text(
-                text = card.word,
-                fontSize = if (card.word.length > 18) 14.sp else 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = colors.primaryText,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (card.meaning.isNotEmpty()) {
-                Text(
-                    text = card.meaning,
-                    fontSize = 12.sp,
-                    color = colors.secondaryText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete()
+                true
+            } else {
+                false
             }
+        }
+    )
 
-            // Compact Metadata Sub-row: Deck Tag, Stage Badge, Due Description
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(colors.error)
+                    .padding(horizontal = 24.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .background(colors.secondaryText.copy(alpha = 0.12f), CircleShape)
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Folder,
-                        contentDescription = null,
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(10.dp)
+                Text(
+                    text = deleteLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.onAccent
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(Icons.Default.Delete, contentDescription = null, tint = colors.onAccent)
+            }
+        }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(bg)
+                .clickable(onClickLabel = editLabel, onClick = onEdit)
+                .semantics {
+                    customActions = listOf(
+                        CustomAccessibilityAction(speakLabel) { onSpeak(); true },
+                        CustomAccessibilityAction(editLabel) { onEdit(); true },
+                        CustomAccessibilityAction(deleteLabel) { onDelete(); true }
                     )
-                    Spacer(modifier = Modifier.width(3.dp))
+                }
+                .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp)
+        ) {
+            ArtikelBadge(card.artikel)
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = card.word,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.primaryText,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (card.meaning.isNotEmpty()) {
                     Text(
-                        text = card.deckName,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
+                        text = card.meaning,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = colors.secondaryText,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-
-                Text(
-                    text = card.stage.title,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = card.stage.color,
-                    modifier = Modifier
-                        .background(card.stage.color.copy(alpha = 0.14f), CircleShape)
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                )
-
-                Text(
-                    text = dueText,
-                    fontSize = 10.sp,
-                    color = colors.secondaryText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-
-        // Action Buttons: Speak, Edit, Delete
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            IconButton(onClick = onSpeak, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    imageVector = Icons.Default.VolumeUp,
-                    contentDescription = "Seslendir",
-                    tint = colors.primaryText,
-                    modifier = Modifier.size(17.dp)
-                )
+                // Metadata wraps instead of overflowing on narrow phones.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    MetaPill(text = card.deckName, color = colors.secondaryText, icon = true)
+                    MetaPill(text = card.stage.title, color = card.stage.color)
+                    Text(
+                        text = dueText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.secondaryText,
+                        maxLines = 1,
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    )
+                }
             }
 
-            IconButton(onClick = onEdit, modifier = Modifier.size(30.dp)) {
+            IconButton(onClick = onSpeak) {
                 Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "Kelimeyi Düzenle",
+                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = stringResource(R.string.words_row_speak_a11y, card.fullGermanTerm),
                     tint = colors.accentBlue,
-                    modifier = Modifier.size(17.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
-            IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Kelimeyi Sil",
-                    tint = colors.vividRed.copy(alpha = 0.85f),
-                    modifier = Modifier.size(17.dp)
-                )
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = stringResource(R.string.words_row_options_a11y, card.fullGermanTerm),
+                        tint = colors.secondaryText
+                    )
+                }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text(editLabel) },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = { showMenu = false; onEdit() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(deleteLabel, color = colors.error) },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = colors.error) },
+                        onClick = { showMenu = false; onDelete() }
+                    )
+                }
             }
         }
     }
 }
 
-private fun dueDescription(card: Flashcard, nowMillis: Long): String {
-    if (card.stage == CardStage.NEW) return "Sırada (Yeni)"
-    if (card.dueDate <= nowMillis) return "Şimdi"
+@Composable
+private fun ArtikelBadge(artikel: Artikel) {
+    val artColor = artikel.themeColor()
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .width(48.dp)
+            .background(artColor.copy(alpha = 0.16f), RoundedCornerShape(8.dp))
+            .border(1.dp, artColor.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+            .padding(vertical = 6.dp)
+    ) {
+        Text(
+            text = artikel.rawValue,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = artColor
+        )
+    }
+}
+
+@Composable
+private fun MetaPill(text: String, color: Color, icon: Boolean = false) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(color.copy(alpha = 0.13f), CircleShape)
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+    ) {
+        if (icon) {
+            Icon(
+                imageVector = Icons.Default.Folder,
+                contentDescription = null,
+                tint = color,
+                modifier = Modifier.size(12.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+        }
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 140.dp)
+        )
+    }
+}
+
+private fun dueDescription(res: Resources, card: Flashcard, nowMillis: Long): String {
+    if (card.stage == CardStage.NEW) return res.getString(R.string.words_due_new)
+    if (card.dueDate <= nowMillis) return res.getString(R.string.words_due_now)
     val diffSec = (card.dueDate - nowMillis) / 1000.0
     return when {
-        diffSec < 60 -> "${max(1, ceil(diffSec).toInt())} sn sonra"
-        diffSec < 3600 -> "${max(1, (diffSec / 60.0).roundToInt())} dk sonra"
-        diffSec < 86_400 -> "${max(1, (diffSec / 3600.0).roundToInt())} sa sonra"
-        else -> "${max(1, (diffSec / 86_400.0).roundToInt())} gün sonra"
+        diffSec < 60 -> res.getString(R.string.words_due_seconds, max(1, ceil(diffSec).toInt()))
+        diffSec < 3600 -> res.getString(R.string.words_due_minutes, max(1, (diffSec / 60.0).roundToInt()))
+        diffSec < 86_400 -> res.getString(R.string.words_due_hours, max(1, (diffSec / 3600.0).roundToInt()))
+        else -> res.getString(R.string.words_due_days, max(1, (diffSec / 86_400.0).roundToInt()))
     }
 }
 
@@ -937,23 +1545,25 @@ private fun CompactTextField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    imeAction: ImeAction = ImeAction.Default,
+    onImeAction: (() -> Unit)? = null
 ) {
     val colors = LocalAppColors.current
     Box(
         contentAlignment = Alignment.CenterStart,
         modifier = modifier
-            .height(36.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .height(48.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(colors.textBackground)
-            .border(1.dp, colors.cardBorderSubtle, RoundedCornerShape(8.dp))
-            .padding(horizontal = 10.dp)
+            .border(1.dp, colors.cardBorderSubtle, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp)
     ) {
         if (value.isEmpty()) {
             Text(
                 text = placeholder,
-                fontSize = 12.sp,
-                color = colors.secondaryText.copy(alpha = 0.6f),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.secondaryText,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -962,74 +1572,52 @@ private fun CompactTextField(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
-            textStyle = TextStyle(
-                fontSize = 13.sp,
-                color = colors.primaryText
-            ),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
             cursorBrush = SolidColor(colors.accentBlue),
-            modifier = Modifier.fillMaxWidth()
+            keyboardOptions = KeyboardOptions(imeAction = imeAction),
+            keyboardActions = KeyboardActions(onAny = { onImeAction?.invoke() }),
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = placeholder }
         )
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DeckFilterChip(
+private fun DialogHeader(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
-    count: Int,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null
+    onClose: () -> Unit
 ) {
     val colors = LocalAppColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(if (isSelected) colors.accentBlue else colors.textBackground)
-            .border(
-                1.dp,
-                if (isSelected) colors.accentBlue else colors.cardBorderSubtle,
-                CircleShape
-            )
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Icon(
-            imageVector = if (isSelected) Icons.Default.Folder else Icons.Default.FolderOpen,
-            contentDescription = null,
-            tint = if (isSelected) Color.White else colors.secondaryText,
-            modifier = Modifier.size(13.dp)
-        )
-        Spacer(modifier = Modifier.width(5.dp))
+        Icon(imageVector = icon, contentDescription = null, tint = colors.accentBlue)
+        Spacer(modifier = Modifier.width(10.dp))
         Text(
             text = title,
-            fontSize = 11.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            color = if (isSelected) Color.White else colors.primaryText,
-            maxLines = 1
-        )
-        Spacer(modifier = Modifier.width(5.dp))
-        Text(
-            text = "$count",
-            fontSize = 10.sp,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = if (isSelected) Color.White else colors.secondaryText,
+            color = colors.primaryText,
             modifier = Modifier
-                .background(
-                    if (isSelected) Color.White.copy(alpha = 0.22f)
-                    else colors.secondaryText.copy(alpha = 0.15f),
-                    CircleShape
-                )
-                .padding(horizontal = 5.dp, vertical = 1.dp)
+                .weight(1f)
+                .semantics { heading() }
         )
+        IconButton(onClick = onClose) {
+            Icon(
+                imageVector = Icons.Default.Cancel,
+                contentDescription = stringResource(R.string.action_close),
+                tint = colors.secondaryText
+            )
+        }
     }
 }
 
-// MARK: - New Deck Creation Modal Dialog (1:1 Port of NewDeckSheet)
+// =====================================================================================
+// New / rename deck dialogs (also used by the sidebar in SplashView.kt)
+// =====================================================================================
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -1041,6 +1629,7 @@ fun NewDeckDialog(
     val colors = LocalAppColors.current
     var deckName by remember { mutableStateOf("") }
 
+    // Proper-noun deck name suggestions (data, intentionally not localized).
     val suggestedDecks = listOf(
         "A1 Kelimeler", "A2 Kelimeler", "B1 Kelimeler",
         "B2 Kelimeler", "C1 Kelimeler", "Günlük Konuşma",
@@ -1050,7 +1639,7 @@ fun NewDeckDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             color = colors.controlBackground,
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, colors.cardBorderSubtle),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1058,85 +1647,49 @@ fun NewDeckDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.padding(20.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CreateNewFolder,
-                        contentDescription = null,
-                        tint = colors.accentBlue
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Yeni Deste Oluştur",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.primaryText,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Cancel,
-                            contentDescription = "Kapat",
-                            tint = colors.secondaryText
-                        )
-                    }
-                }
+                DialogHeader(
+                    icon = Icons.Default.CreateNewFolder,
+                    title = stringResource(R.string.deck_new_title),
+                    onClose = onDismiss
+                )
 
                 Text(
-                    text = "Kelime haznenizi konulara veya seviyelere göre ayırmak için yeni bir deste adı girin:",
-                    fontSize = 12.sp,
+                    text = stringResource(R.string.deck_new_description),
+                    style = MaterialTheme.typography.bodyMedium,
                     color = colors.secondaryText
                 )
 
                 OutlinedTextField(
                     value = deckName,
                     onValueChange = { deckName = it },
-                    placeholder = { Text("Deste adı (örn: B1 Sınav, Mutfak, Akademik)", fontSize = 13.sp) },
+                    label = { Text(stringResource(R.string.words_deck_label)) },
+                    placeholder = { Text(stringResource(R.string.deck_new_hint)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "Hızlı Öneriler:",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        text = stringResource(R.string.deck_suggestions),
+                        style = MaterialTheme.typography.labelMedium,
                         color = colors.secondaryText
                     )
-
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         suggestedDecks.forEach { suggestion ->
-                            val isChosen = deckName == suggestion
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(
-                                        if (isChosen) colors.accentBlue.copy(alpha = 0.2f)
-                                        else colors.secondaryText.copy(alpha = 0.1f)
-                                    )
-                                    .clickable { deckName = suggestion }
-                                    .padding(horizontal = 8.dp, vertical = 5.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FolderOpen,
-                                    contentDescription = null,
-                                    tint = if (isChosen) colors.accentBlue else colors.primaryText,
-                                    modifier = Modifier.size(12.dp)
+                            FilterChip(
+                                selected = deckName == suggestion,
+                                onClick = { deckName = suggestion },
+                                label = { Text(suggestion, style = MaterialTheme.typography.labelMedium) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = colors.textBackground,
+                                    labelColor = colors.primaryText,
+                                    selectedContainerColor = colors.accentBlue.copy(alpha = 0.2f),
+                                    selectedLabelColor = colors.accentBlue
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = suggestion,
-                                    fontSize = 11.sp,
-                                    color = if (isChosen) colors.accentBlue else colors.primaryText
-                                )
-                            }
+                            )
                         }
                     }
                 }
@@ -1145,36 +1698,33 @@ fun NewDeckDialog(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    OutlinedButton(onClick = onDismiss) {
-                        Text("İptal")
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_cancel))
                     }
-                    Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             val created = store.createDeck(deckName)
-                            if (created != null) {
-                                onCreated(created)
-                            }
+                            if (created != null) onCreated(created)
                         },
                         enabled = deckName.trim().isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colors.accentBlue,
-                            contentColor = Color.White
+                            contentColor = colors.onAccent
                         )
                     ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Deste Oluştur")
+                        Text(stringResource(R.string.deck_create))
                     }
                 }
             }
         }
     }
 }
-
-// MARK: - Rename Deck Dialog (1:1 Port of RenameDeckSheet)
 
 @Composable
 fun RenameDeckDialog(
@@ -1189,7 +1739,7 @@ fun RenameDeckDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             color = colors.controlBackground,
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, colors.cardBorderSubtle),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1197,29 +1747,29 @@ fun RenameDeckDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.padding(20.dp)
             ) {
-                Text(
-                    text = "'$oldName' Destesinin Adını Değiştir",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.primaryText
+                DialogHeader(
+                    icon = Icons.Default.Edit,
+                    title = stringResource(R.string.deck_rename_title, oldName),
+                    onClose = onDismiss
                 )
 
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
-                    placeholder = { Text("Yeni deste adı") },
+                    label = { Text(stringResource(R.string.deck_rename_hint)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    OutlinedButton(onClick = onDismiss) {
-                        Text("İptal")
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_cancel))
                     }
-                    Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             val cleaned = newName.trim()
@@ -1231,10 +1781,10 @@ fun RenameDeckDialog(
                         enabled = newName.trim().isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colors.accentBlue,
-                            contentColor = Color.White
+                            contentColor = colors.onAccent
                         )
                     ) {
-                        Text("Kaydet")
+                        Text(stringResource(R.string.action_save))
                     }
                 }
             }
@@ -1242,26 +1792,28 @@ fun RenameDeckDialog(
     }
 }
 
-// MARK: - Edit Word Modal Dialog (1:1 Port of EditWordSheet)
+// =====================================================================================
+// Edit word dialog
+// =====================================================================================
 
 @Composable
 fun EditWordDialog(
     store: DeckStore,
     card: Flashcard,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
     val colors = LocalAppColors.current
     var editArtikel by remember(card.id) { mutableStateOf(card.artikel) }
     var editWord by remember(card.id) { mutableStateOf(card.word) }
     var editMeaning by remember(card.id) { mutableStateOf(card.meaning) }
     var editDeckName by remember(card.id) { mutableStateOf(card.deckName) }
-    var showDeckDropdown by remember { mutableStateOf(false) }
     var showNewDeckSheet by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             color = colors.controlBackground,
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, colors.cardBorderSubtle),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1269,160 +1821,51 @@ fun EditWordDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.padding(20.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = null,
-                        tint = colors.accentBlue
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Kelimeyi Düzenle",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.primaryText,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Cancel,
-                            contentDescription = "Kapat",
-                            tint = colors.secondaryText
-                        )
-                    }
-                }
-
-                HorizontalDivider(color = colors.cardBorderSubtle)
-
-                Text(
-                    text = "Artikel:",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.primaryText
+                DialogHeader(
+                    icon = Icons.Default.Edit,
+                    title = stringResource(R.string.edit_word_title),
+                    onClose = onDismiss
                 )
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Artikel.entries.forEach { art ->
-                        val isSelected = editArtikel == art
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (isSelected) art.color else colors.textBackground
-                                )
-                                .border(
-                                    1.dp,
-                                    if (isSelected) art.color else colors.cardBorderSubtle,
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .clickable { editArtikel = art }
-                                .padding(vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = art.rawValue,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSelected) Color.White else colors.primaryText
-                            )
-                        }
-                    }
-                }
-
                 Text(
-                    text = "Almanca Kelime:",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.primaryText
+                    text = stringResource(R.string.words_artikel_label),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.secondaryText
                 )
+                ArtikelPicker(
+                    selected = editArtikel,
+                    onSelect = { editArtikel = it },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
                 OutlinedTextField(
                     value = editWord,
                     onValueChange = { editWord = it },
+                    label = { Text(stringResource(R.string.words_german_word_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Text(
-                    text = "Türkçe Anlamı / Açıklama:",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.primaryText
-                )
                 OutlinedTextField(
                     value = editMeaning,
                     onValueChange = { editMeaning = it },
+                    label = { Text(stringResource(R.string.edit_word_meaning_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Text(
-                    text = "Deste / Kategori:",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.primaryText
+                    text = stringResource(R.string.edit_word_deck_label),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.secondaryText
                 )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                DeckSelector(
+                    store = store,
+                    deckName = editDeckName,
+                    onDeckChange = { editDeckName = it },
+                    onNewDeck = { showNewDeckSheet = true },
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        Surface(
-                            color = colors.textBackground,
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, colors.cardBorderSubtle),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showDeckDropdown = true }
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Folder,
-                                    contentDescription = null,
-                                    tint = colors.accentBlue,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = editDeckName,
-                                    fontSize = 13.sp,
-                                    color = colors.primaryText
-                                )
-                            }
-                        }
-
-                        DropdownMenu(
-                            expanded = showDeckDropdown,
-                            onDismissRequest = { showDeckDropdown = false }
-                        ) {
-                            store.allDeckNames.forEach { existingDeck ->
-                                DropdownMenuItem(
-                                    text = { Text(existingDeck) },
-                                    onClick = {
-                                        editDeckName = existingDeck
-                                        showDeckDropdown = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    OutlinedButton(onClick = { showNewDeckSheet = true }) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Yeni Deste", fontSize = 12.sp)
-                    }
-                }
+                )
 
                 HorizontalDivider(color = colors.cardBorderSubtle)
 
@@ -1430,10 +1873,20 @@ fun EditWordDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    OutlinedButton(onClick = onDismiss) {
-                        Text("İptal")
+                    if (onDelete != null) {
+                        IconButton(onClick = onDelete) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = stringResource(R.string.edit_word_delete),
+                                tint = colors.error
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             store.createDeck(editDeckName)
@@ -1449,12 +1902,12 @@ fun EditWordDialog(
                         enabled = editWord.trim().isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colors.accentBlue,
-                            contentColor = Color.White
+                            contentColor = colors.onAccent
                         )
                     ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Değişiklikleri Kaydet")
+                        Text(stringResource(R.string.edit_word_save))
                     }
                 }
             }
@@ -1473,66 +1926,35 @@ fun EditWordDialog(
     }
 }
 
-// MARK: - Previews for Android Studio Design Mode
+// =====================================================================================
+// Previews
+// =====================================================================================
 
-@Preview(name = "Kelime Listesi Satır Önizleme", showBackground = true, backgroundColor = 0xFF161618)
+@Preview(name = "Kelime satırı — koyu", showBackground = true, widthDp = 360)
 @Composable
-private fun WordListRowPreview() {
-    val sampleCards = listOf(
-        Flashcard(artikel = com.artikelmeister.android.Artikel.DER, word = "Tisch", meaning = "Masa", deckName = "A1"),
-        Flashcard(artikel = com.artikelmeister.android.Artikel.DIE, word = "Lampe", meaning = "Lamba", deckName = "A1"),
-        Flashcard(artikel = com.artikelmeister.android.Artikel.DAS, word = "Buch", meaning = "Kitap", deckName = "A1")
-    )
-    ArtikelMeisterTheme {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF161618))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            sampleCards.forEach { card ->
-                Surface(
-                    color = Color(0xFF212124),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Color(0x24FFFFFF)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                    ) {
-                        Surface(
-                            color = card.artikel.color.copy(alpha = 0.18f),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = card.artikel.rawValue,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = card.artikel.color,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = card.word,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFFF5F5F7)
-                            )
-                            if (card.meaning.isNotEmpty()) {
-                                Text(
-                                    text = card.meaning,
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF98989F)
-                                )
-                            }
-                        }
-                    }
-                }
+private fun WordRowPreviewDark() {
+    ArtikelMeisterTheme(darkTheme = true) {
+        Column(modifier = Modifier.background(LocalAppColors.current.windowBackground)) {
+            listOf(
+                Flashcard(artikel = Artikel.DER, word = "Tisch", meaning = "Masa", deckName = "A1"),
+                Flashcard(artikel = Artikel.DIE, word = "Lampe", meaning = "Lamba", deckName = "A1"),
+                Flashcard(artikel = Artikel.DAS, word = "Buch", meaning = "Kitap", deckName = "A1")
+            ).forEachIndexed { i, card ->
+                WordRowItem(card, i, "Şimdi", onSpeak = {}, onEdit = {}, onDelete = {})
             }
+        }
+    }
+}
+
+@Preview(name = "Kelime satırı — açık", showBackground = true, widthDp = 360)
+@Composable
+private fun WordRowPreviewLight() {
+    ArtikelMeisterTheme(darkTheme = false) {
+        Column(modifier = Modifier.background(LocalAppColors.current.windowBackground)) {
+            WordRowItem(
+                Flashcard(artikel = Artikel.DIE, word = "Geschwindigkeitsbegrenzung", meaning = "Hız sınırı", deckName = "B2 Kelimeler"),
+                0, "3 gün sonra", onSpeak = {}, onEdit = {}, onDelete = {}
+            )
         }
     }
 }
