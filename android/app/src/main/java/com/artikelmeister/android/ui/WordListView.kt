@@ -153,7 +153,11 @@ private fun matchesNoArticle(card: Flashcard): Boolean {
 
 private val trLocale = Locale("tr", "TR")
 
+/** Medium width class: inline quick-add, no FAB, full "AI ile üret" label. */
 private const val WIDE_LAYOUT_MIN_WIDTH_DP = 600
+
+/** Expanded width class: CSV import/export also shown as buttons instead of in the overflow. */
+private const val EXPANDED_LAYOUT_MIN_WIDTH_DP = 840
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -307,6 +311,7 @@ fun WordListView(
             .background(colors.windowBackground)
     ) {
         val isWide = maxWidth >= WIDE_LAYOUT_MIN_WIDTH_DP.dp
+        val isExpanded = maxWidth >= EXPANDED_LAYOUT_MIN_WIDTH_DP.dp
 
         Column(modifier = Modifier.fillMaxSize()) {
             // ------------------------------------------------------------------ Header
@@ -322,6 +327,7 @@ fun WordListView(
                     filteredCount = filteredCards.size,
                     isFiltered = hasActiveFilters,
                     isWide = isWide,
+                    showAllActions = isExpanded,
                     canExport = store.cards.isNotEmpty(),
                     selectedDeck = selectedDeckFilter,
                     onOpenDrawer = onOpenDrawer,
@@ -386,6 +392,12 @@ fun WordListView(
                 // Deck filter chips — "Yeni deste" is the leading item, so it's always visible.
                 DeckChipRow(
                     store = store,
+                    // Counts exclude cards that are hidden while their Undo snackbar is showing.
+                    countFor = { deck ->
+                        store.cards.count { c ->
+                            (deck == null || c.deckName == deck) && !pendingDeleteIds.contains(c.id)
+                        }
+                    },
                     selectedDeck = selectedDeckFilter,
                     onSelectDeck = { deck ->
                         selectedDeckFilter = deck
@@ -574,6 +586,7 @@ private fun WordPoolTitleRow(
     filteredCount: Int,
     isFiltered: Boolean,
     isWide: Boolean,
+    showAllActions: Boolean,
     canExport: Boolean,
     selectedDeck: String?,
     onOpenDrawer: (() -> Unit)?,
@@ -645,7 +658,7 @@ private fun WordPoolTitleRow(
             )
         }
 
-        if (isWide) {
+        if (showAllActions) {
             Spacer(modifier = Modifier.width(8.dp))
             OutlinedButton(onClick = onImport) {
                 Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -670,7 +683,7 @@ private fun WordPoolTitleRow(
                 )
             }
             DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
-                if (!isWide) {
+                if (!showAllActions) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.words_csv_import)) },
                         leadingIcon = { Icon(Icons.Default.FileUpload, contentDescription = null) },
@@ -900,6 +913,7 @@ private fun ArtikelFilterSegments(
 @Composable
 private fun DeckChipRow(
     store: DeckStore,
+    countFor: (String?) -> Int,
     selectedDeck: String?,
     onSelectDeck: (String?) -> Unit,
     onNewDeck: () -> Unit,
@@ -936,7 +950,7 @@ private fun DeckChipRow(
         item(key = "__all_decks") {
             DeckChip(
                 title = stringResource(R.string.words_all_decks),
-                count = store.cards.size,
+                count = countFor(null),
                 isSelected = selectedDeck == null,
                 onClick = { onSelectDeck(null) }
             )
@@ -947,7 +961,7 @@ private fun DeckChipRow(
             Box {
                 DeckChip(
                     title = deck,
-                    count = store.cardCount(deck),
+                    count = countFor(deck),
                     isSelected = isSelected,
                     showMenuAffordance = isSelected,
                     // Tapping the already-selected deck opens its actions (discoverable via ▾).

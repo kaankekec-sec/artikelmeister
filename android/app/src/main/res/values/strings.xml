@@ -14,7 +14,8 @@
 
     <!-- Navigation tabs -->
     <string name="tab_study">Çalış</string>
-    <string name="tab_words">Kelime Havuzu</string>
+    <!-- Short on purpose: bottom-nav labels must fit 4 tabs on a 360dp phone. -->
+    <string name="tab_words">Kelimeler</string>
     <string name="tab_stats">İstatistikler</string>
     <string name="tab_settings">Ayarlar</string>
 
