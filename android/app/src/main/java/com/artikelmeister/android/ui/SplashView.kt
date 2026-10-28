@@ -1,6 +1,10 @@
 package com.artikelmeister.android.ui
 
+import androidx.compose.material3.MaterialTheme
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.annotation.StringRes
+import androidx.compose.animation.Crossfade
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -36,6 +40,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -99,6 +106,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -118,6 +126,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -380,13 +390,13 @@ fun SplashIntroView(onFinished: () -> Unit) {
     )
     val progressValue by animateFloatAsState(
         targetValue = if (started) 1.0f else 0.0f,
-        animationSpec = tween(durationMillis = 2100, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
         label = "progressValue"
     )
 
     LaunchedEffect(Unit) {
         started = true
-        delay(2350L)
+        delay(1700L)
         onFinished()
     }
 
@@ -403,7 +413,7 @@ fun SplashIntroView(onFinished: () -> Unit) {
                     )
                 )
             )
-            .clickable { onFinished() }
+            .clickable(onClickLabel = stringResource(R.string.splash_skip_a11y)) { onFinished() }
             .padding(32.dp)
     ) {
         Column(
@@ -424,7 +434,7 @@ fun SplashIntroView(onFinished: () -> Unit) {
             Text(
                 text = "ARTIKELMEISTER",
                 style = TextStyle(
-                    fontSize = 32.sp,
+                    fontSize = MaterialTheme.typography.displaySmall.fontSize,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 3.sp,
                     brush = Brush.linearGradient(
@@ -440,8 +450,9 @@ fun SplashIntroView(onFinished: () -> Unit) {
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "Almanca Artikel & Nöro-Hafıza Çalışma Sistemi",
-                fontSize = 14.sp,
+                text = stringResource(R.string.splash_tagline),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
                 fontWeight = FontWeight.Medium,
                 color = Color.White.copy(alpha = 0.72f * appearOpacity)
             )
@@ -450,13 +461,14 @@ fun SplashIntroView(onFinished: () -> Unit) {
 
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Artikel.entries.forEach { art ->
+                    val artColor = art.themeColor()
                     Text(
                         text = art.rawValue,
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = art.color,
+                        color = artColor,
                         modifier = Modifier
-                            .background(art.color.copy(alpha = 0.25f), CircleShape)
+                            .background(artColor.copy(alpha = 0.25f), CircleShape)
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                     )
                 }
@@ -491,19 +503,19 @@ fun SplashIntroView(onFinished: () -> Unit) {
             Spacer(modifier = Modifier.weight(1f))
 
             Text(
-                text = "Geçmek için tıklayın",
-                fontSize = 11.sp,
-                color = Color.White.copy(alpha = 0.38f)
+                text = stringResource(R.string.splash_tap_to_skip),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.6f)
             )
         }
     }
 }
 
-enum class AppTab(val rawValue: String) {
-    STUDY("Çalış"),
-    WORDS("Kelime Havuzu"),
-    STATS("İstatistikler"),
-    SETTINGS("Ayarlar");
+enum class AppTab(val rawValue: String, @StringRes val labelRes: Int) {
+    STUDY("Çalış", R.string.tab_study),
+    WORDS("Kelime Havuzu", R.string.tab_words),
+    STATS("İstatistikler", R.string.tab_stats),
+    SETTINGS("Ayarlar", R.string.tab_settings);
 
     val icon: ImageVector
         get() = when (this) {
@@ -519,14 +531,19 @@ fun RootContainerView(
     store: DeckStore,
     authManager: GeminiAuthManager
 ) {
-    var showSplash by remember { mutableStateOf(true) }
+    // Full animated intro only on the very first launch. Later cold starts are covered by the
+    // Android 12+ system splash (values-v31/themes.xml) / brand windowBackground on older APIs.
+    var showSplash by rememberSaveable { mutableStateOf(!UiPreferences.hasSeenIntro) }
 
     val shouldShowOnboarding = !authManager.hasCompletedOnboarding && !authManager.isGoogleAccountConnected
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
             showSplash -> {
-                SplashIntroView(onFinished = { showSplash = false })
+                SplashIntroView(onFinished = {
+                    UiPreferences.markIntroSeen()
+                    showSplash = false
+                })
             }
             shouldShowOnboarding -> {
                 OnboardingSetupScreen(
@@ -553,7 +570,7 @@ fun MainContentView(
     authManager: GeminiAuthManager
 ) {
     val colors = LocalAppColors.current
-    var selectedTab by remember { mutableStateOf(AppTab.STUDY) }
+    var selectedTab by rememberSaveable { mutableStateOf(AppTab.STUDY) }
     var showNewDeckSheet by remember { mutableStateOf(false) }
     var deckToRename by remember { mutableStateOf<String?>(null) }
     var showManualSignInModal by remember { mutableStateOf(false) }
@@ -571,6 +588,9 @@ fun MainContentView(
             .background(colors.windowBackground)
     ) {
         val isWideScreen = maxWidth >= 700.dp
+
+        // Back from any other tab returns to Study; from Study the system handles it (exit).
+        BackHandler(enabled = selectedTab != AppTab.STUDY) { selectedTab = AppTab.STUDY }
 
         if (isWideScreen) {
             // Tablet / Landscape / Desktop: Exact macOS Side-by-Side Split View
@@ -611,6 +631,9 @@ fun MainContentView(
             // Phone Portrait: Collapsible macOS Sidebar Drawer + Bottom Navigation Bar
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
             val scope = rememberCoroutineScope()
+
+            // Back: close the drawer first (registered last => highest priority).
+            BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
             ModalNavigationDrawer(
                 drawerState = drawerState,
@@ -670,14 +693,14 @@ fun MainContentView(
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(
                                                     imageVector = tab.icon,
-                                                    contentDescription = tab.rawValue,
-                                                    modifier = Modifier.size(20.dp)
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(22.dp)
                                                 )
                                                 if (tab == AppTab.STUDY && store.studyQueue.isNotEmpty()) {
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text(
                                                         text = "${store.studyQueue.size}",
-                                                        fontSize = 10.sp,
+                                                        fontSize = MaterialTheme.typography.labelSmall.fontSize,
                                                         fontWeight = FontWeight.Bold,
                                                         color = if (isSelected) colors.accentBlue else colors.secondaryText
                                                     )
@@ -686,8 +709,8 @@ fun MainContentView(
                                         },
                                         label = {
                                             Text(
-                                                text = tab.rawValue,
-                                                fontSize = 11.sp,
+                                                text = stringResource(tab.labelRes),
+                                                style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
@@ -762,11 +785,17 @@ private fun ActiveTabContent(
     authManager: GeminiAuthManager,
     onOpenDrawer: (() -> Unit)?
 ) {
-    when (selectedTab) {
-        AppTab.STUDY -> StudyView(store = store, authManager = authManager, onOpenDrawer = onOpenDrawer)
-        AppTab.WORDS -> WordListView(store = store, authManager = authManager, onOpenDrawer = onOpenDrawer)
-        AppTab.STATS -> StatsView(store = store, onOpenDrawer = onOpenDrawer)
-        AppTab.SETTINGS -> SettingsView(store = store, authManager = authManager, onOpenDrawer = onOpenDrawer)
+    Crossfade(
+        targetState = selectedTab,
+        animationSpec = tween(durationMillis = 220),
+        label = "tabCrossfade"
+    ) { tab ->
+        when (tab) {
+            AppTab.STUDY -> StudyView(store = store, authManager = authManager, onOpenDrawer = onOpenDrawer)
+            AppTab.WORDS -> WordListView(store = store, authManager = authManager, onOpenDrawer = onOpenDrawer)
+            AppTab.STATS -> StatsView(store = store, onOpenDrawer = onOpenDrawer)
+            AppTab.SETTINGS -> SettingsView(store = store, authManager = authManager, onOpenDrawer = onOpenDrawer)
+        }
     }
 }
 
@@ -803,14 +832,14 @@ fun SidebarContent(
             Column {
                 Text(
                     text = "ArtikelMeister",
-                    fontSize = 15.sp,
+                    style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
                     color = colors.primaryText,
                     maxLines = 1
                 )
                 Text(
                     text = "Nöro-Hafıza",
-                    fontSize = 11.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     color = colors.secondaryText,
                     maxLines = 1
                 )
@@ -831,7 +860,7 @@ fun SidebarContent(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = "MENÜ",
-                    fontSize = 10.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = colors.secondaryText,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)
@@ -845,19 +874,24 @@ fun SidebarContent(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (isSelected) colors.accentBlue else Color.Transparent)
-                            .clickable { onSelectTab(tab) }
+                            .selectable(
+                                selected = isSelected,
+                                role = Role.Tab,
+                                onClick = { onSelectTab(tab) }
+                            )
+                            .heightIn(min = 48.dp)
                             .padding(horizontal = 10.dp, vertical = 8.dp)
                     ) {
                         Icon(
                             imageVector = tab.icon,
-                            contentDescription = tab.rawValue,
+                            contentDescription = null,
                             tint = if (isSelected) Color.White else colors.accentBlue,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(9.dp))
                         Text(
-                            text = tab.rawValue,
-                            fontSize = 13.sp,
+                            text = stringResource(tab.labelRes),
+                            style = MaterialTheme.typography.bodySmall,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                             color = if (isSelected) Color.White else colors.primaryText,
                             maxLines = 1,
@@ -866,7 +900,7 @@ fun SidebarContent(
                         if (tab == AppTab.STUDY && store.studyQueue.isNotEmpty()) {
                             Text(
                                 text = "${store.studyQueue.size}",
-                                fontSize = 11.sp,
+                                fontSize = MaterialTheme.typography.labelSmall.fontSize,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isSelected) Color.White else colors.accentBlue,
                                 modifier = Modifier
@@ -880,7 +914,7 @@ fun SidebarContent(
                         } else if (tab == AppTab.WORDS) {
                             Text(
                                 text = "${store.cards.size}",
-                                fontSize = 11.sp,
+                                fontSize = MaterialTheme.typography.labelSmall.fontSize,
                                 color = if (isSelected) Color.White.copy(alpha = 0.85f) else colors.secondaryText
                             )
                         }
@@ -903,14 +937,14 @@ fun SidebarContent(
                 ) {
                     Text(
                         text = "DESTELER",
-                        fontSize = 10.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = colors.secondaryText
                     )
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
                         text = "${store.allDeckNames.size}",
-                        fontSize = 10.sp,
+                        fontSize = MaterialTheme.typography.labelSmall.fontSize,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.secondaryText
                     )
@@ -939,7 +973,7 @@ fun SidebarContent(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Tüm Desteler",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = if (allSelected) FontWeight.Bold else FontWeight.Medium,
                         color = if (allSelected) colors.accentBlue else colors.primaryText,
                         maxLines = 1,
@@ -947,7 +981,7 @@ fun SidebarContent(
                     )
                     Text(
                         text = "${store.cards.size}",
-                        fontSize = 11.sp,
+                        fontSize = MaterialTheme.typography.labelSmall.fontSize,
                         fontFamily = FontFamily.Monospace,
                         color = colors.secondaryText
                     )
@@ -983,7 +1017,7 @@ fun SidebarContent(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = deck,
-                                fontSize = 12.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = if (isDeckSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isDeckSelected) colors.accentBlue else colors.primaryText,
                                 maxLines = 1,
@@ -992,7 +1026,7 @@ fun SidebarContent(
                             )
                             Text(
                                 text = "${store.cardCount(deck)}",
-                                fontSize = 11.sp,
+                                fontSize = MaterialTheme.typography.labelSmall.fontSize,
                                 fontFamily = FontFamily.Monospace,
                                 color = colors.secondaryText
                             )
@@ -1056,7 +1090,7 @@ fun SidebarContent(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Yeni Deste Ekle",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.accentBlue,
                         maxLines = 1
@@ -1078,10 +1112,12 @@ fun SidebarContent(
         )
 
         // Animated Dark / Light Theme Toggle towards the bottom of the drawer
+        val isDarkNow = colors.isDark
         AnimatedThemeToggleCard(
-            isDarkMode = store.settings.isDarkMode,
+            isDarkMode = isDarkNow,
             onToggleTheme = {
-                store.updateSettings { it.copy(isDarkMode = !it.isDarkMode) }
+                // Explicit choice overrides System mode; the adapter also syncs AppSettings.isDarkMode.
+                UiPreferences.setThemeMode(if (isDarkNow) ThemeMode.LIGHT else ThemeMode.DARK, store)
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -1105,11 +1141,11 @@ fun SidebarContent(
                     Box(
                         modifier = Modifier
                             .size(7.dp)
-                            .background(art.color, CircleShape)
+                            .background(art.themeColor(), CircleShape)
                     )
                     Text(
                         text = art.rawValue,
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = colors.secondaryText
                     )
@@ -1117,7 +1153,7 @@ fun SidebarContent(
             }
             Text(
                 text = if (authManager.isGoogleAccountConnected) "Google Drive & Yerel Depolama Aktif" else "Yerel Depolama Aktif",
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.labelSmall,
                 color = colors.secondaryText
             )
         }
@@ -1195,7 +1231,7 @@ private fun UniversalProfileSidebarCard(
                     } else {
                         "Google ile Giriş Yap"
                     },
-                    fontSize = 12.sp,
+                    fontSize = MaterialTheme.typography.labelSmall.fontSize,
                     fontWeight = FontWeight.Bold,
                     color = colors.primaryText,
                     maxLines = 1,
@@ -1207,7 +1243,7 @@ private fun UniversalProfileSidebarCard(
                         isConnected -> "Drive Eşitleme & AI Aktif"
                         else -> "Bulut Eşitleme & AI için dokun"
                     },
-                    fontSize = 10.sp,
+                    fontSize = MaterialTheme.typography.labelSmall.fontSize,
                     color = if (isConnected) colors.vividGreen else colors.secondaryText,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1273,7 +1309,7 @@ fun OnboardingSetupScreen(
 
             Text(
                 text = "ArtikelMeister",
-                fontSize = 28.sp,
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = colors.primaryText,
                 textAlign = TextAlign.Center
@@ -1281,7 +1317,7 @@ fun OnboardingSetupScreen(
 
             Text(
                 text = "Almanca Artikel & Hafıza Çalışma Sistemi",
-                fontSize = 13.sp,
+                style = MaterialTheme.typography.bodySmall,
                 color = colors.secondaryText,
                 textAlign = TextAlign.Center
             )
@@ -1300,14 +1336,14 @@ fun OnboardingSetupScreen(
                 ) {
                     Text(
                         text = "Kurulum ve Bulut Senkronizasyonu",
-                        fontSize = 15.sp,
+                        style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                         color = colors.primaryText
                     )
 
                     Text(
                         text = "Google hesabınızla bağlanarak kelimelerinizi ve çalışma serinizi tüm cihazlarınızla eşitleyebilir veya uygulamayı doğrudan çevrimdışı modda kullanabilirsiniz.",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         color = colors.secondaryText,
                         lineHeight = 17.sp
                     )
@@ -1356,7 +1392,7 @@ fun OnboardingSetupScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = err,
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         color = colors.vividRed
                     )
                 }
@@ -1379,7 +1415,7 @@ fun OnboardingSetupScreen(
                         } else {
                             authManager.authStatusMessage ?: "Google ile giriş yapılıyor..."
                         },
-                        fontSize = 12.sp,
+                        fontSize = MaterialTheme.typography.labelSmall.fontSize,
                         color = colors.secondaryText
                     )
                 }
@@ -1413,7 +1449,7 @@ fun OnboardingSetupScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = "Google Hesabı ile Giriş Yap & Eşitle",
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -1429,7 +1465,7 @@ fun OnboardingSetupScreen(
                 ) {
                     Text(
                         text = "Çevrimdışı Modda Devam Et",
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                         color = colors.secondaryText
                     )
@@ -1470,13 +1506,13 @@ private fun OnboardingFeatureRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = colors.primaryText
             )
             Text(
                 text = desc,
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.labelSmall,
                 color = colors.secondaryText
             )
         }
@@ -1533,7 +1569,11 @@ private fun AnimatedThemeToggleCard(
         border = BorderStroke(1.dp, colors.cardBorderSubtle),
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable { onToggleTheme() }
+            .toggleable(
+                value = isDarkMode,
+                role = Role.Switch,
+                onValueChange = { onToggleTheme() }
+            )
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1550,7 +1590,7 @@ private fun AnimatedThemeToggleCard(
             ) {
                 Icon(
                     imageVector = if (isDarkMode) Icons.Default.DarkMode else Icons.Default.LightMode,
-                    contentDescription = if (isDarkMode) "Karanlık Mod" else "Aydınlık Mod",
+                    contentDescription = null,
                     tint = activeAccentColor,
                     modifier = Modifier
                         .size(18.dp)
@@ -1562,15 +1602,15 @@ private fun AnimatedThemeToggleCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (isDarkMode) "Karanlık Mod" else "Aydınlık Mod",
-                    fontSize = 13.sp,
+                    text = stringResource(if (isDarkMode) R.string.theme_dark else R.string.theme_light),
+                    style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Bold,
                     color = colors.primaryText,
                     maxLines = 1
                 )
                 Text(
-                    text = if (isDarkMode) "Aydınlık temaya geç" else "Karanlık temaya geç",
-                    fontSize = 10.sp,
+                    text = stringResource(if (isDarkMode) R.string.theme_switch_to_light else R.string.theme_switch_to_dark),
+                    style = MaterialTheme.typography.labelSmall,
                     color = colors.secondaryText,
                     maxLines = 1
                 )
