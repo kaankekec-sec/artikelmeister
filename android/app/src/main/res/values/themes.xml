@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+        Base window theme. Runtime system-bar styling is owned by MainActivity
+        (enableEdgeToEdge, transparent bars; Compose paints behind them).
+        The dark brand windowBackground avoids a white flash before the first frame on API 26-30.
+    -->
     <style name="Theme.ArtikelMeister" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#0A0205</item>
-        <item name="android:navigationBarColor">#0A0205</item>
+        <item name="android:windowBackground">@color/brand_splash_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

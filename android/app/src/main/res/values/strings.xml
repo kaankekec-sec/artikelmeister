@@ -1,3 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ArtikelMeister</string>
+
+    <!-- Common -->
+    <string name="action_cancel">İptal</string>
+    <string name="action_close">Kapat</string>
+    <string name="action_ok">Tamam</string>
+    <string name="action_save">Kaydet</string>
+    <string name="action_undo">Geri al</string>
+    <string name="action_open_menu">Menüyü aç</string>
+    <string name="action_more_options">Diğer seçenekler</string>
+    <string name="dialog_info_title">Bilgi</string>
+
+    <!-- Navigation tabs -->
+    <string name="tab_study">Çalış</string>
+    <string name="tab_words">Kelime Havuzu</string>
+    <string name="tab_stats">İstatistikler</string>
+    <string name="tab_settings">Ayarlar</string>
+
+    <!-- Splash -->
+    <string name="splash_tagline">Almanca Artikel &amp; Nöro-Hafıza Çalışma Sistemi</string>
+    <string name="splash_tap_to_skip">Geçmek için dokunun</string>
+    <string name="splash_skip_a11y">Açılış ekranını geç</string>
+
+    <!-- Theme mode -->
+    <string name="theme_section_title">Görünüm</string>
+    <string name="theme_mode_label">Tema</string>
+    <string name="theme_mode_system">Sistem</string>
+    <string name="theme_mode_light">Açık</string>
+    <string name="theme_mode_dark">Koyu</string>
+    <string name="theme_mode_hint">Sistem seçeneği, cihazınızın açık/koyu tema ayarını takip eder.</string>
+    <string name="theme_dark">Karanlık Mod</string>
+    <string name="theme_light">Aydınlık Mod</string>
+    <string name="theme_switch_to_light">Aydınlık temaya geç</string>
+    <string name="theme_switch_to_dark">Karanlık temaya geç</string>
+
+    <!-- Word pool: header & actions -->
+    <string name="words_title">Kelime Havuzu</string>
+    <string name="words_count">%1$d kelime</string>
+    <string name="words_count_filtered">%1$d / %2$d kelime</string>
+    <string name="words_ai_generate">AI ile üret</string>
+    <string name="words_ai_generate_short">AI</string>
+    <string name="words_csv_import">CSV içe aktar</string>
+    <string name="words_csv_export">CSV dışa aktar</string>
+    <string name="words_add_word">Kelime ekle</string>
+    <string name="words_add">Ekle</string>
+    <string name="words_new_deck">Yeni deste</string>
+    <string name="words_new_deck_ellipsis">Yeni deste ekle…</string>
+    <string name="words_rename_deck">Deste adını değiştir…</string>
+    <string name="words_delete_deck">Desteyi sil (kelimeler \'Genel\'e taşınır)</string>
+    <string name="words_deck_options">\'%1$s\' destesi seçenekleri</string>
+    <string name="words_deck_section">Desteler</string>
+    <string name="words_all_decks">Tüm desteler</string>
+    <string name="words_deck_chip_a11y">%1$s, %2$d kelime</string>
+    <string name="words_export_file_name">almanca_kelimeler.csv</string>
+
+    <!-- Word pool: search & filters -->
+    <string name="words_search_hint">Kelime, anlam veya deste ara…</string>
+    <string name="words_search_clear">Aramayı temizle</string>
+    <string name="words_filter_all">Tümü</string>
+    <string name="words_filter_artikel_a11y">Artikele göre filtrele</string>
+    <!-- TODO(CONTRACT.md): label for the article-less ('-') filter chip -->
+    <string name="words_filter_no_article">–</string>
+    <string name="words_filter_no_article_a11y">Artikelsiz kelimeler</string>
+    <string name="words_filter_stage">Duruma göre filtrele</string>
+    <string name="words_filter_stage_active">Durum filtresi: %1$s</string>
+    <string name="words_filter_all_stages">Tüm durumlar</string>
+    <string name="words_clear_filters">Filtreleri temizle</string>
+
+    <!-- Word pool: quick add -->
+    <string name="words_german_word_hint">Almanca kelime (örn. Tisch)</string>
+    <string name="words_german_word_label">Almanca kelime</string>
+    <string name="words_meaning_hint">Türkçe anlamı / açıklama</string>
+    <string name="words_deck_label">Deste</string>
+    <string name="words_artikel_label">Artikel</string>
+    <string name="words_added_feedback">„%1$s“ eklendi</string>
+    <string name="words_duplicate_feedback">„%1$s“ zaten havuzda</string>
+    <string name="words_add_and_continue">Ekle ve devam et</string>
+
+    <!-- Word pool: row -->
+    <string name="words_row_speak">Seslendir</string>
+    <string name="words_row_speak_a11y">%1$s kelimesini seslendir</string>
+    <string name="words_row_edit">Düzenle</string>
+    <string name="words_row_delete">Sil</string>
+    <string name="words_row_options_a11y">%1$s için seçenekler</string>
+    <string name="words_row_open_edit">Düzenle</string>
+    <string name="words_deleted_snackbar">„%1$s“ silindi</string>
+    <string name="words_swipe_delete_a11y">Silmek için kaydırın</string>
+    <string name="words_due_new">Sırada (yeni)</string>
+    <string name="words_due_now">Şimdi</string>
+    <string name="words_due_seconds">%1$d sn sonra</string>
+    <string name="words_due_minutes">%1$d dk sonra</string>
+    <string name="words_due_hours">%1$d sa sonra</string>
+    <string name="words_due_days">%1$d gün sonra</string>
+
+    <!-- Word pool: empty states -->
+    <string name="words_empty_title">Henüz kayıtlı kelime yok</string>
+    <string name="words_empty_message">İlk kelimeni ekle, bir CSV dosyası içe aktar ya da Gemini AI ile kelime üret.</string>
+    <string name="words_empty_deck_title">\'%1$s\' destesinde henüz kelime yok</string>
+    <string name="words_empty_deck_message">Bu desteye kelime ekleyebilir veya Gemini AI ile yeni kelimeler üretebilirsin.</string>
+    <string name="words_no_results_title">Sonuç bulunamadı</string>
+    <string name="words_no_results_message">Arama veya filtre kriterlerine uygun kelime yok.</string>
+
+    <!-- Word pool: CSV feedback -->
+    <string name="words_import_result">Yeni eklenen: %1$d\nGüncellenen: %2$d\nAtlanan (mevcut): %3$d\nGeçersiz satır: %4$d</string>
+    <string name="words_import_failed">CSV okunamadı.</string>
+    <string name="words_export_success">Kelimeler CSV olarak dışa aktarıldı.</string>
+    <string name="words_export_failed">Dışa aktarma hatası: %1$s</string>
+
+    <!-- Deck dialogs -->
+    <string name="deck_new_title">Yeni Deste Oluştur</string>
+    <string name="deck_new_description">Kelime havuzunu konulara veya seviyelere göre ayırmak için yeni bir deste adı gir:</string>
+    <string name="deck_new_hint">Deste adı (örn. B1 Sınav, Mutfak)</string>
+    <string name="deck_suggestions">Hızlı öneriler</string>
+    <string name="deck_create">Deste oluştur</string>
+    <string name="deck_rename_title">\'%1$s\' destesinin adını değiştir</string>
+    <string name="deck_rename_hint">Yeni deste adı</string>
+
+    <!-- Edit word dialog -->
+    <string name="edit_word_title">Kelimeyi Düzenle</string>
+    <string name="edit_word_meaning_label">Türkçe anlamı / açıklama</string>
+    <string name="edit_word_deck_label">Deste / kategori</string>
+    <string name="edit_word_save">Kaydet</string>
+    <string name="edit_word_delete">Kelimeyi sil</string>
 </resources>
