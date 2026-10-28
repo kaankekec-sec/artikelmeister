@@ -1,0 +1,324 @@
+package com.artikelmeister.android
+
+import org.json.JSONArray
+import java.util.Locale
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * Pure (Android-framework free) card logic: lenient JSON decoding, merge / dedup,
+ * CSV import/export, answer checking and the article filter. Kept separate from
+ * DeckStore so it is unit-testable on the plain JVM.
+ */
+
+object CardCodec {
+    /** Lenient decode: every bad entry is skipped; never throws. */
+    fun decodeArray(arr: JSONArray?, articleless: Boolean): List<Flashcard> {
+        if (arr == null) return emptyList()
+        val out = mutableListOf<Flashcard>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val card = runCatching { Flashcard.fromJson(obj, articleless) }.getOrNull() ?: continue
+            out.add(card)
+        }
+        return out
+    }
+
+    fun encodeArray(cards: List<Flashcard>): JSONArray {
+        val arr = JSONArray()
+        cards.forEach { arr.put(it.toJson()) }
+        return arr
+    }
+}
+
+object CardMerge {
+    fun smartMerge(local: Flashcard, incoming: Flashcard): Flashcard {
+        val incomingHasMoreProgress = when {
+            incoming.totalReviews != local.totalReviews -> incoming.totalReviews > local.totalReviews
+            (incoming.lastReviewedAt ?: 0L) != (local.lastReviewedAt ?: 0L) ->
+                (incoming.lastReviewedAt ?: 0L) > (local.lastReviewedAt ?: 0L)
+            else -> incoming.updatedAt > local.updatedAt
+        }
+        val progressSource = if (incomingHasMoreProgress) incoming else local
+
+        val mergedMeaning = when {
+            local.meaning.isNotBlank() && incoming.meaning.isBlank() -> local.meaning
+            incoming.meaning.isNotBlank() && local.meaning.isBlank() -> incoming.meaning
+            incoming.updatedAt > local.updatedAt && incoming.meaning.isNotBlank() -> incoming.meaning
+            else -> local.meaning
+        }
+
+        val mergedDeck = when {
+            local.cleanDeckName != "Genel" && incoming.cleanDeckName == "Genel" -> local.cleanDeckName
+            incoming.cleanDeckName != "Genel" && local.cleanDeckName == "Genel" -> incoming.cleanDeckName
+            incoming.updatedAt > local.updatedAt -> incoming.cleanDeckName
+            else -> local.cleanDeckName
+        }
+
+        return Flashcard(
+            id = local.id,
+            artikel = local.artikel,
+            word = local.word,
+            meaning = mergedMeaning,
+            deckName = mergedDeck,
+            createdAt = min(local.createdAt, incoming.createdAt),
+            updatedAt = max(local.updatedAt, incoming.updatedAt),
+            stage = progressSource.stage,
+            easeFactor = progressSource.easeFactor,
+            intervalDays = progressSource.intervalDays,
+            repetitions = progressSource.repetitions,
+            lapses = progressSource.lapses,
+            dueDate = progressSource.dueDate,
+            lastReviewedAt = progressSource.lastReviewedAt,
+            totalReviews = progressSource.totalReviews
+        )
+    }
+
+    /** Collapses duplicates (same syncKey) inside one list. */
+    fun dedupe(cards: List<Flashcard>): List<Flashcard> {
+        val map = LinkedHashMap<String, Flashcard>()
+        for (c in cards) {
+            val existing = map[c.syncKey]
+            map[c.syncKey] = if (existing == null) c else smartMerge(existing, c)
+        }
+        return map.values.toList()
+    }
+
+    data class MergeResult(val cards: List<Flashcard>, val addedFromIncoming: Int, val overlapping: Int)
+
+    /**
+     * Union of local + incoming cards by syncKey (valid and article-less cards share the
+     * key space but never collide). Tombstones newer than a card drop it.
+     */
+    fun merge(local: List<Flashcard>, incoming: List<Flashcard>, tombstones: Map<String, Long>): MergeResult {
+        val byKey = LinkedHashMap<String, Flashcard>()
+        for (c in local) {
+            val key = c.syncKey
+            if ((tombstones[key] ?: 0L) > c.updatedAt) continue
+            val existing = byKey[key]
+            byKey[key] = if (existing == null) c else smartMerge(existing, c)
+        }
+        var added = 0
+        var overlapping = 0
+        for (c in incoming) {
+            val key = c.syncKey
+            if ((tombstones[key] ?: 0L) > c.updatedAt) continue
+            val existing = byKey[key]
+            if (existing != null) {
+                byKey[key] = smartMerge(existing, c)
+                overlapping += 1
+            } else {
+                byKey[key] = c
+                added += 1
+            }
+        }
+        return MergeResult(byKey.values.toList(), added, overlapping)
+    }
+}
+
+object AnswerChecker {
+    /** Typed/selected answers that mean "this word has no article". */
+    val NONE_TOKENS = setOf("-", "–", "—")
+
+    /**
+     * Typed-answer check. Case-insensitive and whitespace-trimmed.
+     * - Valid card: typed must equal der/die/das.
+     * - Article-less card: correct answer is "-" (the '-' choice; en/em dash accepted)
+     *   or an empty/blank answer (no article given).
+     */
+    fun isCorrect(card: Flashcard, typed: String): Boolean {
+        val t = typed.trim().lowercase(Locale.ROOT)
+        val art = card.artikel
+        return if (art == null) {
+            t.isEmpty() || t in NONE_TOKENS
+        } else {
+            t == art.rawValue
+        }
+    }
+
+    /** Text to show as the "correct article" in feedback: "der"/"die"/"das" or "-". */
+    fun expectedLabel(card: Flashcard): String = card.displayArtikel
+}
+
+object ArtikelFilter {
+    /** Filter value for article-less words. Other values: "der", "die", "das"; null = all. */
+    const val NONE = "-"
+
+    data class Counts(val total: Int, val der: Int, val die: Int, val das: Int, val none: Int) {
+        /** Count for a filter value (null/blank = all). */
+        fun forFilter(filter: String?): Int = when (filter?.trim()?.lowercase(Locale.ROOT)) {
+            null, "" -> total
+            "der" -> der
+            "die" -> die
+            "das" -> das
+            NONE -> none
+            else -> 0
+        }
+    }
+
+    fun matches(card: Flashcard, filter: String?): Boolean {
+        val f = filter?.trim()?.lowercase(Locale.ROOT)
+        return when {
+            f.isNullOrEmpty() -> true
+            f == NONE -> card.isArticleless
+            else -> card.artikel?.rawValue == f
+        }
+    }
+
+    fun apply(cards: List<Flashcard>, filter: String?): List<Flashcard> = cards.filter { matches(it, filter) }
+
+    fun counts(cards: List<Flashcard>): Counts = Counts(
+        total = cards.size,
+        der = cards.count { it.artikel == Artikel.DER },
+        die = cards.count { it.artikel == Artikel.DIE },
+        das = cards.count { it.artikel == Artikel.DAS },
+        none = cards.count { it.isArticleless }
+    )
+}
+
+object CsvCards {
+    data class ImportOutcome(
+        val cards: List<Flashcard>,
+        val added: Int,
+        val updated: Int,
+        val skipped: Int,
+        val invalid: Int,
+        /** syncKeys of newly added cards (caller clears matching tombstones). */
+        val addedKeys: Set<String>
+    )
+
+    fun importContent(
+        content: String,
+        fallbackDeck: String,
+        existing: List<Flashcard>,
+        now: Long = System.currentTimeMillis()
+    ): ImportOutcome {
+        val lines = content.split("\r\n", "\n", "\r")
+        var added = 0
+        var updated = 0
+        var skipped = 0
+        var invalid = 0
+        val addedKeys = linkedSetOf<String>()
+        val fallback = fallbackDeck.trim().ifEmpty { "Genel" }
+        val cards = existing.toMutableList()
+        val indexByKey = HashMap<String, Int>()
+        cards.forEachIndexed { i, c -> indexByKey.putIfAbsent(c.syncKey, i) }
+
+        for ((lineIdx, rawLine) in lines.withIndex()) {
+            // trimEnd only: a leading tab/comma means "empty article column".
+            val line = rawLine.replace("﻿", "").trimEnd()
+            if (line.isBlank()) continue
+
+            val columns = parseRow(line)
+            if (columns.size < 2) {
+                invalid += 1
+                continue
+            }
+            val rawArtikel = columns[0]
+            val cleanWord = columns[1].trim()
+            val cleanMeaning = if (columns.size >= 3) columns[2].trim() else ""
+            val cleanDeck = (if (columns.size >= 4) columns[3] else fallback).trim().ifEmpty { fallback }
+
+            if (lineIdx == 0 && isHeader(rawArtikel, cleanWord)) continue
+
+            // Empty OR not der/die/das (typo) -> article-less word.
+            val artikel = Artikel.parseStrict(rawArtikel)
+            if (cleanWord.isEmpty()) {
+                invalid += 1
+                continue
+            }
+
+            val key = Flashcard.keyFor(artikel, cleanWord)
+            val idx = indexByKey[key]
+            if (idx != null) {
+                var card = cards[idx]
+                var didUpdate = false
+                if (cleanMeaning.isNotEmpty() && card.meaning != cleanMeaning) {
+                    card = card.copy(meaning = cleanMeaning)
+                    didUpdate = true
+                }
+                if (cleanDeck != "Genel" && card.deckName != cleanDeck) {
+                    card = card.copy(deckName = cleanDeck)
+                    didUpdate = true
+                }
+                if (didUpdate) {
+                    cards[idx] = card.copy(updatedAt = now)
+                    updated += 1
+                } else {
+                    skipped += 1
+                }
+            } else {
+                val card = Flashcard(
+                    artikel = artikel,
+                    word = cleanWord,
+                    meaning = cleanMeaning,
+                    deckName = cleanDeck,
+                    createdAt = now,
+                    updatedAt = now
+                )
+                cards.add(card)
+                indexByKey[key] = cards.size - 1
+                addedKeys.add(key)
+                added += 1
+            }
+        }
+        return ImportOutcome(cards, added, updated, skipped, invalid, addedKeys)
+    }
+
+    private fun isHeader(rawArtikel: String, word: String): Boolean {
+        val a = rawArtikel.trim().lowercase(Locale.ROOT)
+        val w = word.trim().lowercase(Locale.ROOT)
+        return a == "artikel" || a == "article" ||
+            (Artikel.parseStrict(a) == null && w in setOf("kelime", "word", "wort"))
+    }
+
+    fun exportString(cards: List<Flashcard>): String {
+        fun esc(s: String) = if (s.contains(",")) "\"$s\"" else s
+        val rows = mutableListOf("artikel,kelime,anlam,deste")
+        for (card in cards) {
+            // Article-less words are written with an EMPTY article column.
+            rows.add("${card.artikel?.rawValue ?: ""},${esc(card.word)},${esc(card.meaning)},${esc(card.deckName)}")
+        }
+        return rows.joinToString("\n")
+    }
+
+    fun parseRow(line: String): List<String> {
+        val delimiter: Char = run {
+            var inQuotes = false
+            var commaCount = 0
+            var semicolonCount = 0
+            var tabCount = 0
+            for (ch in line) {
+                if (ch == '"') inQuotes = !inQuotes
+                if (!inQuotes) {
+                    when (ch) {
+                        ',' -> commaCount++
+                        ';' -> semicolonCount++
+                        '\t' -> tabCount++
+                    }
+                }
+            }
+            when {
+                semicolonCount > commaCount && semicolonCount >= tabCount -> ';'
+                tabCount > commaCount && tabCount > semicolonCount -> '\t'
+                else -> ','
+            }
+        }
+
+        val fields = mutableListOf<String>()
+        val current = StringBuilder()
+        var inQuotes = false
+        for (ch in line) {
+            when {
+                ch == '"' -> inQuotes = !inQuotes
+                ch == delimiter && !inQuotes -> {
+                    fields.add(current.toString().trim())
+                    current.clear()
+                }
+                else -> current.append(ch)
+            }
+        }
+        fields.add(current.toString().trim())
+        return fields
+    }
+}
