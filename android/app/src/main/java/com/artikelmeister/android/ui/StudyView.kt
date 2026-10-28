@@ -158,8 +158,7 @@ fun StudyView(
 
     fun checkAndRevealCard(card: Flashcard) {
         if (isRevealed) return
-        val cleanedInput = typedArtikel.trim().lowercase(Locale.ROOT)
-        guessResult = if (cleanedInput == card.artikel.rawValue.lowercase(Locale.ROOT)) {
+        guessResult = if (com.artikelmeister.android.AnswerChecker.isCorrect(card, typedArtikel)) {
             ArtikelGuessResult.CORRECT
         } else {
             ArtikelGuessResult.WRONG
@@ -821,13 +820,13 @@ private fun ActiveCardSessionView(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 val statusText = if (guessResult == ArtikelGuessResult.CORRECT) {
-                                    "DOĞRU! (${card.artikel.grammaticalLabel})"
+                                    "DOĞRU! (${card.artikel?.grammaticalLabel ?: "Artikelsiz"})"
                                 } else {
                                     val userCleaned = typedArtikel.trim()
                                     if (userCleaned.isEmpty()) {
-                                        "BOŞ BIRAKILDI — Doğru Artikel: ${card.artikel.rawValue}"
+                                        "BOŞ BIRAKILDI — Doğru Artikel: ${card.displayArtikel}"
                                     } else {
-                                        "YANLIŞ ($userCleaned) — Doğru Artikel: ${card.artikel.rawValue}"
+                                        "YANLIŞ ($userCleaned) — Doğru Artikel: ${card.displayArtikel}"
                                     }
                                 }
                                 Text(
@@ -862,7 +861,7 @@ private fun ActiveCardSessionView(
                                     .padding(horizontal = 8.dp)
                             ) {
                                 Text(
-                                    text = card.artikel.rawValue,
+                                    text = card.artikel?.rawValue ?: "",
                                     fontSize = revealedArtikelFontSize,
                                     fontWeight = FontWeight.Black,
                                     color = wordHighlightColor
