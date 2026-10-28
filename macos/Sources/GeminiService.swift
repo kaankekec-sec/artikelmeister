@@ -1189,14 +1189,32 @@ enum GoogleDriveSyncService {
         dlReq.timeoutInterval = 30
 
         let (dlData, dlResp) = try await sendAuthorizedRequest(dlReq, authManager: authManager)
-        guard (200...299).contains(dlResp.statusCode), !dlData.isEmpty else {
+        // An existing cloud file that cannot be downloaded or decoded must NEVER be treated as
+        // "no cloud backup": the caller would upload over it. Throw so sync aborts instead.
+        guard (200...299).contains(dlResp.statusCode) else {
+            let body = String(data: dlData, encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "GoogleDrive",
+                code: dlResp.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: parseGoogleDriveError(httpCode: dlResp.statusCode, responseBody: body)]
+            )
+        }
+        guard !dlData.isEmpty else {
             return CloudSnapshot(folderId: folderId, fileId: fileId, backup: nil)
         }
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let parsedBackup = try? decoder.decode(ArtikelMeisterBackup.self, from: dlData)
-        return CloudSnapshot(folderId: folderId, fileId: fileId, backup: parsedBackup)
+        do {
+            let parsedBackup = try decoder.decode(ArtikelMeisterBackup.self, from: dlData)
+            return CloudSnapshot(folderId: folderId, fileId: fileId, backup: parsedBackup)
+        } catch {
+            throw NSError(
+                domain: "GoogleDrive",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Buluttaki yedek dosyası okunamadı; üzerine yazılmadı. (\(error.localizedDescription))"]
+            )
+        }
     }
 
     static func uploadCloudBackup(

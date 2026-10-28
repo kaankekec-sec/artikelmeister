@@ -26,6 +26,11 @@ final class DeckStore: ObservableObject {
     @Published var currentTime: Date = Date()
     @Published var deletedCardKeys: [String: Date] = [:]
 
+    /// True when cards.json / articleless_cards.json exists but could not be decoded. While set,
+    /// local card files are never rewritten and cloud sync never uploads, so a decode failure
+    /// cannot wipe local or cloud data.
+    @Published private(set) var cardsLoadFailed: Bool = false
+
     // Cloud Sync State
     @Published var isSyncingCloud: Bool = false
     @Published var cloudSyncStatusMessage: String? = nil
@@ -50,6 +55,9 @@ final class DeckStore: ObservableObject {
     let importedCSVsDirectory: URL
     let backupsDirectory: URL
     private let cardsFileURL: URL
+    /// Article-less words live in their own optional file so cards.json stays a plain array of
+    /// valid der/die/das cards that older app versions can read safely.
+    private let articlelessCardsFileURL: URL
     private let settingsFileURL: URL
     private let progressFileURL: URL
     private let historyFileURL: URL
@@ -61,6 +69,7 @@ final class DeckStore: ObservableObject {
         self.importedCSVsDirectory = storageDirectory.appendingPathComponent("ImportedCSVs", isDirectory: true)
         self.backupsDirectory = storageDirectory.appendingPathComponent("Backups", isDirectory: true)
         self.cardsFileURL = storageDirectory.appendingPathComponent("cards.json")
+        self.articlelessCardsFileURL = storageDirectory.appendingPathComponent("articleless_cards.json")
         self.settingsFileURL = storageDirectory.appendingPathComponent("settings.json")
         self.progressFileURL = storageDirectory.appendingPathComponent("daily_progress.json")
         self.historyFileURL = storageDirectory.appendingPathComponent("study_history.json")
@@ -140,11 +149,29 @@ final class DeckStore: ObservableObject {
             saveHistory()
         }
 
-        if fm.fileExists(atPath: cardsFileURL.path),
-           let data = try? Data(contentsOf: cardsFileURL),
-           let loadedCards = try? decoder.decode([Flashcard].self, from: data) {
-            self.cards = loadedCards
-        } else {
+        var loadFailed = false
+        var loaded: [Flashcard] = []
+        if fm.fileExists(atPath: cardsFileURL.path) {
+            if let data = try? Data(contentsOf: cardsFileURL),
+               let list = try? decoder.decode(LossyCardList.self, from: data) {
+                loaded += list.cards
+            } else {
+                loadFailed = true
+                preserveCorruptFile(cardsFileURL)
+            }
+        }
+        if fm.fileExists(atPath: articlelessCardsFileURL.path) {
+            if let data = try? Data(contentsOf: articlelessCardsFileURL),
+               let list = try? decoder.decode(LossyArticlelessCardList.self, from: data) {
+                loaded += list.cards
+            } else {
+                loadFailed = true
+                preserveCorruptFile(articlelessCardsFileURL)
+            }
+        }
+        self.cardsLoadFailed = loadFailed
+        self.cards = CardMerge.dedupe(loaded)
+        if !loadFailed && !fm.fileExists(atPath: cardsFileURL.path) {
             saveCards(triggerCloudSync: false)
         }
 
@@ -159,6 +186,12 @@ final class DeckStore: ObservableObject {
             }
             self.deletedCardKeys = map
         }
+    }
+
+    private func preserveCorruptFile(_ url: URL) {
+        let backup = url.deletingLastPathComponent()
+            .appendingPathComponent("\(url.lastPathComponent).corrupt-\(Int(Date().timeIntervalSince1970))")
+        try? FileManager.default.copyItem(at: url, to: backup)
     }
 
     func saveDeletedCardsFileOnly() {
@@ -187,8 +220,17 @@ final class DeckStore: ObservableObject {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(cards) {
+        // Never overwrite files we could not decode.
+        if cardsLoadFailed { return }
+        // cards.json: ONLY valid der/die/das cards (backward-safe for old clients).
+        if let data = try? encoder.encode(cards.filter { !$0.isArticleless }) {
             try? data.write(to: cardsFileURL, options: .atomic)
+        }
+        let articleless = cards.filter { $0.isArticleless }
+        if articleless.isEmpty {
+            try? FileManager.default.removeItem(at: articlelessCardsFileURL)
+        } else if let data = try? encoder.encode(articleless) {
+            try? data.write(to: articlelessCardsFileURL, options: .atomic)
         }
         if triggerCloudSync {
             scheduleAutoCloudSync()
@@ -268,6 +310,14 @@ final class DeckStore: ObservableObject {
             return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
         }
     }
+
+    /// Counts per article (incl. '-' = article-less) for the whole pool or one deck.
+    func artikelCounts(forDeck deckName: String? = nil) -> ArtikelFilter.Counts {
+        let pool = deckName == nil ? cards : cards.filter { $0.deckName == deckName }
+        return ArtikelFilter.counts(pool)
+    }
+
+    var articlelessCount: Int { cards.filter { $0.isArticleless }.count }
 
     func cardCount(forDeck deckName: String?) -> Int {
         guard let deckName = deckName else { return cards.count }
@@ -606,7 +656,7 @@ final class DeckStore: ObservableObject {
 
     // MARK: - Word CRUD & Editing
 
-    func addCard(artikel: Artikel, word: String, meaning: String, deckName: String = "Genel") -> Bool {
+    func addCard(artikel: Artikel?, word: String, meaning: String, deckName: String = "Genel") -> Bool {
         let cleanWord = word.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanMeaning = meaning.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanDeck = deckName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -614,9 +664,8 @@ final class DeckStore: ObservableObject {
             : deckName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanWord.isEmpty else { return false }
 
-        if let existingIdx = cards.firstIndex(where: {
-            $0.artikel == artikel && $0.word.lowercased() == cleanWord.lowercased()
-        }) {
+        let newKey = Flashcard.keyFor(artikel: artikel, word: cleanWord)
+        if let existingIdx = cards.firstIndex(where: { $0.syncKey == newKey }) {
             var changed = false
             if !cleanMeaning.isEmpty && cards[existingIdx].meaning.isEmpty {
                 cards[existingIdx].meaning = cleanMeaning
@@ -645,7 +694,7 @@ final class DeckStore: ObservableObject {
         return true
     }
 
-    func updateCard(id: UUID, artikel: Artikel, word: String, meaning: String, deckName: String) {
+    func updateCard(id: UUID, artikel: Artikel?, word: String, meaning: String, deckName: String) {
         guard let idx = cards.firstIndex(where: { $0.id == id }) else { return }
         let cleanWord = word.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanWord.isEmpty else { return }
@@ -704,6 +753,7 @@ final class DeckStore: ObservableObject {
             deletedCardKeys[c.syncKey] = now
         }
         saveDeletedCardsFileOnly()
+        cardsLoadFailed = false // explicit user wipe
         cards.removeAll()
         cardDueStepMap.removeAll()
         selectedStudyDeck = nil
@@ -764,7 +814,8 @@ final class DeckStore: ObservableObject {
         let backup = try decoder.decode(ArtikelMeisterBackup.self, from: data)
 
         if !mergeWithExisting {
-            self.cards = backup.cards
+            cardsLoadFailed = false // explicit user replace of all cards
+            self.cards = CardMerge.dedupe(backup.cards)
             if let s = backup.settings {
                 self.settings = s
                 saveSettingsFileOnly()
@@ -789,9 +840,8 @@ final class DeckStore: ObservableObject {
             var updated = 0
             for incoming in backup.cards {
                 deletedCardKeys.removeValue(forKey: incoming.syncKey)
-                if let idx = cards.firstIndex(where: {
-                    $0.artikel == incoming.artikel && $0.word.lowercased() == incoming.word.lowercased()
-                }) {
+                let incomingKey = incoming.syncKey
+                if let idx = cards.firstIndex(where: { $0.syncKey == incomingKey }) {
                     cards[idx] = smartMergeCards(local: cards[idx], incoming: incoming)
                     updated += 1
                 } else {
@@ -831,60 +881,7 @@ final class DeckStore: ObservableObject {
     }
 
     func smartMergeCards(local: Flashcard, incoming: Flashcard) -> Flashcard {
-        // Choose the card with further / newer Anki SM-2 study progress
-        let incomingHasMoreProgress: Bool
-        if incoming.totalReviews != local.totalReviews {
-            incomingHasMoreProgress = incoming.totalReviews > local.totalReviews
-        } else if (incoming.lastReviewedAt ?? .distantPast) != (local.lastReviewedAt ?? .distantPast) {
-            incomingHasMoreProgress = (incoming.lastReviewedAt ?? .distantPast) > (local.lastReviewedAt ?? .distantPast)
-        } else {
-            incomingHasMoreProgress = incoming.updatedAt > local.updatedAt
-        }
-        let progressSource = incomingHasMoreProgress ? incoming : local
-
-        // Choose best meaning (non-empty wins; if both non-empty, newer updatedAt wins)
-        let mergedMeaning: String
-        let localMeaningTrimmed = local.meaning.trimmingCharacters(in: .whitespacesAndNewlines)
-        let incomingMeaningTrimmed = incoming.meaning.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !localMeaningTrimmed.isEmpty && incomingMeaningTrimmed.isEmpty {
-            mergedMeaning = local.meaning
-        } else if !incomingMeaningTrimmed.isEmpty && localMeaningTrimmed.isEmpty {
-            mergedMeaning = incoming.meaning
-        } else if incoming.updatedAt > local.updatedAt && !incomingMeaningTrimmed.isEmpty {
-            mergedMeaning = incoming.meaning
-        } else {
-            mergedMeaning = local.meaning
-        }
-
-        // Choose best deck (specific deck over 'Genel' wins; if both specific, newer updatedAt wins)
-        let mergedDeck: String
-        if local.cleanDeckName != "Genel" && incoming.cleanDeckName == "Genel" {
-            mergedDeck = local.cleanDeckName
-        } else if incoming.cleanDeckName != "Genel" && local.cleanDeckName == "Genel" {
-            mergedDeck = incoming.cleanDeckName
-        } else if incoming.updatedAt > local.updatedAt {
-            mergedDeck = incoming.cleanDeckName
-        } else {
-            mergedDeck = local.cleanDeckName
-        }
-
-        return Flashcard(
-            id: local.id,
-            artikel: local.artikel,
-            word: local.word,
-            meaning: mergedMeaning,
-            deckName: mergedDeck,
-            createdAt: min(local.createdAt, incoming.createdAt),
-            updatedAt: max(local.updatedAt, incoming.updatedAt),
-            stage: progressSource.stage,
-            easeFactor: progressSource.easeFactor,
-            intervalDays: progressSource.intervalDays,
-            repetitions: progressSource.repetitions,
-            lapses: progressSource.lapses,
-            dueDate: progressSource.dueDate,
-            lastReviewedAt: progressSource.lastReviewedAt,
-            totalReviews: progressSource.totalReviews
-        )
+        CardMerge.smartMerge(local: local, incoming: incoming)
     }
 
     func syncWithGoogleDrive(isSilentAutoSync: Bool = false) async {
@@ -893,6 +890,12 @@ final class DeckStore: ObservableObject {
 
     func syncWithGoogleDrive(authManager: GeminiAuthManager, isSilentAutoSync: Bool = false) async {
         guard authManager.isGoogleAccountConnected && !isSyncingCloud else { return }
+        if cardsLoadFailed {
+            // Local card files could not be decoded: do not merge/upload anything.
+            cloudSyncIsError = true
+            cloudSyncStatusMessage = "Yerel kelime dosyası okunamadı; veri kaybını önlemek için eşitleme durduruldu."
+            return
+        }
         isSyncingCloud = true
         if !isSilentAutoSync {
             cloudSyncIsError = false
@@ -925,37 +928,11 @@ final class DeckStore: ObservableObject {
                 saveDeletedCardsFileOnly()
 
                 // 2. Deduplicate & Smart-Merge local cards + cloud cards by syncKey
-                var mergedByKey: [String: Flashcard] = [:]
-                var keyOrder: [String] = []
-
-                for localCard in cards {
-                    let key = localCard.syncKey
-                    let delTs = mergedDeleted[key] ?? .distantPast
-                    if delTs > localCard.updatedAt { continue }
-                    if let existing = mergedByKey[key] {
-                        mergedByKey[key] = smartMergeCards(local: existing, incoming: localCard)
-                    } else {
-                        mergedByKey[key] = localCard
-                        keyOrder.append(key)
-                    }
-                }
-
-                for cloudCard in cloudBackup.cards {
-                    let key = cloudCard.syncKey
-                    let delTs = mergedDeleted[key] ?? .distantPast
-                    if delTs > cloudCard.updatedAt { continue }
-
-                    if let existing = mergedByKey[key] {
-                        mergedByKey[key] = smartMergeCards(local: existing, incoming: cloudCard)
-                        overlappingDeduplicated += 1
-                    } else {
-                        mergedByKey[key] = cloudCard
-                        keyOrder.append(key)
-                        addedFromCloud += 1
-                    }
-                }
-
-                cards = keyOrder.compactMap { mergedByKey[$0] }
+                //    (cloudBackup.cards already contains valid + article-less cards)
+                let mergeResult = CardMerge.merge(local: cards, incoming: cloudBackup.cards, tombstones: mergedDeleted)
+                addedFromCloud = mergeResult.addedFromIncoming
+                overlappingDeduplicated = mergeResult.overlapping
+                cards = mergeResult.cards
 
                 // 3. Merge studyHistory & today's dailyProgress
                 if let cloudHistory = cloudBackup.studyHistory {
@@ -1021,18 +998,9 @@ final class DeckStore: ObservableObject {
                 saveCards(triggerCloudSync: false)
                 rebuildStudyQueue(preserveCurrentFrontCard: true)
             } else {
-                var deduplicatedMap: [String: Flashcard] = [:]
-                var keyOrder: [String] = []
-                for c in cards {
-                    if let existing = deduplicatedMap[c.syncKey] {
-                        deduplicatedMap[c.syncKey] = smartMergeCards(local: existing, incoming: c)
-                    } else {
-                        deduplicatedMap[c.syncKey] = c
-                        keyOrder.append(c.syncKey)
-                    }
-                }
-                if deduplicatedMap.count != cards.count {
-                    cards = keyOrder.compactMap { deduplicatedMap[$0] }
+                let deduplicated = CardMerge.dedupe(cards)
+                if deduplicated.count != cards.count {
+                    cards = deduplicated
                     saveCards(triggerCloudSync: false)
                 }
             }
@@ -1084,6 +1052,8 @@ final class DeckStore: ObservableObject {
 
         let fm = FileManager.default
         try? fm.removeItem(at: cardsFileURL)
+        try? fm.removeItem(at: articlelessCardsFileURL)
+        cardsLoadFailed = false
         try? fm.removeItem(at: settingsFileURL)
         try? fm.removeItem(at: progressFileURL)
         try? fm.removeItem(at: historyFileURL)
@@ -1126,125 +1096,21 @@ final class DeckStore: ObservableObject {
     }
 
     func importCSVContent(_ content: String, defaultDeckName: String = "Genel") -> CSVImportResult {
-        let lines = content.components(separatedBy: .newlines)
-        var added = 0
-        var updated = 0
-        var skipped = 0
-        var invalid = 0
-
-        let fallbackDeck = defaultDeckName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Genel"
-            : defaultDeckName.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        for (lineIdx, rawLine) in lines.enumerated() {
-            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { continue }
-
-            let columns = parseCSVRow(trimmed)
-            guard columns.count >= 2 else {
-                invalid += 1
-                continue
-            }
-
-            let rawArtikel = columns[0].replacingOccurrences(of: "\u{FEFF}", with: "")
-            let rawWord = columns[1]
-            let rawMeaning = columns.count >= 3 ? columns[2] : ""
-            let rawDeck = columns.count >= 4 ? columns[3] : fallbackDeck
-
-            guard let parsedArtikel = Artikel.parse(rawArtikel) else {
-                if lineIdx == 0 {
-                    continue
-                }
-                invalid += 1
-                continue
-            }
-
-            let cleanWord = rawWord.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleanMeaning = rawMeaning.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleanDeck = rawDeck.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? fallbackDeck
-                : rawDeck.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            guard !cleanWord.isEmpty else {
-                invalid += 1
-                continue
-            }
-
-            if let existingIdx = cards.firstIndex(where: {
-                $0.artikel == parsedArtikel && $0.word.lowercased() == cleanWord.lowercased()
-            }) {
-                var didUpdate = false
-                if !cleanMeaning.isEmpty && cards[existingIdx].meaning != cleanMeaning {
-                    cards[existingIdx].meaning = cleanMeaning
-                    didUpdate = true
-                }
-                if cleanDeck != "Genel" && cards[existingIdx].deckName != cleanDeck {
-                    cards[existingIdx].deckName = cleanDeck
-                    didUpdate = true
-                }
-                if didUpdate {
-                    updated += 1
-                } else {
-                    skipped += 1
-                }
-            } else {
-                let card = Flashcard(artikel: parsedArtikel, word: cleanWord, meaning: cleanMeaning, deckName: cleanDeck)
-                cards.append(card)
-                added += 1
-            }
+        // Rows with an empty / non-der/die/das article column become article-less words.
+        let outcome = CsvCards.importContent(content, fallbackDeck: defaultDeckName, existing: cards)
+        var removedTombstone = false
+        for key in outcome.addedKeys where deletedCardKeys.removeValue(forKey: key) != nil {
+            removedTombstone = true
         }
-
+        if removedTombstone { saveDeletedCardsFileOnly() }
+        cards = outcome.cards
         saveCards()
         rebuildStudyQueue()
-        return CSVImportResult(addedCount: added, updatedCount: updated, skippedCount: skipped, invalidLines: invalid)
-    }
-
-    private func parseCSVRow(_ line: String) -> [String] {
-        let delimiter: Character = {
-            var inQuotes = false
-            var commaCount = 0
-            var semicolonCount = 0
-            var tabCount = 0
-            for ch in line {
-                if ch == "\"" { inQuotes.toggle() }
-                if !inQuotes {
-                    if ch == "," { commaCount += 1 }
-                    else if ch == ";" { semicolonCount += 1 }
-                    else if ch == "\t" { tabCount += 1 }
-                }
-            }
-            if semicolonCount > commaCount && semicolonCount >= tabCount { return ";" }
-            if tabCount > commaCount && tabCount > semicolonCount { return "\t" }
-            return ","
-        }()
-
-        var fields: [String] = []
-        var current = ""
-        var inQuotes = false
-
-        for ch in line {
-            if ch == "\"" {
-                inQuotes.toggle()
-            } else if ch == delimiter && !inQuotes {
-                fields.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
-                current = ""
-            } else {
-                current.append(ch)
-            }
-        }
-        fields.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
-        return fields
+        return CSVImportResult(addedCount: outcome.added, updatedCount: outcome.updated, skippedCount: outcome.skipped, invalidLines: outcome.invalid)
     }
 
     func exportCSVString() -> String {
-        var rows = ["artikel,kelime,anlam,deste"]
-        for card in cards {
-            let escapedWord = card.word.contains(",") ? "\"\(card.word)\"" : card.word
-            let escapedMeaning = card.meaning.contains(",") ? "\"\(card.meaning)\"" : card.meaning
-            let escapedDeck = card.deckName.contains(",") ? "\"\(card.deckName)\"" : card.deckName
-            rows.append("\(card.artikel.rawValue),\(escapedWord),\(escapedMeaning),\(escapedDeck)")
-        }
-        return rows.joined(separator: "\n")
+        CsvCards.exportString(cards)
     }
 
     func loadStarterGermanPack() -> CSVImportResult {
