@@ -1,5 +1,6 @@
 package com.artikelmeister.android.ui
 
+import androidx.compose.material3.MaterialTheme
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -251,13 +252,13 @@ fun AIGeneratorDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Gemini AI ile Seviyeye Göre Kelime Üret",
-                            fontSize = 17.sp,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = colors.primaryText
                         )
                         Text(
                             text = "Kendi Gemini kullanım hakkınızla A1–C1 seviyesinde, listenizde olmayan yeni kelimeler üretin",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             color = colors.secondaryText
                         )
                     }
@@ -305,13 +306,13 @@ fun AIGeneratorDialog(
                                     Column {
                                         Text(
                                             text = if (authManager.isAuthorized) "Gemini Yetkilendirmesi Aktif" else "Gemini Yetkilendirmesi Gerekli",
-                                            fontSize = 14.sp,
+                                            style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = colors.primaryText
                                         )
                                         Text(
                                             text = "${authManager.authMode.title} • Model: ${authManager.selectedModel}",
-                                            fontSize = 11.sp,
+                                            fontSize = MaterialTheme.typography.labelSmall.fontSize,
                                             color = colors.secondaryText
                                         )
                                     }
@@ -324,7 +325,7 @@ fun AIGeneratorDialog(
                                 ) {
                                     Text(
                                         text = if (showAuthConfig) "Gizle" else "Yetkilendirme Ayarları",
-                                        fontSize = 11.sp
+                                        style = MaterialTheme.typography.labelSmall
                                     )
                                 }
                             }
@@ -341,7 +342,7 @@ fun AIGeneratorDialog(
                                     ) {
                                         Text(
                                             text = "Aktif Gemini Modeli:",
-                                            fontSize = 13.sp,
+                                            style = MaterialTheme.typography.bodySmall,
                                             fontWeight = FontWeight.SemiBold,
                                             color = colors.primaryText
                                         )
@@ -359,7 +360,7 @@ fun AIGeneratorDialog(
                                                 ) {
                                                     Text(
                                                         text = authManager.selectedModel,
-                                                        fontSize = 12.sp,
+                                                        style = MaterialTheme.typography.labelSmall,
                                                         fontWeight = FontWeight.SemiBold,
                                                         color = colors.accentPurple
                                                     )
@@ -429,7 +430,7 @@ fun AIGeneratorDialog(
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
                                                 text = if (authManager.isAuthorized && authManager.authMode == GeminiAuthMode.GOOGLE_OAUTH) "Google Hesabını Yeniden Bağla" else "Google Hesabı ile Giriş Yap (Tek Tık)",
-                                                fontSize = 12.sp,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.SemiBold
                                             )
                                         }
@@ -441,7 +442,7 @@ fun AIGeneratorDialog(
                                             ) {
                                                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                                 Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Yetkilendiriliyor...", fontSize = 11.sp, color = colors.secondaryText)
+                                                Text("Yetkilendiriliyor...", style = MaterialTheme.typography.labelSmall, color = colors.secondaryText)
                                             }
                                         }
 
@@ -452,7 +453,7 @@ fun AIGeneratorDialog(
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = if (showAdvancedApiKey) "Gelişmiş Seçenekleri Gizle" else "Gelişmiş: API Anahtarı ile Doğrula",
-                                                fontSize = 11.sp
+                                                style = MaterialTheme.typography.labelSmall
                                             )
                                         }
                                     }
@@ -469,20 +470,20 @@ fun AIGeneratorDialog(
                                         ) {
                                             Text(
                                                 text = "Google AI Studio API Anahtarı:",
-                                                fontSize = 12.sp,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = colors.primaryText
                                             )
                                             Text(
                                                 text = "Google hesabınızla Google AI Studio üzerinden ücretsiz Gemini API anahtarınızı alıp aşağıya yapıştırabilirsiniz.",
-                                                fontSize = 11.sp,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 color = colors.secondaryText
                                             )
 
                                             OutlinedTextField(
                                                 value = authManager.apiKey,
                                                 onValueChange = { authManager.apiKey = it },
-                                                placeholder = { Text("Gemini API Anahtarı (AIza...)", fontSize = 12.sp) },
+                                                placeholder = { Text("Gemini API Anahtarı (AIza...)", style = MaterialTheme.typography.labelSmall) },
                                                 visualTransformation = PasswordVisualTransformation(),
                                                 singleLine = true,
                                                 modifier = Modifier.fillMaxWidth()
@@ -497,7 +498,7 @@ fun AIGeneratorDialog(
                                                 ) {
                                                     Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
                                                     Spacer(modifier = Modifier.width(6.dp))
-                                                    Text("Google AI Studio'dan Al", fontSize = 12.sp)
+                                                    Text("Google AI Studio'dan Al", style = MaterialTheme.typography.labelSmall)
                                                 }
 
                                                 Button(
@@ -521,7 +522,7 @@ fun AIGeneratorDialog(
                                                 ) {
                                                     Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                                                     Spacer(modifier = Modifier.width(6.dp))
-                                                    Text("Doğrula & Kaydet", fontSize = 12.sp)
+                                                    Text("Doğrula & Kaydet", style = MaterialTheme.typography.labelSmall)
                                                 }
                                             }
                                         }
@@ -534,7 +535,7 @@ fun AIGeneratorDialog(
                                         ) {
                                             Text(
                                                 text = statusMsg,
-                                                fontSize = 11.sp,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 color = colors.secondaryText,
                                                 modifier = Modifier.weight(1f)
                                             )
@@ -542,7 +543,7 @@ fun AIGeneratorDialog(
                                                 TextButton(
                                                     onClick = { authManager.clearAuthorization() }
                                                 ) {
-                                                    Text("Yetkiyi Kaldır", fontSize = 11.sp, color = colors.vividRed)
+                                                    Text("Yetkiyi Kaldır", style = MaterialTheme.typography.labelSmall, color = colors.vividRed)
                                                 }
                                             }
                                         }
@@ -561,7 +562,7 @@ fun AIGeneratorDialog(
                         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             Text(
                                 text = "Almanca Dil Seviyesi:",
-                                fontSize = 13.sp,
+                                style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.primaryText
                             )
@@ -596,13 +597,13 @@ fun AIGeneratorDialog(
                                     ) {
                                         Text(
                                             text = lvl.rawValue,
-                                            fontSize = 16.sp,
+                                            style = MaterialTheme.typography.titleSmall,
                                             fontWeight = FontWeight.Bold,
                                             color = if (isSelected) colors.accentPurple else colors.primaryText
                                         )
                                         Text(
                                             text = lvl.shortSubtitle,
-                                            fontSize = 10.sp,
+                                            style = MaterialTheme.typography.labelSmall,
                                             color = if (isSelected) colors.accentPurple else colors.secondaryText,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -613,7 +614,7 @@ fun AIGeneratorDialog(
 
                             Text(
                                 text = selectedLevel.description,
-                                fontSize = 11.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = colors.secondaryText
                             )
 
@@ -626,7 +627,7 @@ fun AIGeneratorDialog(
                             ) {
                                 Text(
                                     text = "Üretilecek Kelime Sayısı (1 – 100):",
-                                    fontSize = 13.sp,
+                                    style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.SemiBold,
                                     color = colors.primaryText,
                                     modifier = Modifier.weight(1f)
@@ -634,22 +635,20 @@ fun AIGeneratorDialog(
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(
-                                        onClick = { wordCount = (wordCount - 1).coerceAtLeast(1) },
-                                        modifier = Modifier.size(28.dp)
+                                        onClick = { wordCount = (wordCount - 1).coerceAtLeast(1) }
                                     ) {
                                         Icon(Icons.Default.Remove, contentDescription = "Azalt", tint = colors.primaryText)
                                     }
                                     Text(
                                         text = "$wordCount kelime",
-                                        fontSize = 14.sp,
+                                        style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
                                         color = colors.accentPurple,
                                         modifier = Modifier.padding(horizontal = 6.dp)
                                     )
                                     IconButton(
-                                        onClick = { wordCount = (wordCount + 1).coerceAtMost(100) },
-                                        modifier = Modifier.size(28.dp)
+                                        onClick = { wordCount = (wordCount + 1).coerceAtMost(100) }
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = "Artır", tint = colors.primaryText)
                                     }
@@ -661,7 +660,7 @@ fun AIGeneratorDialog(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("1", fontSize = 11.sp, color = colors.secondaryText)
+                                Text("1", style = MaterialTheme.typography.labelSmall, color = colors.secondaryText)
                                 Slider(
                                     value = wordCount.toFloat(),
                                     onValueChange = { wordCount = it.roundToInt().coerceIn(1, 100) },
@@ -672,7 +671,7 @@ fun AIGeneratorDialog(
                                     ),
                                     modifier = Modifier.weight(1f)
                                 )
-                                Text("100", fontSize = 11.sp, color = colors.secondaryText)
+                                Text("100", style = MaterialTheme.typography.labelSmall, color = colors.secondaryText)
                             }
 
                             // Quick count preset chips
@@ -683,7 +682,7 @@ fun AIGeneratorDialog(
                             ) {
                                 Text(
                                     text = "Hızlı Seçim:",
-                                    fontSize = 11.sp,
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = colors.secondaryText,
                                     modifier = Modifier.align(Alignment.CenterVertically)
                                 )
@@ -700,7 +699,7 @@ fun AIGeneratorDialog(
                                     ) {
                                         Text(
                                             text = "$preset",
-                                            fontSize = 11.sp,
+                                            style = MaterialTheme.typography.labelSmall,
                                             fontWeight = if (isPreset) FontWeight.Bold else FontWeight.Medium,
                                             color = if (isPreset) colors.accentPurple else colors.primaryText,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
@@ -715,7 +714,7 @@ fun AIGeneratorDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
                                     text = "Konu / Tema (İsteğe bağlı):",
-                                    fontSize = 12.sp,
+                                    style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Medium,
                                     color = colors.primaryText
                                 )
@@ -725,7 +724,7 @@ fun AIGeneratorDialog(
                                     placeholder = {
                                         Text(
                                             "Örn: Seyahat, İş Hayatı, Mutfak, Akademik (Boş bırakılırsa genel)",
-                                            fontSize = 12.sp
+                                            style = MaterialTheme.typography.labelSmall
                                         )
                                     },
                                     singleLine = true,
@@ -734,7 +733,7 @@ fun AIGeneratorDialog(
 
                                 Text(
                                     text = "Eklenecek Deste / Kategori:",
-                                    fontSize = 12.sp,
+                                    style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Medium,
                                     color = colors.primaryText
                                 )
@@ -758,7 +757,7 @@ fun AIGeneratorDialog(
                                         OutlinedButton(onClick = { showTargetDeckMenu = true }) {
                                             Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
                                             Spacer(modifier = Modifier.width(5.dp))
-                                            Text("Mevcut Desteler", fontSize = 12.sp)
+                                            Text("Mevcut Desteler", style = MaterialTheme.typography.labelSmall)
                                         }
                                         DropdownMenu(
                                             expanded = showTargetDeckMenu,
@@ -808,7 +807,7 @@ fun AIGeneratorDialog(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = err,
-                                fontSize = 12.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = colors.vividRed
                             )
                         }
@@ -823,7 +822,7 @@ fun AIGeneratorDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = "Aşağıdaki kelimeler listenize eklendi:",
-                                    fontSize = 11.sp,
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = colors.secondaryText
                                 )
                                 newlyAddedWords.forEach { item ->
@@ -842,21 +841,21 @@ fun AIGeneratorDialog(
                                         ) {
                                             Text(
                                                 text = art.rawValue,
-                                                fontSize = 12.sp,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.Bold,
-                                                color = art.color
+                                                color = art.themeColor()
                                             )
                                         }
                                         Text(
                                             text = item.word,
-                                            fontSize = 13.sp,
+                                            style = MaterialTheme.typography.bodySmall,
                                             fontWeight = FontWeight.SemiBold,
                                             color = colors.primaryText
                                         )
                                         Text("—", color = colors.secondaryText)
                                         Text(
                                             text = item.meaning,
-                                            fontSize = 13.sp,
+                                            style = MaterialTheme.typography.bodySmall,
                                             color = colors.secondaryText
                                         )
                                     }
@@ -884,7 +883,7 @@ fun AIGeneratorDialog(
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                             Text(
                                 text = progressMessage,
-                                fontSize = 12.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = colors.secondaryText
                             )
                         }
@@ -902,7 +901,7 @@ fun AIGeneratorDialog(
                             shape = RoundedCornerShape(10.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                         ) {
-                            Text("Kapat", fontSize = 12.sp, color = colors.primaryText)
+                            Text("Kapat", style = MaterialTheme.typography.labelSmall, color = colors.primaryText)
                         }
 
                         Button(
@@ -923,7 +922,7 @@ fun AIGeneratorDialog(
                             Text(
                                 text = "${selectedLevel.rawValue} Seviyesinde $wordCount Kelime Üret ve Ekle",
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp,
+                                fontSize = MaterialTheme.typography.labelSmall.fontSize,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )

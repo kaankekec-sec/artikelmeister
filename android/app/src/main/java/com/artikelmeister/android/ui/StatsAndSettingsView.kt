@@ -1,5 +1,8 @@
 package com.artikelmeister.android.ui
 
+import com.artikelmeister.android.R
+import androidx.compose.ui.res.stringResource
+import androidx.compose.material3.MaterialTheme
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -24,7 +27,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
@@ -127,12 +141,11 @@ fun StatsView(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onOpenDrawer != null) {
                 IconButton(
-                    onClick = onOpenDrawer,
-                    modifier = Modifier.size(32.dp)
+                    onClick = onOpenDrawer
                 ) {
                     Icon(
                         imageVector = Icons.Default.Menu,
-                        contentDescription = "Menü",
+                        contentDescription = stringResource(R.string.action_open_menu),
                         tint = colors.primaryText
                     )
                 }
@@ -140,7 +153,7 @@ fun StatsView(
             }
             Text(
                 text = "Çalışma İstatistikleri",
-                fontSize = 22.sp,
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = colors.primaryText
             )
@@ -209,13 +222,13 @@ fun StatsView(
                         Column {
                             Text(
                                 text = "${store.currentStreakDays} Gün",
-                                fontSize = 20.sp,
+                                fontSize = MaterialTheme.typography.titleLarge.fontSize,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.primaryText
                             )
                             Text(
                                 text = "Kesintisiz Günlük Seri",
-                                fontSize = 11.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = colors.secondaryText
                             )
                         }
@@ -232,13 +245,13 @@ fun StatsView(
                         Column {
                             Text(
                                 text = "${store.longestStreakDays} Gün",
-                                fontSize = 18.sp,
+                                fontSize = MaterialTheme.typography.titleMedium.fontSize,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.primaryText
                             )
                             Text(
                                 text = "En Uzun Seri Rekoru",
-                                fontSize = 11.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = colors.secondaryText
                             )
                         }
@@ -255,13 +268,13 @@ fun StatsView(
                         Column {
                             Text(
                                 text = "$activeStudyDaysCount Gün",
-                                fontSize = 18.sp,
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.primaryText
                             )
                             Text(
                                 text = "Toplam Aktif Çalışılan Gün",
-                                fontSize = 11.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = colors.secondaryText
                             )
                         }
@@ -277,7 +290,7 @@ fun StatsView(
                 ) {
                     Text(
                         text = "Son 35 Günlük Aktivite Yoğunluğu",
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.secondaryText,
                         modifier = Modifier.weight(1f)
@@ -286,7 +299,7 @@ fun StatsView(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text("Az", fontSize = 10.sp, color = colors.secondaryText)
+                        Text("Az", style = MaterialTheme.typography.labelSmall, color = colors.secondaryText)
                         listOf(0, 3, 12, 25, 50).forEach { sample ->
                             Box(
                                 modifier = Modifier
@@ -297,7 +310,7 @@ fun StatsView(
                                     )
                             )
                         }
-                        Text("Çok", fontSize = 10.sp, color = colors.secondaryText)
+                        Text("Çok", style = MaterialTheme.typography.labelSmall, color = colors.secondaryText)
                     }
                 }
 
@@ -343,7 +356,7 @@ fun StatsView(
                             }
                             append(" / ${store.settings.dailyNewCardLimit}")
                         },
-                        fontSize = 13.sp,
+                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
                         color = colors.primaryText
                     )
                     Text(
@@ -354,7 +367,7 @@ fun StatsView(
                             }
                             append(" / ${store.settings.dailyReviewLimit}")
                         },
-                        fontSize = 13.sp,
+                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
                         color = colors.primaryText
                     )
                 }
@@ -395,19 +408,19 @@ fun StatsView(
                     label = "der (Eril)",
                     count = derCount,
                     total = max(1, totalCards),
-                    color = Artikel.DER.color
+                    color = Artikel.DER.themeColor()
                 )
                 DistributionRow(
                     label = "die (Dişil)",
                     count = dieCount,
                     total = max(1, totalCards),
-                    color = Artikel.DIE.color
+                    color = Artikel.DIE.themeColor()
                 )
                 DistributionRow(
                     label = "das (Nötr)",
                     count = dasCount,
                     total = max(1, totalCards),
-                    color = Artikel.DAS.color
+                    color = Artikel.DAS.themeColor()
                 )
             }
         }
@@ -464,7 +477,7 @@ private fun HeatmapCell(
     ) {
         Text(
             text = displayDate,
-            fontSize = 9.sp,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
             color = if (count > 0) colors.primaryText else colors.secondaryText,
             maxLines = 1,
@@ -472,7 +485,7 @@ private fun HeatmapCell(
         )
         Text(
             text = if (count > 0) "$count yanıt" else "—",
-            fontSize = 9.sp,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = if (count > 0) colors.primaryText else colors.secondaryText.copy(alpha = 0.7f),
             maxLines = 1,
@@ -574,12 +587,11 @@ fun SettingsView(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onOpenDrawer != null) {
                 IconButton(
-                    onClick = onOpenDrawer,
-                    modifier = Modifier.size(32.dp)
+                    onClick = onOpenDrawer
                 ) {
                     Icon(
                         imageVector = Icons.Default.Menu,
-                        contentDescription = "Menü",
+                        contentDescription = stringResource(R.string.action_open_menu),
                         tint = colors.primaryText
                     )
                 }
@@ -587,7 +599,7 @@ fun SettingsView(
             }
             Text(
                 text = "Ayarlar ve Hesap Yönetimi",
-                fontSize = 22.sp,
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = colors.primaryText
             )
@@ -627,18 +639,18 @@ fun SettingsView(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = authManager.userName.ifBlank { "Google Hesabı Bağlı" },
-                                fontSize = 14.sp,
+                                fontSize = MaterialTheme.typography.bodyMedium.fontSize,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.primaryText
                             )
                             Text(
                                 text = authManager.userEmail.ifBlank { "Google Profil Aktif" },
-                                fontSize = 12.sp,
+                                fontSize = MaterialTheme.typography.labelSmall.fontSize,
                                 color = colors.secondaryText
                             )
                             Text(
                                 text = "Bulut Eşitleme Aktif",
-                                fontSize = 11.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = colors.vividGreen,
                                 fontWeight = FontWeight.Medium
                             )
@@ -674,7 +686,7 @@ fun SettingsView(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = if (store.isSyncingCloud) "Eşitleniyor..." else "Şimdi Bulutla Eşitle",
-                                fontSize = 12.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -690,13 +702,13 @@ fun SettingsView(
                         ) {
                             Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Hesaptan Çıkış Yap", fontSize = 12.sp)
+                            Text("Hesaptan Çıkış Yap", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 } else {
                     Text(
                         text = "Google hesabınızla giriş yaparak tüm kelimelerinizi, çalışma geçmişinizi, günlük serinizi (streak) ve tercihlerinizi Google Drive bulutunuzla otomatik eşitleyebilirsiniz.",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         color = colors.secondaryText
                     )
 
@@ -723,7 +735,7 @@ fun SettingsView(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (authManager.isAuthenticating) "Google ile Bağlanılıyor..." else "Google Hesabı ile Giriş Yap & Eşitle",
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -747,7 +759,7 @@ fun SettingsView(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = statusMsg,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             color = if (store.cloudSyncIsError) colors.vividRed else colors.primaryText
                         )
@@ -771,13 +783,13 @@ fun SettingsView(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Günlük Yeni Kelime Sayısı",
-                            fontSize = 15.sp,
+                            style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
                             color = colors.primaryText
                         )
                         Text(
                             text = "Her gün çalışma sırasına eklenecek maksimum yeni kelime adedi.",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             color = colors.secondaryText
                         )
                     }
@@ -788,14 +800,13 @@ fun SettingsView(
                                 store.updateSettings {
                                     it.copy(dailyNewCardLimit = (it.dailyNewCardLimit - 5).coerceIn(1, 500))
                                 }
-                            },
-                            modifier = Modifier.size(30.dp)
+                            }
                         ) {
                             Icon(Icons.Default.Remove, contentDescription = null, tint = colors.primaryText)
                         }
                         Text(
                             text = "${store.settings.dailyNewCardLimit} kelime / gün",
-                            fontSize = 13.sp,
+                            fontSize = MaterialTheme.typography.bodySmall.fontSize,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
                             color = colors.primaryText,
@@ -806,8 +817,7 @@ fun SettingsView(
                                 store.updateSettings {
                                     it.copy(dailyNewCardLimit = (it.dailyNewCardLimit + 5).coerceIn(1, 500))
                                 }
-                            },
-                            modifier = Modifier.size(30.dp)
+                            }
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, tint = colors.primaryText)
                         }
@@ -836,13 +846,13 @@ fun SettingsView(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Günlük Maksimum Tekrar Sayısı",
-                            fontSize = 15.sp,
+                            style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
                             color = colors.primaryText
                         )
                         Text(
                             text = "Daha önce öğrenilmiş kelimelerden bir günde sorulacak maksimum tekrar kartı sayısı.",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             color = colors.secondaryText
                         )
                     }
@@ -853,14 +863,13 @@ fun SettingsView(
                                 store.updateSettings {
                                     it.copy(dailyReviewLimit = (it.dailyReviewLimit - 10).coerceIn(10, 1000))
                                 }
-                            },
-                            modifier = Modifier.size(30.dp)
+                            }
                         ) {
                             Icon(Icons.Default.Remove, contentDescription = null, tint = colors.primaryText)
                         }
                         Text(
                             text = "${store.settings.dailyReviewLimit} tekrar / gün",
-                            fontSize = 13.sp,
+                            fontSize = MaterialTheme.typography.bodySmall.fontSize,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
                             color = colors.primaryText,
@@ -871,8 +880,7 @@ fun SettingsView(
                                 store.updateSettings {
                                     it.copy(dailyReviewLimit = (it.dailyReviewLimit + 10).coerceIn(10, 1000))
                                 }
-                            },
-                            modifier = Modifier.size(30.dp)
+                            }
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, tint = colors.primaryText)
                         }
@@ -892,6 +900,15 @@ fun SettingsView(
                     )
                 )
             }
+        }
+
+        // Appearance: System / Light / Dark
+        GroupBoxCard(
+            title = stringResource(R.string.theme_section_title),
+            icon = Icons.Default.Palette,
+            iconTint = colors.accentPurple
+        ) {
+            ThemeModeSelector(store = store)
         }
 
         // Card Presentation Preferences
@@ -936,7 +953,7 @@ fun SettingsView(
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
                     text = "Tüm kelimelerinizi ve ilerlemenizi yedekleyebilir veya arkadaşlarınızla paylaşabileceğiniz deste paketleri oluşturabilirsiniz.",
-                    fontSize = 12.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     color = colors.secondaryText
                 )
 
@@ -959,7 +976,7 @@ fun SettingsView(
                     ) {
                         Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Tam Yedek İndir", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Tam Yedek İndir", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
                     }
 
                     OutlinedButton(
@@ -973,7 +990,7 @@ fun SettingsView(
                     ) {
                         Icon(Icons.Default.Group, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Deste Paketi Paylaş", fontSize = 12.sp)
+                        Text("Deste Paketi Paylaş", style = MaterialTheme.typography.labelSmall)
                     }
 
                     OutlinedButton(
@@ -984,7 +1001,7 @@ fun SettingsView(
                     ) {
                         Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Yedek veya Deste Yükle", fontSize = 12.sp)
+                        Text("Yedek veya Deste Yükle", style = MaterialTheme.typography.labelSmall)
                     }
                 }
 
@@ -1012,7 +1029,7 @@ fun SettingsView(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = msg,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             color = if (backupStatusIsError) colors.vividRed else colors.primaryText
                         )
@@ -1045,7 +1062,7 @@ fun SettingsView(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Öğrenme İlerlemesini Sıfırla", color = colors.vividRed, fontSize = 12.sp)
+                        Text("Öğrenme İlerlemesini Sıfırla", color = colors.vividRed, style = MaterialTheme.typography.labelSmall)
                     }
 
                     OutlinedButton(
@@ -1061,7 +1078,7 @@ fun SettingsView(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Tüm Kelimeleri Sil", color = colors.vividRed, fontSize = 12.sp)
+                        Text("Tüm Kelimeleri Sil", color = colors.vividRed, style = MaterialTheme.typography.labelSmall)
                     }
 
                     Button(
@@ -1091,7 +1108,7 @@ fun SettingsView(
                         Text(
                             text = if (isDeletingAccount) "Hesap Verileri Siliniyor..." else "Hesap Verilerini Sil",
                             color = Color.White,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -1107,7 +1124,7 @@ fun SettingsView(
                 Text(
                     "Hesap Verilerini Silmek İstediğinize Emin Misiniz?",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    style = MaterialTheme.typography.titleSmall
                 )
             },
             text = {
@@ -1116,7 +1133,7 @@ fun SettingsView(
                         "• Google Drive'daki \"ArtikelMeister Cloud Sync\" klasörünüz ve bulut yedeğiniz kalıcı olarak silinir.\n" +
                         "• Bu cihazdaki tüm kelimeleriniz, desteleriniz, günlük seriniz (streak) ve tercih ayarlarınız sıfırlanır.\n" +
                         "• Google hesabı bağlantınız sonlandırılır.",
-                    fontSize = 13.sp,
+                    style = MaterialTheme.typography.bodySmall,
                     color = colors.secondaryText
                 )
             },
@@ -1158,7 +1175,7 @@ fun SettingsView(
                 Text(
                     "Tüm kelimelerin öğrenme geçmişini sıfırlamak istediğinize emin misiniz?",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    style = MaterialTheme.typography.titleSmall
                 )
             },
             confirmButton = {
@@ -1187,7 +1204,7 @@ fun SettingsView(
                 Text(
                     "Yerel depolamadaki tüm kelimeleri silmek istediğinize emin misiniz?",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    style = MaterialTheme.typography.titleSmall
                 )
             },
             confirmButton = {
@@ -1217,13 +1234,17 @@ private fun SettingToggleRow(
     onCheckedChange: (Boolean) -> Unit
 ) {
     val colors = LocalAppColors.current
+    // Whole row is the toggle target (label + switch announced together by TalkBack).
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
     ) {
         Text(
             text = label,
-            fontSize = 13.sp,
+            style = MaterialTheme.typography.bodyMedium,
             color = colors.primaryText,
             modifier = Modifier
                 .weight(1f)
@@ -1231,11 +1252,53 @@ private fun SettingToggleRow(
         )
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = colors.accentBlue
             )
+        )
+    }
+}
+
+/** System / Light / Dark theme picker backed by the [UiPreferences] adapter. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThemeModeSelector(store: DeckStore) {
+    val colors = LocalAppColors.current
+    val selected = UiPreferences.effectiveThemeMode(store.settings.isDarkMode)
+    val options = listOf(
+        Triple(ThemeMode.SYSTEM, R.string.theme_mode_system, Icons.Default.BrightnessAuto),
+        Triple(ThemeMode.LIGHT, R.string.theme_mode_light, Icons.Default.LightMode),
+        Triple(ThemeMode.DARK, R.string.theme_mode_dark, Icons.Default.DarkMode)
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            options.forEachIndexed { index, (mode, labelRes, icon) ->
+                SegmentedButton(
+                    selected = selected == mode,
+                    onClick = { UiPreferences.setThemeMode(mode, store) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    icon = {
+                        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    colors = SegmentedButtonDefaults.colors(
+                        activeContainerColor = colors.accentBlue.copy(alpha = 0.16f),
+                        activeContentColor = colors.accentBlue,
+                        activeBorderColor = colors.cardBorderSubtle,
+                        inactiveContainerColor = colors.textBackground,
+                        inactiveContentColor = colors.primaryText,
+                        inactiveBorderColor = colors.cardBorderSubtle
+                    )
+                ) {
+                    Text(stringResource(labelRes), style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
+            }
+        }
+        Text(
+            text = stringResource(R.string.theme_mode_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.secondaryText
         )
     }
 }
@@ -1263,7 +1326,7 @@ private fun StatCard(
         ) {
             Text(
                 text = title,
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.secondaryText,
                 maxLines = 1,
@@ -1271,13 +1334,13 @@ private fun StatCard(
             )
             Text(
                 text = value,
-                fontSize = 30.sp,
+                style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Bold,
                 color = color
             )
             Text(
                 text = subtitle,
-                fontSize = 10.sp,
+                style = MaterialTheme.typography.labelSmall,
                 color = colors.secondaryText,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1301,13 +1364,13 @@ private fun FeedbackBadge(
     ) {
         Text(
             text = "$count",
-            fontSize = 18.sp,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = color
         )
         Text(
             text = title,
-            fontSize = 10.sp,
+            style = MaterialTheme.typography.labelSmall,
             color = colors.secondaryText
         )
     }
@@ -1330,14 +1393,14 @@ private fun DistributionRow(
         ) {
             Text(
                 text = label,
-                fontSize = 13.sp,
+                style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Medium,
                 color = colors.primaryText,
                 modifier = Modifier.weight(1f)
             )
             Text(
                 text = "$count kelime (${(ratio * 100f).roundToInt()}%)",
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.labelSmall,
                 color = colors.secondaryText
             )
         }

@@ -235,7 +235,8 @@ val AppTypography = Typography(
     labelLarge = style(14, 20, FontWeight.Medium, 0.1f),
     labelMedium = style(13, 18, FontWeight.Medium, 0.2f),
     // M3 default is 11sp — overridden: nothing in this app goes below 12sp.
-    labelSmall = style(12, 16, FontWeight.Medium, 0.25f)
+    // Normal weight: it doubles as the caption style for migrated 9–12sp text.
+    labelSmall = style(12, 16, FontWeight.Normal, 0.2f)
 )
 
 // =====================================================================================
