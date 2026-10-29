@@ -76,6 +76,7 @@ fi
 echo "[3/4] Compiling Universal macOS binary (arm64 + x86_64) using ${SDK_PATH}..."
 SOURCES=(
     Sources/Models.swift
+    Sources/CardLogic.swift
     Sources/SpeechManager.swift
     Sources/StorageManager.swift
     Sources/GeminiService.swift

@@ -55,4 +55,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.play.services.auth)
     debugImplementation(libs.androidx.ui.tooling)
+
+    testImplementation("junit:junit:4.13.2")
+    // Real org.json implementation for JVM unit tests (android.jar only ships stubs).
+    testImplementation("org.json:json:20231013")
 }

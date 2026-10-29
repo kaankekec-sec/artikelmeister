@@ -1525,11 +1525,20 @@ object GoogleDriveSyncService {
         val dlText = (if (dlCode in 200..299) dlConn.inputStream else dlConn.errorStream)
             ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
 
-        if (dlCode !in 200..299 || dlText.isBlank()) {
+        // An existing cloud file that cannot be downloaded or decoded must NEVER be treated as
+        // "no cloud backup": the caller would upload over it. Throw so sync aborts instead.
+        if (dlCode !in 200..299) {
+            throw IllegalStateException(parseGoogleDriveError(dlCode, dlText))
+        }
+        if (dlText.isBlank()) {
             return@withContext CloudSnapshot(folderId = folderId, fileId = fileId, backup = null)
         }
 
-        val parsedBackup = runCatching { ArtikelMeisterBackup.fromJsonString(dlText) }.getOrNull()
+        val parsedBackup = try {
+            ArtikelMeisterBackup.fromJsonString(dlText)
+        } catch (e: Exception) {
+            throw IllegalStateException("Buluttaki yedek dosyası okunamadı; üzerine yazılmadı. (${e.localizedMessage})")
+        }
         CloudSnapshot(folderId = folderId, fileId = fileId, backup = parsedBackup)
     }
 

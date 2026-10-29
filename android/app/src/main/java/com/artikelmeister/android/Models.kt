@@ -108,7 +108,8 @@ enum class ReviewRating(val rawValue: Int) {
 
 data class Flashcard(
     val id: String = UUID.randomUUID().toString().uppercase(Locale.ROOT),
-    val artikel: Artikel,
+    /** null = article-less word ("artikelsiz"). */
+    val artikel: Artikel?,
     val word: String,
     val meaning: String = "",
     val deckName: String = "Genel",
@@ -127,16 +128,29 @@ data class Flashcard(
     val cleanDeckName: String
         get() = deckName.trim().ifEmpty { "Genel" }
 
-    val fullGermanTerm: String
-        get() = "${artikel.rawValue} $word"
+    val isArticleless: Boolean
+        get() = artikel == null
 
+    /** "der"/"die"/"das", or "-" for article-less words (display only). */
+    val displayArtikel: String
+        get() = artikel?.rawValue ?: ArtikelFilter.NONE
+
+    val fullGermanTerm: String
+        get() = if (artikel == null) word else "${artikel.rawValue} $word"
+
+    /**
+     * Dedup / tombstone key. Valid cards: "der_tisch". Article-less cards: "none_tisch"
+     * (word only), so article-less 'Tisch' and 'der Tisch' are distinct cards.
+     */
     val syncKey: String
-        get() = "${artikel.rawValue.lowercase(Locale.ROOT)}_${word.trim().lowercase(Locale.ROOT)}"
+        get() = keyFor(artikel, word)
 
     fun toJson(): JSONObject {
         return JSONObject().apply {
             put("id", id)
-            put("artikel", artikel.rawValue)
+            // Article-less cards are stored in the separate "articlelessCards" list and
+            // carry no "artikel" field.
+            if (artikel != null) put("artikel", artikel.rawValue)
             put("word", word)
             put("meaning", meaning)
             put("deckName", cleanDeckName)
@@ -156,9 +170,22 @@ data class Flashcard(
     }
 
     companion object {
-        fun fromJson(obj: JSONObject): Flashcard? {
-            val rawArt = obj.optString("artikel", "")
-            val parsedArt = Artikel.parse(rawArt) ?: return null
+        fun keyFor(artikel: Artikel?, word: String): String {
+            val w = word.trim().lowercase(Locale.ROOT)
+            return if (artikel == null) "none_$w" else "${artikel.rawValue.lowercase(Locale.ROOT)}_$w"
+        }
+
+        /**
+         * @param articleless true when decoding an entry of "articlelessCards": the
+         * "artikel" field is ignored and the card is always article-less. When false
+         * (entries of "cards"), an unparseable article makes the card invalid -> null.
+         */
+        fun fromJson(obj: JSONObject, articleless: Boolean = false): Flashcard? {
+            val parsedArt: Artikel? = if (articleless) {
+                null
+            } else {
+                Artikel.parse(obj.optString("artikel", "")) ?: return null
+            }
             val word = obj.optString("word", "").trim()
             if (word.isEmpty()) return null
             val id = obj.optString("id", UUID.randomUUID().toString().uppercase(Locale.ROOT))
@@ -301,6 +328,7 @@ data class ArtikelMeisterBackup(
     val version: Int = 2,
     val exportedAt: Long = System.currentTimeMillis(),
     val includesProgress: Boolean,
+    /** ALL cards in memory (valid + article-less); split into two arrays when serialized. */
     val cards: List<Flashcard>,
     val settings: AppSettings? = null,
     val studyHistory: Map<String, DailyProgress>? = null,
@@ -315,9 +343,16 @@ data class ArtikelMeisterBackup(
             if (!userEmail.isNullOrBlank()) {
                 put("userEmail", userEmail)
             }
+            // "cards" ONLY contains valid der/die/das cards (old clients drop/choke on others).
             val cardsArray = JSONArray()
-            cards.forEach { cardsArray.put(it.toJson()) }
+            cards.filterNot { it.isArticleless }.forEach { cardsArray.put(it.toJson()) }
             put("cards", cardsArray)
+            val articlelessList = cards.filter { it.isArticleless }
+            if (articlelessList.isNotEmpty()) {
+                val arr = JSONArray()
+                articlelessList.forEach { arr.put(it.toJson()) }
+                put("articlelessCards", arr)
+            }
             if (settings != null) {
                 put("settings", settings.toJson())
             }
@@ -343,14 +378,10 @@ data class ArtikelMeisterBackup(
             val includesProgress = root.optBoolean("includesProgress", true)
             val userEmail = root.optString("userEmail", "").ifBlank { null }
 
+            // Lenient: a bad card is skipped, it never fails the whole decode.
             val cardsList = mutableListOf<Flashcard>()
-            val cardsArr = root.optJSONArray("cards")
-            if (cardsArr != null) {
-                for (i in 0 until cardsArr.length()) {
-                    val obj = cardsArr.optJSONObject(i) ?: continue
-                    Flashcard.fromJson(obj)?.let { cardsList.add(it) }
-                }
-            }
+            cardsList.addAll(CardCodec.decodeArray(root.optJSONArray("cards"), articleless = false))
+            cardsList.addAll(CardCodec.decodeArray(root.optJSONArray("articlelessCards"), articleless = true))
 
             val settings = root.optJSONObject("settings")?.let { AppSettings.fromJson(it) }
             val historyMap = root.optJSONObject("studyHistory")?.let { histObj ->

@@ -91,6 +91,17 @@ class DeckStore(private val appContext: Context) {
     val importedCSVsDirectory: File = File(storageDirectory, "ImportedCSVs")
     val backupsDirectory: File = File(storageDirectory, "Backups")
     private val cardsFile = File(storageDirectory, "cards.json")
+    // Article-less words live in their own optional file so cards.json stays a plain array
+    // of valid der/die/das cards that older app versions can read safely.
+    private val articlelessCardsFile = File(storageDirectory, "articleless_cards.json")
+
+    /**
+     * Set when cards.json / articleless_cards.json exists but could not be decoded.
+     * While set, local card files are never rewritten and cloud sync never uploads,
+     * so a decode failure cannot wipe local or cloud data.
+     */
+    var cardsLoadFailed by mutableStateOf(false)
+        private set
     private val settingsFile = File(storageDirectory, "settings.json")
     private val progressFile = File(storageDirectory, "daily_progress.json")
     private val historyFile = File(storageDirectory, "study_history.json")
@@ -180,19 +191,29 @@ class DeckStore(private val appContext: Context) {
             saveHistory()
         }
 
+        var loadFailed = false
+        val loaded = mutableListOf<Flashcard>()
         if (cardsFile.exists()) {
             runCatching {
                 val arr = JSONArray(cardsFile.readText(Charsets.UTF_8))
-                val loaded = mutableListOf<Flashcard>()
-                for (i in 0 until arr.length()) {
-                    val obj = arr.optJSONObject(i) ?: continue
-                    Flashcard.fromJson(obj)?.let { loaded.add(it) }
-                }
-                cards = loaded
+                loaded.addAll(CardCodec.decodeArray(arr, articleless = false))
             }.onFailure {
-                saveCards(triggerCloudSync = false)
+                loadFailed = true
+                preserveCorruptFile(cardsFile)
             }
-        } else {
+        }
+        if (articlelessCardsFile.exists()) {
+            runCatching {
+                val arr = JSONArray(articlelessCardsFile.readText(Charsets.UTF_8))
+                loaded.addAll(CardCodec.decodeArray(arr, articleless = true))
+            }.onFailure {
+                loadFailed = true
+                preserveCorruptFile(articlelessCardsFile)
+            }
+        }
+        cardsLoadFailed = loadFailed
+        cards = CardMerge.dedupe(loaded)
+        if (!loadFailed && !cardsFile.exists()) {
             saveCards(triggerCloudSync = false)
         }
 
@@ -210,6 +231,12 @@ class DeckStore(private val appContext: Context) {
             }.onFailure {
                 saveDeletedCardsFileOnly()
             }
+        }
+    }
+
+    private fun preserveCorruptFile(file: File) {
+        runCatching {
+            file.copyTo(File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}"), overwrite = false)
         }
     }
 
@@ -231,10 +258,22 @@ class DeckStore(private val appContext: Context) {
 
     fun saveCards(triggerCloudSync: Boolean = true) {
         ensureDirectoriesExist()
+        if (cardsLoadFailed) {
+            // Never overwrite files we could not decode.
+            return
+        }
         runCatching {
-            val arr = JSONArray()
-            cards.forEach { arr.put(it.toJson()) }
-            cardsFile.writeText(arr.toString(2), Charsets.UTF_8)
+            // cards.json: ONLY valid der/die/das cards (backward-safe for old clients).
+            cardsFile.writeText(
+                CardCodec.encodeArray(cards.filterNot { it.isArticleless }).toString(2),
+                Charsets.UTF_8
+            )
+            val articleless = cards.filter { it.isArticleless }
+            if (articleless.isNotEmpty()) {
+                articlelessCardsFile.writeText(CardCodec.encodeArray(articleless).toString(2), Charsets.UTF_8)
+            } else if (articlelessCardsFile.exists()) {
+                articlelessCardsFile.delete()
+            }
         }
         if (triggerCloudSync) {
             scheduleAutoCloudSync()
@@ -310,6 +349,15 @@ class DeckStore(private val appContext: Context) {
                 }
             }
         }
+
+    /** Counts per article (incl. '-' = article-less) for the whole pool or one deck. */
+    fun artikelCounts(forDeck: String? = null): ArtikelFilter.Counts {
+        val pool = if (forDeck == null) cards else cards.filter { it.deckName == forDeck }
+        return ArtikelFilter.counts(pool)
+    }
+
+    val articlelessCount: Int
+        get() = cards.count { it.isArticleless }
 
     fun cardCount(forDeck: String?): Int {
         if (forDeck == null) return cards.size
@@ -667,7 +715,7 @@ class DeckStore(private val appContext: Context) {
     // MARK: - Word CRUD & Editing
 
     fun addCard(
-        artikel: Artikel,
+        artikel: Artikel?,
         word: String,
         meaning: String,
         deckName: String = "Genel"
@@ -678,9 +726,8 @@ class DeckStore(private val appContext: Context) {
         if (cleanWord.isEmpty()) return false
         val now = System.currentTimeMillis()
 
-        val existingIdx = cards.indexOfFirst {
-            it.artikel == artikel && it.word.equals(cleanWord, ignoreCase = true)
-        }
+        val newKey = Flashcard.keyFor(artikel, cleanWord)
+        val existingIdx = cards.indexOfFirst { it.syncKey == newKey }
         if (existingIdx != -1) {
             var existing = cards[existingIdx]
             var changed = false
@@ -722,7 +769,7 @@ class DeckStore(private val appContext: Context) {
 
     fun updateCard(
         id: String,
-        artikel: Artikel,
+        artikel: Artikel?,
         word: String,
         meaning: String,
         deckName: String
@@ -795,6 +842,7 @@ class DeckStore(private val appContext: Context) {
             deletedCardKeys = updatedDeleted
             saveDeletedCardsFileOnly()
         }
+        cardsLoadFailed = false // explicit user wipe
         cards = emptyList()
         cardDueStepMap.clear()
         _selectedStudyDeck = null
@@ -848,56 +896,20 @@ class DeckStore(private val appContext: Context) {
         }
     }
 
-    private fun smartMergeCards(local: Flashcard, incoming: Flashcard): Flashcard {
-        // Choose the card with further / newer Anki SM-2 study progress
-        val incomingHasMoreProgress = when {
-            incoming.totalReviews != local.totalReviews -> incoming.totalReviews > local.totalReviews
-            (incoming.lastReviewedAt ?: 0L) != (local.lastReviewedAt ?: 0L) ->
-                (incoming.lastReviewedAt ?: 0L) > (local.lastReviewedAt ?: 0L)
-            else -> incoming.updatedAt > local.updatedAt
-        }
-        val progressSource = if (incomingHasMoreProgress) incoming else local
-
-        // Choose best meaning (non-empty wins; if both non-empty, newer updatedAt wins)
-        val mergedMeaning = when {
-            local.meaning.isNotBlank() && incoming.meaning.isBlank() -> local.meaning
-            incoming.meaning.isNotBlank() && local.meaning.isBlank() -> incoming.meaning
-            incoming.updatedAt > local.updatedAt && incoming.meaning.isNotBlank() -> incoming.meaning
-            else -> local.meaning
-        }
-
-        // Choose best deck (specific deck over 'Genel' wins; if both specific, newer updatedAt wins)
-        val mergedDeck = when {
-            local.cleanDeckName != "Genel" && incoming.cleanDeckName == "Genel" -> local.cleanDeckName
-            incoming.cleanDeckName != "Genel" && local.cleanDeckName == "Genel" -> incoming.cleanDeckName
-            incoming.updatedAt > local.updatedAt -> incoming.cleanDeckName
-            else -> local.cleanDeckName
-        }
-
-        return Flashcard(
-            id = local.id,
-            artikel = local.artikel,
-            word = local.word,
-            meaning = mergedMeaning,
-            deckName = mergedDeck,
-            createdAt = min(local.createdAt, incoming.createdAt),
-            updatedAt = max(local.updatedAt, incoming.updatedAt),
-            stage = progressSource.stage,
-            easeFactor = progressSource.easeFactor,
-            intervalDays = progressSource.intervalDays,
-            repetitions = progressSource.repetitions,
-            lapses = progressSource.lapses,
-            dueDate = progressSource.dueDate,
-            lastReviewedAt = progressSource.lastReviewedAt,
-            totalReviews = progressSource.totalReviews
-        )
-    }
+    private fun smartMergeCards(local: Flashcard, incoming: Flashcard): Flashcard =
+        CardMerge.smartMerge(local, incoming)
 
     suspend fun syncWithGoogleDrive(
         authManager: GeminiAuthManager = GeminiAuthManager.getInstance(appContext),
         isSilentAutoSync: Boolean = false
     ) {
         if (!authManager.isGoogleAccountConnected || isSyncingCloud) return
+        if (cardsLoadFailed) {
+            // Local card files could not be decoded: do not merge/upload anything.
+            cloudSyncIsError = true
+            cloudSyncStatusMessage = "Yerel kelime dosyası okunamadı; veri kaybını önlemek için eşitleme durduruldu."
+            return
+        }
         isSyncingCloud = true
         if (!isSilentAutoSync) {
             cloudSyncIsError = false
@@ -928,35 +940,11 @@ class DeckStore(private val appContext: Context) {
                 saveDeletedCardsFileOnly()
 
                 // 2. Deduplicate & Smart-Merge local cards + cloud cards by syncKey
-                val mergedByKey = LinkedHashMap<String, Flashcard>()
-                for (localCard in cards) {
-                    val key = localCard.syncKey
-                    val delTs = mergedDeleted[key] ?: 0L
-                    if (delTs > localCard.updatedAt) continue
-                    val existing = mergedByKey[key]
-                    if (existing == null) {
-                        mergedByKey[key] = localCard
-                    } else {
-                        mergedByKey[key] = smartMergeCards(existing, localCard)
-                    }
-                }
-
-                for (cloudCard in cloudBackup.cards) {
-                    val key = cloudCard.syncKey
-                    val delTs = mergedDeleted[key] ?: 0L
-                    if (delTs > cloudCard.updatedAt) continue
-
-                    val existingLocal = mergedByKey[key]
-                    if (existingLocal != null) {
-                        mergedByKey[key] = smartMergeCards(existingLocal, cloudCard)
-                        overlappingDeduplicated += 1
-                    } else {
-                        mergedByKey[key] = cloudCard
-                        addedFromCloud += 1
-                    }
-                }
-
-                cards = mergedByKey.values.toList()
+                //    (cloudBackup.cards already contains valid + article-less cards)
+                val mergeResult = CardMerge.merge(cards, cloudBackup.cards, mergedDeleted)
+                addedFromCloud = mergeResult.addedFromIncoming
+                overlappingDeduplicated = mergeResult.overlapping
+                cards = mergeResult.cards
 
                 // 3. Merge studyHistory & today's dailyProgress (streak, daily completed & remaining counts)
                 if (cloudBackup.studyHistory != null) {
@@ -1013,13 +1001,9 @@ class DeckStore(private val appContext: Context) {
                 rebuildStudyQueue(preserveCurrentFrontCard = true)
             } else {
                 // Ensure any local duplicate keys are also deduplicated before initial upload
-                val deduplicatedMap = LinkedHashMap<String, Flashcard>()
-                for (c in cards) {
-                    val existing = deduplicatedMap[c.syncKey]
-                    deduplicatedMap[c.syncKey] = if (existing == null) c else smartMergeCards(existing, c)
-                }
-                if (deduplicatedMap.size != cards.size) {
-                    cards = deduplicatedMap.values.toList()
+                val deduplicated = CardMerge.dedupe(cards)
+                if (deduplicated.size != cards.size) {
+                    cards = deduplicated
                     saveCards(triggerCloudSync = false)
                 }
             }
@@ -1069,6 +1053,8 @@ class DeckStore(private val appContext: Context) {
             cardDueStepMap.clear()
 
             runCatching { cardsFile.delete() }
+            runCatching { articlelessCardsFile.delete() }
+            cardsLoadFailed = false
             runCatching { settingsFile.delete() }
             runCatching { progressFile.delete() }
             runCatching { historyFile.delete() }
@@ -1093,7 +1079,8 @@ class DeckStore(private val appContext: Context) {
         val backup = ArtikelMeisterBackup.fromJsonString(jsonStr)
 
         if (!mergeWithExisting) {
-            cards = backup.cards
+            cardsLoadFailed = false // explicit user replace of all cards
+            cards = CardMerge.dedupe(backup.cards)
             if (backup.settings != null) {
                 settings = backup.settings
                 saveSettingsFileOnly()
@@ -1115,9 +1102,8 @@ class DeckStore(private val appContext: Context) {
 
             for (incoming in backup.cards) {
                 updatedDeleted.remove(incoming.syncKey)
-                val idx = mutableCards.indexOfFirst {
-                    it.artikel == incoming.artikel && it.word.equals(incoming.word, ignoreCase = true)
-                }
+                val incomingKey = incoming.syncKey
+                val idx = mutableCards.indexOfFirst { it.syncKey == incomingKey }
                 if (idx != -1) {
                     mutableCards[idx] = smartMergeCards(mutableCards[idx], incoming)
                     updated += 1
@@ -1179,147 +1165,29 @@ class DeckStore(private val appContext: Context) {
     }
 
     fun importCSVContent(content: String, defaultDeckName: String = "Genel"): CSVImportResult {
-        val lines = content.split("\r\n", "\n", "\r")
-        var added = 0
-        var updated = 0
-        var skipped = 0
-        var invalid = 0
-
-        val fallbackDeck = defaultDeckName.trim().ifEmpty { "Genel" }
-        val mutableCards = cards.toMutableList()
-
-        for ((lineIdx, rawLine) in lines.withIndex()) {
-            val trimmed = rawLine.trim()
-            if (trimmed.isEmpty()) continue
-
-            val columns = parseCSVRow(trimmed)
-            if (columns.size < 2) {
-                invalid += 1
-                continue
-            }
-
-            val rawArtikel = columns[0].replace("\uFEFF", "")
-            val rawWord = columns[1]
-            val rawMeaning = if (columns.size >= 3) columns[2] else ""
-            val rawDeck = if (columns.size >= 4) columns[3] else fallbackDeck
-
-            val parsedArtikel = Artikel.parse(rawArtikel)
-            if (parsedArtikel == null) {
-                if (lineIdx == 0) continue
-                invalid += 1
-                continue
-            }
-
-            val cleanWord = rawWord.trim()
-            val cleanMeaning = rawMeaning.trim()
-            val cleanDeck = rawDeck.trim().ifEmpty { fallbackDeck }
-
-            if (cleanWord.isEmpty()) {
-                invalid += 1
-                continue
-            }
-
-            val existingIdx = mutableCards.indexOfFirst {
-                it.artikel == parsedArtikel && it.word.equals(cleanWord, ignoreCase = true)
-            }
-            if (existingIdx != -1) {
-                var existing = mutableCards[existingIdx]
-                var didUpdate = false
-                if (cleanMeaning.isNotEmpty() && existing.meaning != cleanMeaning) {
-                    existing = existing.copy(meaning = cleanMeaning)
-                    didUpdate = true
-                }
-                if (cleanDeck != "Genel" && existing.deckName != cleanDeck) {
-                    existing = existing.copy(deckName = cleanDeck)
-                    didUpdate = true
-                }
-                if (didUpdate) {
-                    mutableCards[existingIdx] = existing.copy(updatedAt = System.currentTimeMillis())
-                    updated += 1
-                } else {
-                    skipped += 1
-                }
-            } else {
-                val now = System.currentTimeMillis()
-                val card = Flashcard(
-                    artikel = parsedArtikel,
-                    word = cleanWord,
-                    meaning = cleanMeaning,
-                    deckName = cleanDeck,
-                    createdAt = now,
-                    updatedAt = now
-                )
-                if (deletedCardKeys.containsKey(card.syncKey)) {
-                    deletedCardKeys = deletedCardKeys - card.syncKey
-                    saveDeletedCardsFileOnly()
-                }
-                mutableCards.add(card)
-                added += 1
-            }
+        // Rows with an empty / non-der/die/das article column become article-less words.
+        val outcome = CsvCards.importContent(content, defaultDeckName, cards)
+        var removedTombstone = false
+        val updatedDeleted = deletedCardKeys.toMutableMap()
+        for (key in outcome.addedKeys) {
+            if (updatedDeleted.remove(key) != null) removedTombstone = true
         }
-
-        cards = mutableCards
+        if (removedTombstone) {
+            deletedCardKeys = updatedDeleted
+            saveDeletedCardsFileOnly()
+        }
+        cards = outcome.cards
         saveCards()
         rebuildStudyQueue()
         return CSVImportResult(
-            addedCount = added,
-            updatedCount = updated,
-            skippedCount = skipped,
-            invalidLines = invalid
+            addedCount = outcome.added,
+            updatedCount = outcome.updated,
+            skippedCount = outcome.skipped,
+            invalidLines = outcome.invalid
         )
     }
 
-    private fun parseCSVRow(line: String): List<String> {
-        val delimiter: Char = run {
-            var inQuotes = false
-            var commaCount = 0
-            var semicolonCount = 0
-            var tabCount = 0
-            for (ch in line) {
-                if (ch == '"') inQuotes = !inQuotes
-                if (!inQuotes) {
-                    when (ch) {
-                        ',' -> commaCount++
-                        ';' -> semicolonCount++
-                        '\t' -> tabCount++
-                    }
-                }
-            }
-            when {
-                semicolonCount > commaCount && semicolonCount >= tabCount -> ';'
-                tabCount > commaCount && tabCount > semicolonCount -> '\t'
-                else -> ','
-            }
-        }
-
-        val fields = mutableListOf<String>()
-        val current = StringBuilder()
-        var inQuotes = false
-
-        for (ch in line) {
-            when {
-                ch == '"' -> inQuotes = !inQuotes
-                ch == delimiter && !inQuotes -> {
-                    fields.add(current.toString().trim())
-                    current.clear()
-                }
-                else -> current.append(ch)
-            }
-        }
-        fields.add(current.toString().trim())
-        return fields
-    }
-
-    fun exportCSVString(): String {
-        val rows = mutableListOf("artikel,kelime,anlam,deste")
-        for (card in cards) {
-            val escapedWord = if (card.word.contains(",")) "\"${card.word}\"" else card.word
-            val escapedMeaning = if (card.meaning.contains(",")) "\"${card.meaning}\"" else card.meaning
-            val escapedDeck = if (card.deckName.contains(",")) "\"${card.deckName}\"" else card.deckName
-            rows.add("${card.artikel.rawValue},$escapedWord,$escapedMeaning,$escapedDeck")
-        }
-        return rows.joinToString("\n")
-    }
+    fun exportCSVString(): String = CsvCards.exportString(cards)
 
     fun loadStarterGermanPack(): CSVImportResult {
         val sampleCSV = """
