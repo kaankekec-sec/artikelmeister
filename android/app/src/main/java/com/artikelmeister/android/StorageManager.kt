@@ -2,6 +2,7 @@ package com.artikelmeister.android
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +26,8 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
+
+private const val MAX_IMPORT_SNAPSHOTS = 3
 
 data class CSVImportResult(
     val addedCount: Int,
@@ -1201,16 +1204,29 @@ class DeckStore(private val appContext: Context) {
 
     // MARK: - CSV Import / Export
 
+    /** Reads the picked file's display name (null when the provider does not expose one). */
+    private fun displayNameOf(uri: Uri): String? {
+        val fromProvider = runCatching {
+            appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull()
+        return fromProvider?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Imports a picked CSV. Gates, all BEFORE any data is touched: .csv extension (primary gate), then
+     * decoding + content validation. Throws [CsvCards.RejectedException] (Turkish message) on rejection.
+     */
     fun importCSVFromUri(uri: Uri, defaultDeckName: String = "Genel"): CSVImportResult {
+        CsvCards.requireCsvName(displayNameOf(uri))
+
         val bytes = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: throw IllegalArgumentException("CSV dosyası okunamadı.")
 
-        val rawContent = try {
-            String(bytes, Charsets.UTF_8)
-        } catch (_: Exception) {
-            String(bytes, Charset.forName("ISO-8859-1"))
-        }
+        val rawContent = CsvCards.decodeAndValidate(bytes)
 
+        // Only validated files are kept in ImportedCSVs.
         ensureDirectoriesExist()
         val timestamp = System.currentTimeMillis() / 1000
         val backupFile = File(importedCSVsDirectory, "${timestamp}_imported.csv")
@@ -1224,9 +1240,61 @@ class DeckStore(private val appContext: Context) {
         return importCSVContent(rawContent, defaultDeckName)
     }
 
+    // ---- Import safety net -------------------------------------------------------------------
+
+    private var importUndo by mutableStateOf<CsvCards.UndoRecord?>(null)
+
+    /** True while the last successful CSV import can still be undone ("Geri al"). */
+    val canUndoImport: Boolean get() = importUndo != null
+
+    /** Full pre-import snapshot (cards, progress, settings, tombstones) as a backup file; keeps the last few. */
+    private fun writeImportSnapshot() {
+        runCatching {
+            ensureDirectoriesExist()
+            val file = File(backupsDirectory, "pre_import_${System.currentTimeMillis()}.json")
+            file.writeText(exportBackupJSONString(includeProgress = true), Charsets.UTF_8)
+            backupsDirectory.listFiles { f -> f.name.startsWith("pre_import_") && f.name.endsWith(".json") }
+                ?.sortedByDescending { it.name }
+                ?.drop(MAX_IMPORT_SNAPSHOTS)
+                ?.forEach { it.delete() }
+        }
+    }
+
+    /**
+     * Reverts the last CSV import: removes cards it added (with tombstones so cloud sync cannot bring them
+     * back), restores the previous meaning/deck of cards it updated (with a fresh updatedAt so the older
+     * values win the next cloud merge) and restores the previous tombstones. Returns false if nothing to undo.
+     */
+    fun undoLastImport(): Boolean {
+        val undo = importUndo ?: return false
+        val (restored, tombstones) = CsvCards.applyUndo(undo, cards, deletedCardKeys, System.currentTimeMillis())
+        cards = restored
+        deletedCardKeys = tombstones
+        saveDeletedCardsFileOnly()
+        val sel = _selectedStudyDeck
+        if (sel != null && !allDeckNames.contains(sel)) _selectedStudyDeck = null
+        importUndo = null
+        saveCards()
+        rebuildStudyQueue()
+        return true
+    }
+
+    /**
+     * Validates, snapshots, then imports. Validation failure throws [CsvCards.RejectedException] and leaves
+     * cards, decks, tombstones and cloud state completely untouched (no save, no sync).
+     */
     fun importCSVContent(content: String, defaultDeckName: String = "Genel"): CSVImportResult {
+        CsvCards.requireValid(content)
+
+        writeImportSnapshot()
+        val before = cards
+        val previousTombstones = deletedCardKeys
+
         // Rows with an empty / non-der/die/das article column become article-less words.
         val outcome = CsvCards.importContent(content, defaultDeckName, cards)
+
+        CsvCards.buildUndo(before, outcome, previousTombstones)?.let { importUndo = it }
+
         var removedTombstone = false
         val updatedDeleted = deletedCardKeys.toMutableMap()
         for (key in outcome.addedKeys) {
@@ -1250,39 +1318,7 @@ class DeckStore(private val appContext: Context) {
     fun exportCSVString(): String = CsvCards.exportString(cards)
 
     fun loadStarterGermanPack(): CSVImportResult {
-        val sampleCSV = """
-            artikel,kelime,anlam,deste
-            der,Tisch,Masa,A1 Temel
-            die,Katze,Kedi,A1 Temel
-            das,Buch,Kitap,A1 Temel
-            der,Stuhl,Sandalye,A1 Temel
-            die,Sonne,Güneş,A1 Temel
-            das,Haus,Ev,A1 Temel
-            der,Apfel,Elma,Yiyecek & İçecek
-            die,Blume,Çiçek,Doğa
-            das,Auto,Araba,Ulaşım
-            der,Hund,Köpek,A1 Temel
-            die,Schule,Okul,Eğitim
-            das,Wasser,Su,Yiyecek & İçecek
-            der,Baum,Ağaç,Doğa
-            die,Tür,Kapı,A1 Temel
-            das,Fenster,Pencere,A1 Temel
-            der,Schlüssel,Anahtar,Günlük Eşyalar
-            die,Tasche,Çanta,Günlük Eşyalar
-            das,Kind,Çocuk,A1 Temel
-            der,Zug,Tren,Ulaşım
-            die,Stadt,Şehir,Ulaşım
-            das,Mädchen,Kız çocuk,A1 Temel
-            der,Kaffee,Kahve,Yiyecek & İçecek
-            die,Milch,Süt,Yiyecek & İçecek
-            das,Brot,Ekmek,Yiyecek & İçecek
-            der,Bahnhof,Tren istasyonu,Ulaşım
-            die,Zeitung,Gazete,Günlük Eşyalar
-            das,Handy,Cep telefonu,Günlük Eşyalar
-            der,Computer,Bilgisayar,Günlük Eşyalar
-            die,Uhr,Saat,Günlük Eşyalar
-            das,Zimmer,Oda,A1 Temel
-        """.trimIndent()
+        val sampleCSV = CsvCards.STARTER_PACK_CSV
         return importCSVContent(sampleCSV, defaultDeckName = "A1 Temel")
     }
 }

@@ -97,6 +97,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.artikelmeister.android.Artikel
+import com.artikelmeister.android.CsvCards
 import com.artikelmeister.android.DeckStore
 import com.artikelmeister.android.Flashcard
 import com.artikelmeister.android.GeminiAuthManager
@@ -126,6 +127,7 @@ fun StudyView(
 
     var importMessage by remember { mutableStateOf<String?>(null) }
     var showImportAlert by remember { mutableStateOf(false) }
+    var offerImportUndo by remember { mutableStateOf(false) }
     var showAIGenerator by remember { mutableStateOf(false) }
     var showNewDeckSheet by remember { mutableStateOf(false) }
 
@@ -152,8 +154,10 @@ fun StudyView(
                     Zaten mevcut (atlanan): ${res.skippedCount}
                     Geçersiz/Atlanan satır: ${res.invalidLines}
                 """.trimIndent()
+                offerImportUndo = store.canUndoImport
                 showImportAlert = true
             }.onFailure { err ->
+                offerImportUndo = false
                 importMessage = "Hata: ${err.localizedMessage ?: "CSV okunamadı"}"
                 showImportAlert = true
             }
@@ -206,7 +210,7 @@ fun StudyView(
             onOpenDrawer = onOpenDrawer,
             onShowNewDeck = { showNewDeckSheet = true },
             onShowAIGenerator = { showAIGenerator = true },
-            onImportCSV = { csvLauncher.launch(arrayOf("text/*", "application/csv", "*/*")) }
+            onImportCSV = { csvLauncher.launch(CsvCards.ACCEPTED_MIME_TYPES) }
         )
 
         HorizontalDivider(color = colors.cardBorderSubtle)
@@ -221,10 +225,11 @@ fun StudyView(
                 store.cards.isEmpty() -> {
                     EmptyDatabaseView(
                         onShowAIGenerator = { showAIGenerator = true },
-                        onImportCSV = { csvLauncher.launch(arrayOf("text/*", "application/csv", "*/*")) },
+                        onImportCSV = { csvLauncher.launch(CsvCards.ACCEPTED_MIME_TYPES) },
                         onLoadStarterPack = {
                             val res = store.loadStarterGermanPack()
                             importMessage = "Örnek paket yüklendi: ${res.addedCount} yeni kelime eklendi."
+                            offerImportUndo = store.canUndoImport
                             showImportAlert = true
                         }
                     )
@@ -255,7 +260,7 @@ fun StudyView(
                     SessionCompletedView(
                         store = store,
                         onShowAIGenerator = { showAIGenerator = true },
-                        onImportCSV = { csvLauncher.launch(arrayOf("text/*", "application/csv", "*/*")) }
+                        onImportCSV = { csvLauncher.launch(CsvCards.ACCEPTED_MIME_TYPES) }
                     )
                 }
             }
@@ -283,14 +288,25 @@ fun StudyView(
 
     if (showImportAlert) {
         AlertDialog(
-            onDismissRequest = { showImportAlert = false },
+            onDismissRequest = { showImportAlert = false; offerImportUndo = false },
             title = { Text("CSV İçe Aktarma Sonucu", fontWeight = FontWeight.Bold) },
             text = { Text(importMessage ?: "") },
             confirmButton = {
-                TextButton(onClick = { showImportAlert = false }) {
+                TextButton(onClick = { showImportAlert = false; offerImportUndo = false }) {
                     Text("Tamam")
                 }
-            }
+            },
+            dismissButton = if (offerImportUndo && store.canUndoImport) {
+                {
+                    TextButton(onClick = {
+                        val undone = store.undoLastImport()
+                        offerImportUndo = false
+                        importMessage = if (undone) "İçe aktarma geri alındı." else importMessage
+                    }) {
+                        Text("Geri al")
+                    }
+                }
+            } else null
         )
     }
 }

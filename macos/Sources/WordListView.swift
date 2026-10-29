@@ -23,6 +23,8 @@ struct WordListView: View {
 
     @State private var alertMessage: String? = nil
     @State private var showAlert: Bool = false
+    /// True only while the alert shows a successful CSV import result that can still be undone.
+    @State private var offerImportUndo: Bool = false
     @State private var showAIGenerator: Bool = false
 
     private var filteredCards: [Flashcard] {
@@ -451,7 +453,13 @@ struct WordListView: View {
             .environmentObject(store)
         }
         .alert("Bilgi", isPresented: $showAlert) {
-            Button("Tamam", role: .cancel) {}
+            if offerImportUndo {
+                Button("Geri al", role: .destructive) {
+                    store.undoLastImport()
+                    offerImportUndo = false
+                }
+            }
+            Button("Tamam", role: .cancel) { offerImportUndo = false }
         } message: {
             Text(alertMessage ?? "")
         }
@@ -498,8 +506,10 @@ struct WordListView: View {
                 Atlanan (mevcut): \(res.skippedCount)
                 Geçersiz satır: \(res.invalidLines)
                 """
+                offerImportUndo = store.canUndoImport
                 showAlert = true
             } catch {
+                offerImportUndo = false
                 alertMessage = error.localizedDescription
                 showAlert = true
             }
@@ -517,6 +527,7 @@ struct WordListView: View {
             do {
                 try content.write(to: url, atomically: true, encoding: .utf8)
                 alertMessage = "Kelimeler başarıyla dışa aktarıldı:\n\(url.path)"
+                offerImportUndo = false
                 showAlert = true
             } catch {
                 alertMessage = "Dışa aktarma hatası: \(error.localizedDescription)"

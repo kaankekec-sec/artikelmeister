@@ -17,6 +17,7 @@ struct StudyView: View {
     @State private var keyMonitor: Any? = nil
     @State private var importMessage: String? = nil
     @State private var showImportAlert: Bool = false
+    @State private var offerImportUndo: Bool = false
     @State private var showAIGenerator: Bool = false
     @State private var showNewDeckSheet: Bool = false
 
@@ -70,7 +71,13 @@ struct StudyView: View {
             .environmentObject(store)
         }
         .alert("CSV İçe Aktarma Sonucu", isPresented: $showImportAlert) {
-            Button("Tamam", role: .cancel) {}
+            if offerImportUndo {
+                Button("Geri al", role: .destructive) {
+                    store.undoLastImport()
+                    offerImportUndo = false
+                }
+            }
+            Button("Tamam", role: .cancel) { offerImportUndo = false }
         } message: {
             Text(importMessage ?? "")
         }
@@ -588,6 +595,7 @@ struct StudyView: View {
                 Button {
                     let res = store.loadStarterGermanPack()
                     importMessage = "Örnek paket yüklendi: \(res.addedCount) yeni kelime yerel depolama alanına kaydedildi."
+                    offerImportUndo = store.canUndoImport
                     showImportAlert = true
                 } label: {
                     Label("Örnek 30 Kelime", systemImage: "sparkles")
@@ -712,8 +720,10 @@ struct StudyView: View {
                 Zaten mevcut (atlanan): \(res.skippedCount)
                 Geçersiz/Atlanan satır: \(res.invalidLines)
                 """
+                offerImportUndo = store.canUndoImport
                 showImportAlert = true
             } catch {
+                offerImportUndo = false
                 importMessage = "Hata: \(error.localizedDescription)"
                 showImportAlert = true
             }
