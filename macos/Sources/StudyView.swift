@@ -222,8 +222,8 @@ struct StudyView: View {
     private var cardBorderColor: Color {
         guard isRevealed else { return Color.primary.opacity(0.12) }
         switch guessResult {
-        case .correct: return Color.green.opacity(0.85)
-        case .wrong: return Color.red.opacity(0.85)
+        case .correct: return AppPalette.success.opacity(0.85)
+        case .wrong: return AppPalette.error.opacity(0.85)
         case .none: return Color.primary.opacity(0.25)
         }
     }
@@ -231,8 +231,8 @@ struct StudyView: View {
     private var wordHighlightColor: Color {
         guard isRevealed else { return .primary }
         switch guessResult {
-        case .correct: return Color(red: 0.12, green: 0.78, blue: 0.35) // Vivid green
-        case .wrong: return Color(red: 0.92, green: 0.18, blue: 0.22)   // Vivid red
+        case .correct: return AppPalette.success
+        case .wrong: return AppPalette.error
         case .none: return .primary
         }
     }
@@ -249,7 +249,7 @@ struct StudyView: View {
                         .fill(Color(NSColor.controlBackgroundColor))
                         .shadow(
                             color: isRevealed
-                                ? (guessResult == .correct ? Color.green.opacity(0.22) : Color.red.opacity(0.22))
+                                ? (guessResult == .correct ? AppPalette.success.opacity(0.22) : AppPalette.error.opacity(0.22))
                                 : Color.black.opacity(0.08),
                             radius: 16,
                             x: 0,
