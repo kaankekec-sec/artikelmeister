@@ -38,3 +38,6 @@ android/captures/
 # Local scratch / test files
 .system_generated/
 scratch/
+
+# Claude Code files and folders (any case)
+*[Cc][Ll][Aa][Uu][Dd][Ee]*
