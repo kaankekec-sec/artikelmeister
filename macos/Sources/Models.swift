@@ -15,7 +15,7 @@ enum AppPalette {
 
     /// Appearance-aware colour: `dark` in dark mode, `light` otherwise.
     static func dynamic(dark: UInt32, light: UInt32) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
+        Color(NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? rgb(dark) : rgb(light)
         })
     }

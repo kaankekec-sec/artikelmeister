@@ -563,11 +563,11 @@ fun WordListView(
 
     alertMessage?.let { message ->
         AlertDialog(
-            onDismissRequest = { alertMessage = null; offerImportUndo = false },
+            onDismissRequest = { alertMessage = null; offerImportUndo = false; store.finishImportUndoWindow() },
             title = { Text(stringResource(R.string.dialog_info_title)) },
             text = { Text(message, style = MaterialTheme.typography.bodyMedium) },
             confirmButton = {
-                TextButton(onClick = { alertMessage = null; offerImportUndo = false }) {
+                TextButton(onClick = { alertMessage = null; offerImportUndo = false; store.finishImportUndoWindow() }) {
                     Text(stringResource(R.string.action_ok))
                 }
             },

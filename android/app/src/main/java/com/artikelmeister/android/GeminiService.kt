@@ -13,7 +13,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.google.android.gms.auth.GoogleAuthException
 import com.google.android.gms.auth.GoogleAuthUtil
-import com.google.android.gms.auth.UserRecoverableAuthException
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
@@ -130,7 +129,7 @@ object GoogleScopes {
 
     const val RECONSENT_MESSAGE =
         "Gemini erişimi için Google hesabınızın ek izinleri (Gemini / Cloud) gerekiyor. " +
-            "Aşağıdaki \"Google Hesabını Yeniden Bağla\" düğmesine dokunup izinleri onaylayın. " +
+            "\"Google Hesabını Yeniden Bağla\" düğmesine dokunup izinleri onaylayın. " +
             "Sorun sürerse Ayarlar'dan \"Hesaptan Çıkış Yap\" deyip tekrar giriş yapın."
 }
 
@@ -354,7 +353,8 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             val token = withContext(Dispatchers.IO) {
                 try {
                     GoogleAuthUtil.getToken(context.applicationContext, rawAccount, GoogleScopes.FULL_TOKEN)
-                } catch (_: UserRecoverableAuthException) {
+                } catch (_: GoogleAuthException) {
+                    // Consent missing OR scope refused by the Cloud project: keep Drive sync working.
                     GoogleAuthUtil.getToken(context.applicationContext, rawAccount, GoogleScopes.DRIVE_TOKEN)
                 }
             }
@@ -486,8 +486,10 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             authMode = GeminiAuthMode.GOOGLE_OAUTH
             hasCloudSyncScope = true
             hasDismissedStartupSignIn = true
-            runCatchingCancellable { fetchUserProfile() }
+            // Persist BEFORE the suspending profile fetch: flipping isGoogleAccountConnected can remove the
+            // calling screen, and a cancellation there must not lose the freshly obtained tokens.
             saveToKeystore()
+            runCatchingCancellable { fetchUserProfile() }
             val emailSuffix = if (userEmail.isNotBlank()) " ($userEmail)" else ""
             authStatusMessage = "Google Hesabı$emailSuffix, Drive Senkronizasyonu ve Gemini AI başarıyla bağlandı!"
         } catch (e: Exception) {

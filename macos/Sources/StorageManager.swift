@@ -811,9 +811,16 @@ final class DeckStore: ObservableObject {
     func importBackupJSONData(_ data: Data, mergeWithExisting: Bool) throws -> (added: Int, updated: Int) {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        // The decode is lenient: any JSON object yields a backup with zero cards, and replace mode would then
+        // wipe the word list. Require a real cards array and snapshot before replacing.
+        let probe = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        guard probe?["cards"] is [Any] || probe?["articlelessCards"] is [Any] else {
+            throw NSError(domain: "BackupImport", code: 1, userInfo: [NSLocalizedDescriptionKey: "Bu dosya geçerli bir ArtikelMeister yedeği değil. Hiçbir veri değiştirilmedi."])
+        }
         let backup = try decoder.decode(ArtikelMeisterBackup.self, from: data)
 
         if !mergeWithExisting {
+            writeImportSnapshot()
             cardsLoadFailed = false // explicit user replace of all cards
             self.cards = CardMerge.dedupe(backup.cards)
             if let s = backup.settings {
@@ -1108,6 +1115,14 @@ final class DeckStore: ObservableObject {
     /// True while the last successful CSV import can still be undone ("Geri al").
     var canUndoImport: Bool { importUndo != nil }
 
+    /// Call when the import result is dismissed: closes the undo window and lets the deferred cloud sync run.
+    func finishImportUndoWindow() {
+        if importUndo != nil {
+            importUndo = nil
+            scheduleAutoCloudSync()
+        }
+    }
+
     /// Full pre-import snapshot (cards, progress, settings, tombstones) as a backup file; keeps the last few.
     private func writeImportSnapshot() {
         ensureDirectoriesExist()
@@ -1154,7 +1169,9 @@ final class DeckStore: ObservableObject {
         }
         if removedTombstone { saveDeletedCardsFileOnly() }
         cards = outcome.cards
-        saveCards()
+        // While an undo is possible do NOT upload (cloud merge prefers specific deck / non-blank meaning
+        // regardless of updatedAt, which would revert an undo). Sync resumes in finishImportUndoWindow().
+        saveCards(triggerCloudSync: importUndo == nil)
         rebuildStudyQueue()
         return CSVImportResult(addedCount: outcome.added, updatedCount: outcome.updated, skippedCount: outcome.skipped, invalidLines: outcome.invalid)
     }

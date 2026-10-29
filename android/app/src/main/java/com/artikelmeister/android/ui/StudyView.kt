@@ -288,11 +288,11 @@ fun StudyView(
 
     if (showImportAlert) {
         AlertDialog(
-            onDismissRequest = { showImportAlert = false; offerImportUndo = false },
+            onDismissRequest = { showImportAlert = false; offerImportUndo = false; store.finishImportUndoWindow() },
             title = { Text("CSV İçe Aktarma Sonucu", fontWeight = FontWeight.Bold) },
             text = { Text(importMessage ?: "") },
             confirmButton = {
-                TextButton(onClick = { showImportAlert = false; offerImportUndo = false }) {
+                TextButton(onClick = { showImportAlert = false; offerImportUndo = false; store.finishImportUndoWindow() }) {
                     Text("Tamam")
                 }
             },

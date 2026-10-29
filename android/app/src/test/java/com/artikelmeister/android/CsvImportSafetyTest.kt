@@ -211,6 +211,22 @@ class CsvImportSafetyTest {
         assertTrue(tomb.getValue(Flashcard.keyFor(Artikel.DAS, "Buch")) >= 9000L)
     }
 
+    /**
+     * Why the store defers cloud upload while an import can be undone: if the imported values reached the cloud
+     * first, the sync merge would revert part of the undo. Meaning is protected by the bumped updatedAt; a specific
+     * deck always beats "Genel" regardless of updatedAt, so that case cannot be protected by timestamps alone.
+     */
+    @Test fun cloudMergeAfterUndo_documentsWhyUploadIsDeferred() {
+        val original = card(Artikel.DER, "Tisch", "Masa", "Genel", updated = 1000L)
+        val outcome = CsvCards.importContent("der,Tisch,Anderes,Yeni Deste", "Genel", listOf(original), 5000L)
+        val cloudCopy = outcome.cards[0] // what an early upload would have stored
+        val undo = CsvCards.buildUndo(listOf(original), outcome, emptyMap())!!
+        val (restored, _) = CsvCards.applyUndo(undo, outcome.cards, emptyMap(), 9000L)
+        val merged = CardMerge.smartMerge(restored[0], cloudCopy)
+        assertEquals("meaning undo survives the merge (newer updatedAt)", "Masa", merged.meaning)
+        assertEquals("deck rule ignores updatedAt: this is why sync is deferred during the undo window", "Yeni Deste", merged.deckName)
+    }
+
     @Test fun undoKeepsLaterUnrelatedChanges() {
         val existing = listOf(card(Artikel.DER, "Tisch", "Masa"))
         val outcome = CsvCards.importContent("die,Blume,Cicek", "Genel", existing, 5000L)
