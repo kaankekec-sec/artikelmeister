@@ -39,6 +39,8 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
@@ -464,8 +466,12 @@ private fun HeatmapCell(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalAppColors.current
+    // Compact cell (7 per row on phones): day number + count only; full text for TalkBack.
+    val dayLabel = displayDate.trim().substringBefore(' ')
+    val a11yText = if (count > 0) "$displayDate: $count yanıt" else "$displayDate: —"
     Column(
         modifier = modifier
+            .clearAndSetSemantics { contentDescription = a11yText }
             .clip(RoundedCornerShape(7.dp))
             .background(color)
             .border(
@@ -476,7 +482,7 @@ private fun HeatmapCell(
             .padding(horizontal = 6.dp, vertical = 5.dp)
     ) {
         Text(
-            text = displayDate,
+            text = dayLabel,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
             color = if (count > 0) colors.primaryText else colors.secondaryText,
@@ -484,7 +490,7 @@ private fun HeatmapCell(
             overflow = TextOverflow.Ellipsis
         )
         Text(
-            text = if (count > 0) "$count yanıt" else "—",
+            text = if (count > 0) "$count" else "—",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = if (count > 0) colors.primaryText else colors.secondaryText.copy(alpha = 0.7f),
@@ -776,11 +782,9 @@ fun SettingsView(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 // Daily New Card Limit
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                // Label stacked above the stepper so it never gets squeezed on 360dp phones.
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = "Günlük Yeni Kelime Sayısı",
                             style = MaterialTheme.typography.bodyLarge,
@@ -794,7 +798,10 @@ fun SettingsView(
                         )
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
                         IconButton(
                             onClick = {
                                 store.updateSettings {
@@ -802,7 +809,7 @@ fun SettingsView(
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.Remove, contentDescription = null, tint = colors.primaryText)
+                            Icon(Icons.Default.Remove, contentDescription = stringResource(R.string.action_decrease), tint = colors.primaryText)
                         }
                         Text(
                             text = "${store.settings.dailyNewCardLimit} kelime / gün",
@@ -819,7 +826,7 @@ fun SettingsView(
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = colors.primaryText)
+                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.action_increase), tint = colors.primaryText)
                         }
                     }
                 }
@@ -839,11 +846,9 @@ fun SettingsView(
                 HorizontalDivider(color = colors.cardBorderSubtle)
 
                 // Daily Review Limit
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                // Label stacked above the stepper so it never gets squeezed on 360dp phones.
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = "Günlük Maksimum Tekrar Sayısı",
                             style = MaterialTheme.typography.bodyLarge,
@@ -857,7 +862,10 @@ fun SettingsView(
                         )
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
                         IconButton(
                             onClick = {
                                 store.updateSettings {
@@ -865,7 +873,7 @@ fun SettingsView(
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.Remove, contentDescription = null, tint = colors.primaryText)
+                            Icon(Icons.Default.Remove, contentDescription = stringResource(R.string.action_decrease), tint = colors.primaryText)
                         }
                         Text(
                             text = "${store.settings.dailyReviewLimit} tekrar / gün",
@@ -882,7 +890,7 @@ fun SettingsView(
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = colors.primaryText)
+                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.action_increase), tint = colors.primaryText)
                         }
                     }
                 }

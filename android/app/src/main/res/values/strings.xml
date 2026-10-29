@@ -11,6 +11,8 @@
     <string name="action_open_menu">Menüyü aç</string>
     <string name="action_more_options">Diğer seçenekler</string>
     <string name="dialog_info_title">Bilgi</string>
+    <string name="action_decrease">Azalt</string>
+    <string name="action_increase">Artır</string>
 
     <!-- Navigation tabs -->
     <string name="tab_study">Çalış</string>
