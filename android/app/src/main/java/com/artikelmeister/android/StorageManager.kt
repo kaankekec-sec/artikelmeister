@@ -1139,7 +1139,14 @@ class DeckStore(private val appContext: Context) {
     }
 
     fun importBackupJSONString(jsonStr: String, mergeWithExisting: Boolean): Pair<Int, Int> {
+        // fromJsonString is lenient: any JSON object decodes to a backup with zero cards, and replace mode
+        // would then wipe the word list. Require a real cards array and snapshot before replacing.
+        val probe = JSONObject(jsonStr)
+        if (probe.optJSONArray("cards") == null && probe.optJSONArray("articlelessCards") == null) {
+            throw IllegalArgumentException("Bu dosya geçerli bir ArtikelMeister yedeği değil. Hiçbir veri değiştirilmedi.")
+        }
         val backup = ArtikelMeisterBackup.fromJsonString(jsonStr)
+        if (!mergeWithExisting) writeImportSnapshot()
 
         if (!mergeWithExisting) {
             cardsLoadFailed = false // explicit user replace of all cards
@@ -1211,7 +1218,10 @@ class DeckStore(private val appContext: Context) {
                 if (c.moveToFirst()) c.getString(0) else null
             }
         }.getOrNull()
-        return fromProvider?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        if (!fromProvider.isNullOrBlank()) return fromProvider
+        // Fallback only when it looks like a file name (providers often expose ids such as "msf:1234");
+        // otherwise return null = unknown name, and content validation is the gate.
+        return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.contains('.') }
     }
 
     /**
@@ -1246,6 +1256,14 @@ class DeckStore(private val appContext: Context) {
 
     /** True while the last successful CSV import can still be undone ("Geri al"). */
     val canUndoImport: Boolean get() = importUndo != null
+
+    /** Call when the import result is dismissed: closes the undo window and lets the deferred cloud sync run. */
+    fun finishImportUndoWindow() {
+        if (importUndo != null) {
+            importUndo = null
+            scheduleAutoCloudSync()
+        }
+    }
 
     /** Full pre-import snapshot (cards, progress, settings, tombstones) as a backup file; keeps the last few. */
     private fun writeImportSnapshot() {
@@ -1305,7 +1323,10 @@ class DeckStore(private val appContext: Context) {
             saveDeletedCardsFileOnly()
         }
         cards = outcome.cards
-        saveCards()
+        // While an undo is possible do NOT upload: the cloud merge prefers a specific deck over "Genel" and a
+        // non-blank meaning over a blank one regardless of updatedAt, so a synced import could not be undone.
+        // Sync resumes in finishImportUndoWindow() (dialog dismissed) or on the next change.
+        saveCards(triggerCloudSync = importUndo == null)
         rebuildStudyQueue()
         return CSVImportResult(
             addedCount = outcome.added,

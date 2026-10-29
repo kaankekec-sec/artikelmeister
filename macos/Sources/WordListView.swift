@@ -459,7 +459,7 @@ struct WordListView: View {
                     offerImportUndo = false
                 }
             }
-            Button("Tamam", role: .cancel) { offerImportUndo = false }
+            Button("Tamam", role: .cancel) { offerImportUndo = false; store.finishImportUndoWindow() }
         } message: {
             Text(alertMessage ?? "")
         }
