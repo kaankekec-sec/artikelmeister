@@ -330,10 +330,10 @@ struct WordListView: View {
                                 // Artikel Badge
                                 Text(card.displayArtikel)
                                     .font(.subheadline.weight(.bold))
-                                    .foregroundColor(card.artikel?.color ?? .secondary)
+                                    .foregroundColor(card.artikel?.color ?? AppPalette.articleNone)
                                     .frame(width: 44, alignment: .center)
                                     .padding(.vertical, 4)
-                                    .background(card.artikel?.badgeBackground ?? Color.secondary.opacity(0.15))
+                                    .background(card.artikel?.badgeBackground ?? AppPalette.articleNone.opacity(0.15))
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
 
                                 // Word & Meaning

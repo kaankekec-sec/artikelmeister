@@ -1,6 +1,33 @@
 import Foundation
 import SwiftUI
 
+/// Shared palette, identical to android ui/Theme.kt (dark / light variants). Article colours are clearly
+/// separated from the success green and error red, so correct/wrong feedback never clashes with die/das.
+enum AppPalette {
+    private static func rgb(_ hex: UInt32) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
+    }
+
+    /// Appearance-aware colour: `dark` in dark mode, `light` otherwise.
+    static func dynamic(dark: UInt32, light: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? rgb(dark) : rgb(light)
+        })
+    }
+
+    static let der = dynamic(dark: 0x4C8DFF, light: 0x1F63E0)      // blue
+    static let die = dynamic(dark: 0xF062C0, light: 0xC0268F)      // magenta
+    static let das = dynamic(dark: 0xE8B90E, light: 0x946C00)      // gold
+    static let articleNone = dynamic(dark: 0xA1A1AA, light: 0x6B7280) // grey ('-')
+    static let success = dynamic(dark: 0x30D158, light: 0x1E8E3E)
+    static let error = dynamic(dark: 0xFF453A, light: 0xD92D20)
+}
+
 enum Artikel: String, Codable, CaseIterable, Identifiable {
     case der = "der"
     case die = "die"
@@ -10,9 +37,9 @@ enum Artikel: String, Codable, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .der: return Color(red: 0.16, green: 0.48, blue: 0.96) // Blue for masculine
-        case .die: return Color(red: 0.90, green: 0.22, blue: 0.35) // Red/Rose for feminine
-        case .das: return Color(red: 0.15, green: 0.68, blue: 0.42) // Green for neuter
+        case .der: return AppPalette.der // blue (masculine)
+        case .die: return AppPalette.die // magenta (feminine)
+        case .das: return AppPalette.das // gold (neuter)
         }
     }
 
@@ -85,9 +112,9 @@ enum ReviewRating: Int, CaseIterable {
 
     var color: Color {
         switch self {
-        case .again: return Color(red: 0.90, green: 0.25, blue: 0.25)
+        case .again: return AppPalette.error
         case .hard: return Color(red: 0.92, green: 0.55, blue: 0.15)
-        case .good: return Color(red: 0.18, green: 0.68, blue: 0.38)
+        case .good: return AppPalette.success
         case .easy: return Color(red: 0.20, green: 0.52, blue: 0.95)
         }
     }
