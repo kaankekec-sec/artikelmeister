@@ -409,6 +409,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 }
 
 struct MainContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var store: DeckStore
     @EnvironmentObject var authManager: GeminiAuthManager
     @State private var selectedTab: AppTab = .study
@@ -629,10 +630,12 @@ struct MainContentView: View {
 
                 // Animated Dark / Light Theme Toggle Card
                 AnimatedThemeToggleCard(
-                    isDarkMode: store.settings.isDarkMode,
+                    isDarkMode: colorScheme == .dark,
                     onToggleTheme: {
-                        store.settings.isDarkMode.toggle()
-                        store.saveSettings()
+                        // Flip the look that is on screen now, even when the mode is "system".
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            store.themeMode = (colorScheme == .dark) ? .light : .dark
+                        }
                     }
                 )
                 .padding(.horizontal, 10)
@@ -814,9 +817,20 @@ struct AnimatedThemeToggleCard: View {
                         .fill(isDarkMode ? Color.purple.opacity(0.18) : Color.orange.opacity(0.18))
                         .frame(width: 28, height: 28)
 
-                    Image(systemName: isDarkMode ? "moon.stars.fill" : "sun.max.fill")
+                    // Both symbols stay in the tree so they can rotate/scale/fade across each other.
+                    Image(systemName: "moon.stars.fill")
                         .font(.system(size: 13))
-                        .foregroundColor(isDarkMode ? .purple : .orange)
+                        .foregroundColor(.purple)
+                        .opacity(isDarkMode ? 1 : 0)
+                        .scaleEffect(isDarkMode ? 1 : 0.3)
+                        .rotationEffect(.degrees(isDarkMode ? 0 : -90))
+
+                    Image(systemName: "sun.max.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(.orange)
+                        .opacity(isDarkMode ? 0 : 1)
+                        .scaleEffect(isDarkMode ? 0.3 : 1)
+                        .rotationEffect(.degrees(isDarkMode ? 90 : 0))
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -824,11 +838,15 @@ struct AnimatedThemeToggleCard: View {
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.primary)
                         .lineLimit(1)
+                        .id("title-\(isDarkMode)")
+                        .transition(.opacity)
 
                     Text(isDarkMode ? "Aydınlık temaya geç" : "Karanlık temaya geç")
                         .font(.system(size: 9.5))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .id("subtitle-\(isDarkMode)")
+                        .transition(.opacity)
                 }
 
                 Spacer(minLength: 0)
@@ -851,6 +869,7 @@ struct AnimatedThemeToggleCard: View {
                 }
                 .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isDarkMode)
             }
+            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isDarkMode)
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .background(
@@ -1089,6 +1108,7 @@ struct RootContainerView: View {
             }
         }
         .frame(minWidth: 920, minHeight: 600)
-        .preferredColorScheme(store.settings.isDarkMode ? .dark : .light)
+        .preferredColorScheme(store.themeMode.colorScheme)
+        .animation(.easeInOut(duration: 0.3), value: store.themeMode)
     }
 }

@@ -16,10 +16,53 @@ struct HeatmapDayItem: Identifiable {
     let count: Int
 }
 
+/// Device-local appearance choice. Explicit light/dark is mirrored into `AppSettings.isDarkMode`
+/// so cloud sync and the Android app keep seeing a plain boolean; `system` leaves it untouched.
+enum ThemeMode: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: return "Sistem Varsayılanı"
+        case .light: return "Açık"
+        case .dark: return "Koyu"
+        }
+    }
+
+    /// nil = follow the system appearance.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
+
+    static let defaultsKey = "themeMode"
+}
+
 @MainActor
 final class DeckStore: ObservableObject {
     @Published var cards: [Flashcard] = []
     @Published var settings: AppSettings = AppSettings()
+    @Published var themeMode: ThemeMode = .dark {
+        didSet {
+            guard themeMode != oldValue else { return }
+            UserDefaults.standard.set(themeMode.rawValue, forKey: ThemeMode.defaultsKey)
+            applyAppearance()
+            if !isRestoringTheme { mirrorThemeIntoSettings() }
+        }
+    }
+    private var isRestoringTheme = false
     @Published var dailyProgress: DailyProgress = DailyProgress.empty()
     @Published var studyHistory: [String: DailyProgress] = [:]
     @Published var studyQueue: [Flashcard] = []
@@ -77,6 +120,7 @@ final class DeckStore: ObservableObject {
 
         ensureDirectoriesExist()
         loadAll()
+        loadThemeMode()
         refreshDailyRollover()
         rebuildStudyQueue()
         startLiveDueTimer()
@@ -115,6 +159,47 @@ final class DeckStore: ObservableObject {
     }
 
     // MARK: - Persistence
+
+    /// Existing users keep their current theme: with no stored choice, derive it from isDarkMode.
+    private func loadThemeMode() {
+        isRestoringTheme = true
+        defer { isRestoringTheme = false }
+        if let raw = UserDefaults.standard.string(forKey: ThemeMode.defaultsKey),
+           let stored = ThemeMode(rawValue: raw) {
+            themeMode = stored
+        } else {
+            themeMode = settings.isDarkMode ? .dark : .light
+        }
+        applyAppearance()
+    }
+
+    /// SwiftUI's preferredColorScheme(nil) does not reliably restore the system look on macOS
+    /// after an explicit choice, so the app-wide appearance is driven directly as well.
+    private func applyAppearance() {
+        NSApplication.shared.appearance = themeMode.nsAppearance
+    }
+
+    private func explicitDarkValue() -> Bool? {
+        switch themeMode {
+        case .system: return nil
+        case .light: return false
+        case .dark: return true
+        }
+    }
+
+    /// Theme changed on this device: write the boolean and sync it like any other setting.
+    private func mirrorThemeIntoSettings() {
+        guard let wantDark = explicitDarkValue(), settings.isDarkMode != wantDark else { return }
+        settings.isDarkMode = wantDark
+        saveSettings()
+    }
+
+    /// After a cloud merge the device-local choice stays authoritative; no timestamp bump.
+    private func reassertThemeMirror() {
+        guard let wantDark = explicitDarkValue(), settings.isDarkMode != wantDark else { return }
+        settings.isDarkMode = wantDark
+        saveSettingsFileOnly()
+    }
 
     func loadAll() {
         ensureDirectoriesExist()
@@ -999,6 +1084,7 @@ final class DeckStore: ObservableObject {
                         customDecks: unionDecks,
                         updatedAt: max(settings.updatedAt, cloudSettings.updatedAt)
                     )
+                    reassertThemeMirror()
                     saveSettingsFileOnly()
                 }
 

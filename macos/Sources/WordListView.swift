@@ -130,7 +130,11 @@ struct WordListView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(width: 140)
+                    // Four segments (der/die/das/-) need more than the old 140pt; keep their natural
+                    // width so they never draw over the German word field.
+                    .frame(width: 176)
+                    .fixedSize()
+                    .layoutPriority(1)
 
                     TextField("Almanca kelime (örn: Tisch)", text: $newWord)
                         .textFieldStyle(.roundedBorder)

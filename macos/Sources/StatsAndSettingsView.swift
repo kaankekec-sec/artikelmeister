@@ -360,6 +360,29 @@ struct SettingsView: View {
                     .padding(14)
                 }
 
+                // Appearance (shares store.themeMode with the sidebar toggle)
+                GroupBox(label: Label("Görünüm", systemImage: "circle.lefthalf.filled")) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Tema", selection: Binding(
+                            get: { store.themeMode },
+                            set: { newMode in
+                                withAnimation(.easeInOut(duration: 0.3)) { store.themeMode = newMode }
+                            }
+                        )) {
+                            ForEach(ThemeMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+
+                        Text("Sistem varsayılanı, Mac'inizin açık/koyu ayarını takip eder. Kenar çubuğundaki düğme de aynı ayarı değiştirir.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(14)
+                }
+
                 // Daily Limits
                 GroupBox(label: Label("Günlük Çalışma Limitleri", systemImage: "slider.horizontal.3")) {
                     VStack(alignment: .leading, spacing: 18) {
