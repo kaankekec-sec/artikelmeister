@@ -1020,8 +1020,14 @@ final class DeckStore: ObservableObject {
                 ? "Bulutla eşitlendi: +\(addedFromCloud) yeni kelime alındı (Toplam \(cards.count) kelime)."
                 : "Google Drive ile başarıyla eşitlendi (\(cards.count) kelime, \(currentStreakDays) gün seri)."
         } catch {
-            cloudSyncIsError = true
-            cloudSyncStatusMessage = "Bulut eşitleme hatası: \(error.localizedDescription)"
+            // Cancellation is never a user-visible sync error.
+            let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
+            if cancelled {
+                if !isSilentAutoSync { cloudSyncStatusMessage = nil }
+            } else {
+                cloudSyncIsError = true
+                cloudSyncStatusMessage = "Bulut eşitleme hatası: \(error.localizedDescription)"
+            }
         }
 
         isSyncingCloud = false

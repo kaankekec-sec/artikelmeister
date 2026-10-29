@@ -11,7 +11,9 @@ import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.google.android.gms.auth.GoogleAuthException
 import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.UserRecoverableAuthException
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
@@ -103,6 +105,37 @@ data class GeneratedWordItem(
     val id: String
         get() = "${artikel.lowercase(Locale.ROOT)}_${word.lowercase(Locale.ROOT)}"
 }
+
+/** OAuth scope sets. Gemini scopes are sensitive and need OAuth consent screen configuration in Google Cloud. */
+object GoogleScopes {
+    const val DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
+    const val USER_EMAIL = "https://www.googleapis.com/auth/userinfo.email"
+    const val USER_PROFILE = "https://www.googleapis.com/auth/userinfo.profile"
+    const val GEMINI_RETRIEVER = "https://www.googleapis.com/auth/generative-language.retriever"
+    const val CLOUD_PLATFORM = "https://www.googleapis.com/auth/cloud-platform"
+
+    /** Scopes needed by Drive sync only (used for Drive calls so existing narrower grants keep working). */
+    const val DRIVE_TOKEN = "oauth2:$DRIVE_FILE $USER_EMAIL $USER_PROFILE"
+
+    /** Drive + Gemini scopes (same set the manual OAuth deep-link flow requests). */
+    const val FULL_TOKEN = "oauth2:$DRIVE_FILE $USER_EMAIL $USER_PROFILE $GEMINI_RETRIEVER $CLOUD_PLATFORM"
+
+    /** True when a Gemini HTTP response means the OAuth token lacks the required scopes. */
+    fun isInsufficientScopes(httpStatus: Int, body: String): Boolean =
+        httpStatus == 403 && (
+            body.contains("insufficient authentication scopes", ignoreCase = true) ||
+                body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT", ignoreCase = true) ||
+                body.contains("SCOPE_INSUFFICIENT", ignoreCase = true)
+            )
+
+    const val RECONSENT_MESSAGE =
+        "Gemini erişimi için Google hesabınızın ek izinleri (Gemini / Cloud) gerekiyor. " +
+            "Aşağıdaki \"Google Hesabını Yeniden Bağla\" düğmesine dokunup izinleri onaylayın. " +
+            "Sorun sürerse Ayarlar'dan \"Hesaptan Çıkış Yap\" deyip tekrar giriş yapın."
+}
+
+/** Thrown when the Google token lacks Gemini scopes; the user must re-consent. Never retried. */
+class GeminiScopeException(message: String = GoogleScopes.RECONSENT_MESSAGE) : IllegalStateException(message)
 
 class GeminiAuthManager private constructor(private val appContext: Context) {
     var authMode by mutableStateOf(GeminiAuthMode.GOOGLE_OAUTH)
@@ -281,7 +314,9 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             .requestEmail()
             .requestProfile()
             .requestScopes(
-                Scope("https://www.googleapis.com/auth/drive.file")
+                Scope(GoogleScopes.DRIVE_FILE),
+                Scope(GoogleScopes.GEMINI_RETRIEVER),
+                Scope(GoogleScopes.CLOUD_PLATFORM)
             )
             .build()
         return GoogleSignIn.getClient(context, gso)
@@ -314,10 +349,14 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 ?: Account(userEmail, "com.google")
 
             authStatusMessage = "Bulut senkronizasyonu için erişim anahtarı alınıyor..."
-            val scopeString = "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
-
+            // Request Drive + Gemini scopes. If the user un-ticked the Gemini permissions on the
+            // consent screen, fall back to a Drive-only token so cloud sync still works.
             val token = withContext(Dispatchers.IO) {
-                GoogleAuthUtil.getToken(context.applicationContext, rawAccount, scopeString)
+                try {
+                    GoogleAuthUtil.getToken(context.applicationContext, rawAccount, GoogleScopes.FULL_TOKEN)
+                } catch (_: UserRecoverableAuthException) {
+                    GoogleAuthUtil.getToken(context.applicationContext, rawAccount, GoogleScopes.DRIVE_TOKEN)
+                }
             }
 
             oauthAccessToken = token
@@ -447,7 +486,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             authMode = GeminiAuthMode.GOOGLE_OAUTH
             hasCloudSyncScope = true
             hasDismissedStartupSignIn = true
-            runCatching { fetchUserProfile() }
+            runCatchingCancellable { fetchUserProfile() }
             saveToKeystore()
             val emailSuffix = if (userEmail.isNotBlank()) " ($userEmail)" else ""
             authStatusMessage = "Google Hesabı$emailSuffix, Drive Senkronizasyonu ve Gemini AI başarıyla bağlandı!"
@@ -609,6 +648,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             try {
                 return block()
             } catch (e: Exception) {
+                if (e is kotlin.coroutines.cancellation.CancellationException) throw e
                 lastException = e
                 val msg = e.message ?: ""
                 val isNetworkOrDns = e is java.net.UnknownHostException ||
@@ -687,11 +727,12 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
     suspend fun validOAuthAccessToken(): String {
         val email = userEmail.trim()
         if (email.isNotEmpty()) {
-            val freshToken = runCatching {
+            val freshToken = runCatchingCancellable {
                 val rawAccount = Account(email, "com.google")
-                val scopeString = "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+                // Drive calls deliberately request ONLY the Drive scopes: requesting the Gemini scopes
+                // here would fail (consent required) for users with the older, narrower grant and break sync.
                 withContext(Dispatchers.IO) {
-                    GoogleAuthUtil.getToken(appContext, rawAccount, scopeString)
+                    GoogleAuthUtil.getToken(appContext, rawAccount, GoogleScopes.DRIVE_TOKEN)
                 }
             }.getOrNull()
 
@@ -703,13 +744,54 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
 
         val expiry = oauthTokenExpiry
         if (expiry != null && expiry <= System.currentTimeMillis() && oauthRefreshToken.isNotEmpty() && effectiveClientId.isNotEmpty()) {
-            runCatching { refreshOAuthToken() }
+            runCatchingCancellable { refreshOAuthToken() }
         }
         val token = oauthAccessToken.trim()
         if (token.isEmpty()) {
             throw IllegalStateException("Geçerli bir OAuth erişim anahtarı bulunamadı. Lütfen yeniden giriş yapın.")
         }
         return token
+    }
+
+    /**
+     * Access token for Gemini (generative-language) calls. Requests the Drive + Gemini scope set.
+     * A user who signed in natively before the Gemini scopes were added only holds drive.file; for them
+     * getToken needs consent again, which is reported as [GeminiScopeException] (Turkish re-consent message).
+     * Tokens from the manual OAuth flow (refresh token present) already carry the Gemini scopes.
+     */
+    suspend fun validGeminiAccessToken(): String {
+        val email = userEmail.trim()
+        var consentMissing = false
+        if (email.isNotEmpty()) {
+            try {
+                val token = withContext(Dispatchers.IO) {
+                    GoogleAuthUtil.getToken(appContext, Account(email, "com.google"), GoogleScopes.FULL_TOKEN)
+                }
+                if (token.isNotEmpty()) {
+                    oauthAccessToken = token
+                    return token
+                }
+            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                throw e
+            } catch (_: GoogleAuthException) {
+                // UserRecoverableAuthException (consent for the Gemini scopes missing) or scope refused;
+                // maybe a manual-flow token below still works.
+                consentMissing = true
+            } catch (_: Exception) {
+                // Account not on device / transient failure: fall through to stored credentials.
+            }
+        }
+
+        if (oauthRefreshToken.isNotEmpty() && effectiveClientId.isNotEmpty()) {
+            // Manual OAuth flow tokens carry the Gemini scopes; the access token may have been
+            // replaced by a Drive-only one, so refresh to get the full-scope token back.
+            val refreshed = runCatchingCancellable { refreshOAuthToken() }
+            if (refreshed.isSuccess && oauthAccessToken.isNotBlank()) return oauthAccessToken.trim()
+        }
+        if (consentMissing && oauthRefreshToken.isEmpty()) {
+            throw GeminiScopeException()
+        }
+        return validOAuthAccessToken()
     }
 
     suspend fun refreshOAuthToken() = withContext(Dispatchers.IO) {
@@ -773,7 +855,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                     }
 
                     GeminiAuthMode.GOOGLE_OAUTH -> {
-                        val token = validOAuthAccessToken()
+                        val token = validGeminiAccessToken()
                         val url = URL("https://generativelanguage.googleapis.com/v1beta/models")
                         (url.openConnection() as HttpURLConnection).apply {
                             setRequestProperty("Authorization", "Bearer $token")
@@ -794,6 +876,9 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             }
         }
 
+        if (authMode == GeminiAuthMode.GOOGLE_OAUTH && GoogleScopes.isInsufficientScopes(status, body)) {
+            throw GeminiScopeException()
+        }
         if (status !in 200..299) {
             throw IllegalStateException("Yetkilendirme doğrulanamadı (HTTP $status). Bilgilerinizi kontrol edin.\n$body")
         }
@@ -833,7 +918,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
     suspend fun revokeGoogleTokenBestEffort() = withContext(Dispatchers.IO) {
         val tokenToRevoke = oauthRefreshToken.ifBlank { oauthAccessToken }.trim()
         if (tokenToRevoke.isEmpty()) return@withContext
-        runCatching {
+        runCatchingCancellable {
             val url = URL("https://oauth2.googleapis.com/revoke?token=${URLEncoder.encode(tokenToRevoke, "UTF-8")}")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -1021,6 +1106,8 @@ object GeminiVocabularyGenerator {
                     consecutiveErrors += 1
                 }
             } catch (e: Exception) {
+                // Cancellation and missing-scope errors are not transient: never retry or count them.
+                if (e is kotlin.coroutines.cancellation.CancellationException || e is GeminiScopeException) throw e
                 consecutiveErrors += 1
                 if (collected.isEmpty() && consecutiveErrors >= maxConsecutiveErrors) {
                     throw e
@@ -1160,7 +1247,7 @@ object GeminiVocabularyGenerator {
                         }
 
                         GeminiAuthMode.GOOGLE_OAUTH -> {
-                            val token = authManager.validOAuthAccessToken()
+                            val token = authManager.validGeminiAccessToken()
                             val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent")
                             (url.openConnection() as HttpURLConnection).apply {
                                 setRequestProperty("Authorization", "Bearer $token")
@@ -1203,8 +1290,14 @@ object GeminiVocabularyGenerator {
 
         var (status, body) = executePost(buildPayloadJson(includeThinkingConfig = true))
 
+        // Token lacks the Gemini scopes (e.g. signed in before they were requested): clear Turkish
+        // re-consent message instead of the raw HTTP 403.
+        if (authManager.authMode == GeminiAuthMode.GOOGLE_OAUTH && GoogleScopes.isInsufficientScopes(status, body)) {
+            throw GeminiScopeException()
+        }
+
         if (status == 400) {
-            val fallback = runCatching { executePost(buildPayloadJson(includeThinkingConfig = false)) }.getOrNull()
+            val fallback = runCatchingCancellable { executePost(buildPayloadJson(includeThinkingConfig = false)) }.getOrNull()
             if (fallback != null && fallback.first in 200..299) {
                 return parseGeminiCandidates(fallback.second)
             }
@@ -1212,7 +1305,7 @@ object GeminiVocabularyGenerator {
 
         if ((status == 404 || status == 400) && allowModelAutoDiscoveryRetry) {
             val previousModel = authManager.selectedModel
-            runCatching { authManager.verifyCredentials() }
+            runCatchingCancellable { authManager.verifyCredentials() }
             if (authManager.selectedModel != previousModel) {
                 return requestBatchFromGemini(
                     level = level,
@@ -1338,7 +1431,7 @@ object GoogleDriveSyncService {
             }
             if (checkConn.responseCode == 401) {
                 authManager.invalidateToken()
-                runCatching { authManager.refreshOAuthToken() }
+                runCatchingCancellable { authManager.refreshOAuthToken() }
                 token = authManager.validOAuthAccessToken()
                 checkConn = (checkUrl.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
@@ -1370,7 +1463,7 @@ object GoogleDriveSyncService {
         var listCode = listConn.responseCode
         if (listCode == 401) {
             authManager.invalidateToken()
-            runCatching { authManager.refreshOAuthToken() }
+            runCatchingCancellable { authManager.refreshOAuthToken() }
             token = authManager.validOAuthAccessToken()
             listConn = (listUrl.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -1417,7 +1510,7 @@ object GoogleDriveSyncService {
         createConn.outputStream.use { it.write(createMeta.toString().toByteArray(Charsets.UTF_8)) }
         var createCode = createConn.responseCode
         if (createCode == 401 && authManager.oauthRefreshToken.isNotEmpty()) {
-            runCatching { authManager.refreshOAuthToken() }
+            runCatchingCancellable { authManager.refreshOAuthToken() }
             token = authManager.validOAuthAccessToken()
             createConn = (URL("https://www.googleapis.com/drive/v3/files?fields=id").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -1468,7 +1561,7 @@ object GoogleDriveSyncService {
         var listCode = listConn.responseCode
         if (listCode == 401) {
             authManager.invalidateToken()
-            runCatching { authManager.refreshOAuthToken() }
+            runCatchingCancellable { authManager.refreshOAuthToken() }
             token = authManager.validOAuthAccessToken()
             listConn = (listUrl.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -1511,7 +1604,7 @@ object GoogleDriveSyncService {
         var dlCode = dlConn.responseCode
         if (dlCode == 401) {
             authManager.invalidateToken()
-            runCatching { authManager.refreshOAuthToken() }
+            runCatchingCancellable { authManager.refreshOAuthToken() }
             token = authManager.validOAuthAccessToken()
             dlConn = (downloadUrl.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -1570,7 +1663,7 @@ object GoogleDriveSyncService {
             var createCode = createConn.responseCode
             if (createCode == 401) {
                 authManager.invalidateToken()
-                runCatching { authManager.refreshOAuthToken() }
+                runCatchingCancellable { authManager.refreshOAuthToken() }
                 token = authManager.validOAuthAccessToken()
                 createConn = (URL("https://www.googleapis.com/drive/v3/files?fields=id").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
@@ -1612,7 +1705,7 @@ object GoogleDriveSyncService {
         var uploadCode = uploadConn.responseCode
         if (uploadCode == 401) {
             authManager.invalidateToken()
-            runCatching { authManager.refreshOAuthToken() }
+            runCatchingCancellable { authManager.refreshOAuthToken() }
             token = authManager.validOAuthAccessToken()
             uploadConn = (uploadUrl.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -1645,7 +1738,7 @@ object GoogleDriveSyncService {
 
     suspend fun deleteAllCloudAccountData(authManager: GeminiAuthManager) = withContext(Dispatchers.IO) {
         if (!authManager.isGoogleAccountConnected) return@withContext
-        runCatching {
+        runCatchingCancellable {
             val token = authManager.validOAuthAccessToken()
 
             // Delete sync file if known

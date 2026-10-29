@@ -570,15 +570,8 @@ fun SettingsView(
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        scope.launch {
-            runCatching {
-                authManager.handleGoogleSignInResult(result.data, context)
-                store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = false)
-            }.onFailure { err ->
-                store.cloudSyncStatusMessage = err.localizedMessage ?: "Google girişi başarısız oldu."
-                store.cloudSyncIsError = true
-            }
-        }
+        // Runs in the store's own scope: sign-in changes screens and a composition scope would cancel the sync.
+        store.completeGoogleSignIn(result.data, authManager)
     }
 
     Column(
@@ -668,11 +661,7 @@ fun SettingsView(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Button(
-                            onClick = {
-                                scope.launch {
-                                    store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = false)
-                                }
-                            },
+                            onClick = { store.requestCloudSync(authManager) },
                             enabled = !store.isSyncingCloud && !isDeletingAccount,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = colors.accentBlue,
@@ -1148,9 +1137,8 @@ fun SettingsView(
             confirmButton = {
                 Button(
                     onClick = {
-                        scope.launch {
-                            isDeletingAccount = true
-                            store.deleteAccountAndAllData(authManager)
+                        isDeletingAccount = true
+                        store.requestDeleteAccountAndAllData(authManager) {
                             isDeletingAccount = false
                             showDeleteAccountConfirmation = false
                         }
