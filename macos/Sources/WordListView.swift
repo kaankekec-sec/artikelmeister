@@ -5,11 +5,12 @@ struct WordListView: View {
     @EnvironmentObject var store: DeckStore
     @State private var searchText: String = ""
     @State private var selectedDeckFilter: String? = nil
-    @State private var selectedArtikelFilter: Artikel? = nil
+    /// nil = all; "der"/"die"/"das"; ArtikelFilter.none ("-") = article-less words
+    @State private var selectedArtikelFilter: String? = nil
     @State private var selectedStageFilter: CardStage? = nil
 
     // Manual new word form state
-    @State private var newArtikel: Artikel = .der
+    @State private var newArtikel: Artikel? = .der
     @State private var newWord: String = ""
     @State private var newMeaning: String = ""
     @State private var newDeckName: String = "Genel"
@@ -29,7 +30,7 @@ struct WordListView: View {
             if let deckFilter = selectedDeckFilter, card.deckName != deckFilter {
                 return false
             }
-            if let artFilter = selectedArtikelFilter, card.artikel != artFilter {
+            if !ArtikelFilter.matches(card, filter: selectedArtikelFilter) {
                 return false
             }
             if let stageFilter = selectedStageFilter, card.stage != stageFilter {
@@ -39,7 +40,7 @@ struct WordListView: View {
                 let query = searchText.lowercased()
                 let matchesWord = card.word.lowercased().contains(query)
                 let matchesMeaning = card.meaning.lowercased().contains(query)
-                let matchesArtikel = card.artikel.rawValue.lowercased().contains(query)
+                let matchesArtikel = card.displayArtikel.lowercased().contains(query)
                 let matchesDeck = card.deckName.lowercased().contains(query)
                 return matchesWord || matchesMeaning || matchesArtikel || matchesDeck
             }
@@ -121,8 +122,9 @@ struct WordListView: View {
                 HStack(spacing: 8) {
                     Picker("", selection: $newArtikel) {
                         ForEach(Artikel.allCases) { art in
-                            Text(art.rawValue).tag(art)
+                            Text(art.rawValue).tag(Artikel?.some(art))
                         }
+                        Text(ArtikelFilter.none).tag(Artikel?.none)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
@@ -271,10 +273,11 @@ struct WordListView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
                     Picker("", selection: $selectedArtikelFilter) {
-                        Text("Tüm Artikeller").tag(Artikel?.none)
+                        Text("Tüm Artikeller").tag(String?.none)
                         ForEach(Artikel.allCases) { art in
-                            Text(art.rawValue).tag(Artikel?.some(art))
+                            Text(art.rawValue).tag(String?.some(art.rawValue))
                         }
+                        Text(ArtikelFilter.none).tag(String?.some(ArtikelFilter.none))
                     }
                     .labelsHidden()
                     .frame(width: 130)
@@ -323,12 +326,12 @@ struct WordListView: View {
                         ForEach(Array(filteredCards.enumerated()), id: \.element.id) { index, card in
                             HStack(spacing: 12) {
                                 // Artikel Badge
-                                Text(card.artikel.rawValue)
+                                Text(card.displayArtikel)
                                     .font(.subheadline.weight(.bold))
-                                    .foregroundColor(card.artikel.color)
+                                    .foregroundColor(card.artikel?.color ?? .secondary)
                                     .frame(width: 44, alignment: .center)
                                     .padding(.vertical, 4)
-                                    .background(card.artikel.badgeBackground)
+                                    .background(card.artikel?.badgeBackground ?? Color.secondary.opacity(0.15))
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
 
                                 // Word & Meaning
@@ -726,7 +729,7 @@ struct EditWordSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let card: Flashcard
-    @State private var editArtikel: Artikel
+    @State private var editArtikel: Artikel?
     @State private var editWord: String
     @State private var editMeaning: String
     @State private var editDeckName: String
@@ -763,8 +766,9 @@ struct EditWordSheet: View {
                     .font(.caption.weight(.semibold))
                 Picker("Artikel", selection: $editArtikel) {
                     ForEach(Artikel.allCases) { art in
-                        Text("\(art.rawValue) (\(art.grammaticalLabel))").tag(art)
+                        Text("\(art.rawValue) (\(art.grammaticalLabel))").tag(Artikel?.some(art))
                     }
+                    Text(ArtikelFilter.none).tag(Artikel?.none)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()

@@ -820,13 +820,13 @@ private fun ActiveCardSessionView(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 val statusText = if (guessResult == ArtikelGuessResult.CORRECT) {
-                                    "DOĞRU! (${card.artikel?.grammaticalLabel ?: "Artikelsiz"})"
+                                    "DOĞRU! (${card.artikel?.grammaticalLabel ?: card.meaning})"
                                 } else {
                                     val userCleaned = typedArtikel.trim()
                                     if (userCleaned.isEmpty()) {
-                                        "BOŞ BIRAKILDI — Doğru Artikel: ${card.displayArtikel}"
+                                        "BOŞ BIRAKILDI — Doğru ${if (card.isArticleless) "Anlam" else "Artikel"}: ${com.artikelmeister.android.AnswerChecker.expectedLabel(card)}"
                                     } else {
-                                        "YANLIŞ ($userCleaned) — Doğru Artikel: ${card.displayArtikel}"
+                                        "YANLIŞ ($userCleaned) — Doğru ${if (card.isArticleless) "Anlam" else "Artikel"}: ${com.artikelmeister.android.AnswerChecker.expectedLabel(card)}"
                                     }
                                 }
                                 Text(

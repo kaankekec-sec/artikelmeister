@@ -307,18 +307,20 @@ struct StudyView: View {
                         // Center Content: Front (Input Box + Word) vs Back (Green/Red Result)
                         if !isRevealed {
                             VStack(spacing: 16) {
-                                Text("Kelimenin artikelini (der / die / das) boşluğa yazıp Enter'a basın:")
+                                Text(card.isArticleless
+                                     ? "Kelimenin Türkçe anlamını yazıp Enter'a basın:"
+                                     : "Kelimenin artikelini (der / die / das) boşluğa yazıp Enter'a basın:")
                                     .font(.subheadline.weight(.medium))
                                     .foregroundColor(.secondary)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.8)
 
                                 HStack(alignment: .center, spacing: 14) {
-                                    TextField("artikel...", text: $typedArtikel)
+                                    TextField(card.isArticleless ? "anlam..." : "artikel...", text: $typedArtikel)
                                         .textFieldStyle(.plain)
                                         .font(.system(size: 28, weight: .bold, design: .rounded))
                                         .multilineTextAlignment(.center)
-                                        .frame(width: 132, height: 54)
+                                        .frame(width: card.isArticleless ? 240 : 132, height: 54)
                                         .background(
                                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                                 .fill(Color(NSColor.textBackgroundColor))
@@ -342,7 +344,7 @@ struct StudyView: View {
                                 }
                                 .padding(.horizontal, 8)
 
-                                if store.settings.showMeaningOnFront && !card.meaning.isEmpty {
+                                if store.settings.showMeaningOnFront && !card.meaning.isEmpty && !card.isArticleless {
                                     Text(card.meaning)
                                         .font(.title3)
                                         .foregroundColor(.secondary)
@@ -358,15 +360,15 @@ struct StudyView: View {
                                     Image(systemName: guessResult == .correct ? "checkmark.circle.fill" : "xmark.octagon.fill")
                                         .font(.headline)
                                     if guessResult == .correct {
-                                        Text("DOĞRU! (\(card.artikel.grammaticalLabel))")
+                                        Text("DOĞRU! (\(card.artikel?.grammaticalLabel ?? card.meaning))")
                                             .font(.subheadline.weight(.bold))
                                     } else {
                                         let userCleaned = typedArtikel.trimmingCharacters(in: .whitespacesAndNewlines)
                                         if userCleaned.isEmpty {
-                                            Text("BOŞ BIRAKILDI — Doğru Artikel: \(card.artikel.rawValue)")
+                                            Text("BOŞ BIRAKILDI — Doğru \(card.isArticleless ? "Anlam" : "Artikel"): \(AnswerChecker.expectedLabel(card: card))")
                                                 .font(.subheadline.weight(.bold))
                                         } else {
-                                            Text("YANLIŞ (\(userCleaned)) — Doğru Artikel: \(card.artikel.rawValue)")
+                                            Text("YANLIŞ (\(userCleaned)) — Doğru \(card.isArticleless ? "Anlam" : "Artikel"): \(AnswerChecker.expectedLabel(card: card))")
                                                 .font(.subheadline.weight(.bold))
                                         }
                                     }
@@ -381,9 +383,11 @@ struct StudyView: View {
 
                                 // Revealed Artikel + Word lit up in Green (if correct) or Red (if wrong)
                                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                    Text(card.artikel.rawValue)
-                                        .font(.system(size: 44, weight: .heavy, design: .rounded))
-                                        .foregroundColor(wordHighlightColor)
+                                    if let art = card.artikel {
+                                        Text(art.rawValue)
+                                            .font(.system(size: 44, weight: .heavy, design: .rounded))
+                                            .foregroundColor(wordHighlightColor)
+                                    }
 
                                     Text(card.word)
                                         .font(.system(size: 42, weight: .bold, design: .rounded))
@@ -668,8 +672,7 @@ struct StudyView: View {
         guard !isRevealed else { return }
         isInputFocused = false
 
-        let cleanedInput = typedArtikel.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if cleanedInput == card.artikel.rawValue.lowercased() {
+        if AnswerChecker.isCorrect(card: card, typed: typedArtikel) {
             guessResult = .correct
         } else {
             guessResult = .wrong

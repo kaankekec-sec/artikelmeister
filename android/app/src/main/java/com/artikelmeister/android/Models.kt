@@ -48,20 +48,6 @@ enum class Artikel(val rawValue: String) {
                 else -> null
             }
         }
-
-        /**
-         * Strict parser used for CSV import and answer checking: only der/die/das
-         * (case-insensitive, trimmed). Anything else (empty, typo, "m", ...) -> null,
-         * which means "article-less word".
-         */
-        fun parseStrict(raw: String): Artikel? {
-            return when (raw.trim().lowercase(Locale.ROOT)) {
-                "der" -> DER
-                "die" -> DIE
-                "das" -> DAS
-                else -> null
-            }
-        }
     }
 }
 

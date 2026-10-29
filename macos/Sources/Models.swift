@@ -37,17 +37,6 @@ enum Artikel: String, Codable, CaseIterable, Identifiable {
         default: return nil
         }
     }
-
-    /// Strict parser (CSV import / answer checking): only der/die/das, case-insensitive,
-    /// trimmed. Anything else (empty, typo, "m", ...) -> nil = article-less word.
-    static func parseStrict(_ raw: String) -> Artikel? {
-        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "der": return .der
-        case "die": return .die
-        case "das": return .das
-        default: return nil
-        }
-    }
 }
 
 enum CardStage: String, Codable, CaseIterable {
