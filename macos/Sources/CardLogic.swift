@@ -201,6 +201,231 @@ enum ArtikelFilter {
 }
 
 enum CsvCards {
+    // MARK: - Validation (runs BEFORE any data is touched) -- mirrors Kotlin CsvCards
+
+    enum Rejection { case badExtension, empty, tooLarge, binary, badEncoding, notCsvFormat, noColumns, noValidRows, tooManyInvalid }
+
+    /// Thrown when a file is not an importable word list. Nothing has been changed when this is thrown.
+    struct RejectedError: LocalizedError {
+        let reason: Rejection
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    struct Validation {
+        var ok: Bool
+        var reason: Rejection? = nil
+        var message: String = ""
+        var validRows: Int = 0
+        var invalidRows: Int = 0
+    }
+
+    static let maxBytes = 10 * 1024 * 1024
+    /// Reject when MORE than this share of the non-empty data rows is invalid (a header row is not counted).
+    static let maxInvalidRatio = 0.5
+    private static let maxColumns = 8
+    private static let maxArticleChars = 12
+    private static let maxWordChars = 80
+    private static let maxWordTokens = 6
+    private static let maxMeaningChars = 200
+    private static let maxDeckChars = 60
+    private static let forbiddenWordChars: Set<Character> = ["{", "}", "[", "]", "<", ">", "|", "\\"]
+
+    static func message(_ reason: Rejection, valid: Int = 0, invalid: Int = 0) -> String {
+        switch reason {
+        case .badExtension: return "Lütfen .csv uzantılı bir dosya seçin. Seçilen dosya CSV değil; hiçbir veri değiştirilmedi."
+        case .empty: return "Dosya boş; içe aktarılacak kelime bulunamadı. Hiçbir veri değiştirilmedi."
+        case .tooLarge: return "Dosya çok büyük (en fazla 10 MB). Hiçbir veri değiştirilmedi."
+        case .binary: return "Bu dosya bir metin/CSV dosyası değil (resim, PDF gibi ikili içerik algılandı). Hiçbir veri değiştirilmedi."
+        case .badEncoding: return "Dosyanın karakter kodlaması okunamadı. Dosyayı UTF-8 olarak kaydedip tekrar deneyin. Hiçbir veri değiştirilmedi."
+        case .notCsvFormat: return "Bu dosya CSV değil (JSON/XML/HTML benzeri içerik). JSON yedekleri için Ayarlar'daki yedek içe aktarmayı kullanın. Hiçbir veri değiştirilmedi."
+        case .noColumns: return "Dosyada sütun yapısı bulunamadı. Satırlar virgül, noktalı virgül veya sekme ile ayrılmış olmalı: artikel,kelime,anlam,deste. Hiçbir veri değiştirilmedi."
+        case .noValidRows: return "Dosyada geçerli kelime satırı bulunamadı. Beklenen biçim: artikel,kelime,anlam,deste. Hiçbir veri değiştirilmedi."
+        case .tooManyInvalid: return "Dosyadaki satırların çoğu geçersiz (\(invalid) / \(valid + invalid) satır). Doğru bir CSV dosyası seçtiğinizden emin olun. Hiçbir veri değiştirilmedi."
+        }
+    }
+
+    private static func reject(_ reason: Rejection) -> RejectedError {
+        RejectedError(reason: reason, message: message(reason))
+    }
+
+    static func hasCsvExtension(_ displayName: String?) -> Bool {
+        guard let n = displayName else { return false }
+        return n.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasSuffix(".csv")
+    }
+
+    /// Throws (badExtension) unless the name ends with .csv. A nil name cannot be checked and is allowed.
+    static func requireCsvName(_ displayName: String?) throws {
+        if let n = displayName, !hasCsvExtension(n) { throw reject(.badExtension) }
+    }
+
+    /// Decodes raw bytes: UTF-8, UTF-16 with BOM, or Windows-1254 (Turkish Excel) as fallback.
+    static func decode(_ data: Data) throws -> String {
+        if data.isEmpty { throw reject(.empty) }
+        if data.count > maxBytes { throw reject(.tooLarge) }
+        let b = [UInt8](data.prefix(2))
+        if b.count == 2 && b[0] == 0xFF && b[1] == 0xFE {
+            guard let s = String(data: data.dropFirst(2), encoding: .utf16LittleEndian) else { throw reject(.badEncoding) }
+            return s
+        }
+        if b.count == 2 && b[0] == 0xFE && b[1] == 0xFF {
+            guard let s = String(data: data.dropFirst(2), encoding: .utf16BigEndian) else { throw reject(.badEncoding) }
+            return s
+        }
+        if data.contains(0) { throw reject(.binary) }
+        if let s = String(data: data, encoding: .utf8) { return s }
+        if let s = String(data: data, encoding: .windowsCP1254) { return s }
+        throw reject(.badEncoding)
+    }
+
+    static func isPlausibleRow(_ columns: [String]) -> Bool {
+        if columns.count < 2 || columns.count > maxColumns { return false }
+        let article = columns[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        let word = columns[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        if word.isEmpty { return false }
+        if article.count > maxArticleChars || article.contains(where: { $0.isWhitespace }) { return false }
+        if word.count > maxWordChars { return false }
+        if word.split(whereSeparator: { $0.isWhitespace }).count > maxWordTokens { return false }
+        if word.contains(where: { forbiddenWordChars.contains($0) }) { return false }
+        if let last = word.last, ".!?;:".contains(last) { return false }
+        if columns.count >= 3 && columns[2].count > maxMeaningChars { return false }
+        if columns.count >= 4 && columns[3].count > maxDeckChars { return false }
+        return true
+    }
+
+    /// Validates decoded text. Pure; never throws.
+    static func validate(_ content: String) -> Validation {
+        func fail(_ r: Rejection, _ v: Int = 0, _ i: Int = 0) -> Validation {
+            Validation(ok: false, reason: r, message: message(r, valid: v, invalid: i), validRows: v, invalidRows: i)
+        }
+        let text = content.replacingOccurrences(of: "\u{FEFF}", with: "")
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return fail(.empty) }
+        if text.utf8.count > maxBytes { return fail(.tooLarge) }
+
+        var nonPrintable = 0
+        var total = 0
+        for scalar in text.unicodeScalars {
+            total += 1
+            let v = scalar.value
+            if v == 0 || v == 0xFFFD || v == 0x7F || (v < 0x20 && v != 0x0A && v != 0x0D && v != 0x09) { nonPrintable += 1 }
+        }
+        if text.unicodeScalars.contains(where: { $0.value == 0 }) || Double(nonPrintable) / Double(total) > 0.01 {
+            return fail(.binary)
+        }
+
+        if let first = text.drop(while: { $0.isWhitespace }).first, first == "{" || first == "[" || first == "<" {
+            return fail(.notCsvFormat)
+        }
+
+        var valid = 0, invalid = 0, multiColumn = 0
+        for (lineIdx, rawLine) in text.components(separatedBy: .newlines).enumerated() {
+            var line = rawLine
+            while let last = line.last, last.isWhitespace || last.isNewline { line.removeLast() }
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            let columns = parseRow(line)
+            if columns.count >= 2 { multiColumn += 1 }
+            if lineIdx == 0 && columns.count >= 2 && isHeader(rawArtikel: columns[0], word: columns[1]) { continue }
+            if isPlausibleRow(columns) { valid += 1 } else { invalid += 1 }
+        }
+        if valid + invalid == 0 { return fail(.empty) }
+        if multiColumn == 0 { return fail(.noColumns, valid, invalid) }
+        if valid == 0 { return fail(.noValidRows, valid, invalid) }
+        if Double(invalid) / Double(valid + invalid) > maxInvalidRatio { return fail(.tooManyInvalid, valid, invalid) }
+        return Validation(ok: true, validRows: valid, invalidRows: invalid)
+    }
+
+    @discardableResult
+    static func requireValid(_ content: String) throws -> Validation {
+        let v = validate(content)
+        if !v.ok, let r = v.reason { throw RejectedError(reason: r, message: v.message) }
+        return v
+    }
+
+    static func decodeAndValidate(_ data: Data) throws -> String {
+        let text = try decode(data)
+        try requireValid(text)
+        return text
+    }
+
+    // MARK: - Undo (pure)
+
+    struct UndoRecord {
+        var addedKeys: Set<String>
+        /// Cards the import modified, keyed by syncKey, as they were BEFORE the import.
+        var previousCards: [String: Flashcard]
+        var previousTombstones: [String: Date]
+    }
+
+    /// Returns nil when the import changed nothing. `before` must be the list passed to importContent.
+    static func buildUndo(before: [Flashcard], outcome: ImportOutcome, previousTombstones: [String: Date]) -> UndoRecord? {
+        if outcome.added == 0 && outcome.updated == 0 { return nil }
+        var previous: [String: Flashcard] = [:]
+        for i in before.indices where outcome.cards[i] != before[i] {
+            previous[before[i].syncKey] = before[i]
+        }
+        return UndoRecord(addedKeys: Set(outcome.addedKeys), previousCards: previous, previousTombstones: previousTombstones)
+    }
+
+    static func applyUndo(_ undo: UndoRecord, cards: [Flashcard], tombstones: [String: Date], now: Date) -> (cards: [Flashcard], tombstones: [String: Date]) {
+        var tomb = tombstones
+        var kept: [Flashcard] = []
+        for card in cards {
+            let key = card.syncKey
+            if undo.addedKeys.contains(key) {
+                tomb[key] = now
+            } else if let prev = undo.previousCards[key] {
+                var c = card
+                c.meaning = prev.meaning
+                c.deckName = prev.deckName
+                c.updatedAt = now
+                kept.append(c)
+            } else {
+                kept.append(card)
+            }
+        }
+        for (k, ts) in undo.previousTombstones where !undo.addedKeys.contains(k) && tomb[k] == nil {
+            tomb[k] = ts
+        }
+        return (kept, tomb)
+    }
+
+    // MARK: - Import
+
+    /// Bundled starter pack (must always pass `validate`).
+    static let starterPackCSV: String = """
+    artikel,kelime,anlam,deste
+    der,Tisch,Masa,A1 Temel
+    die,Katze,Kedi,A1 Temel
+    das,Buch,Kitap,A1 Temel
+    der,Stuhl,Sandalye,A1 Temel
+    die,Sonne,Güneş,A1 Temel
+    das,Haus,Ev,A1 Temel
+    der,Apfel,Elma,Yiyecek & İçecek
+    die,Blume,Çiçek,Doğa
+    das,Auto,Araba,Ulaşım
+    der,Hund,Köpek,A1 Temel
+    die,Schule,Okul,Eğitim
+    das,Wasser,Su,Yiyecek & İçecek
+    der,Baum,Ağaç,Doğa
+    die,Tür,Kapı,A1 Temel
+    das,Fenster,Pencere,A1 Temel
+    der,Schlüssel,Anahtar,Günlük Eşyalar
+    die,Tasche,Çanta,Günlük Eşyalar
+    das,Kind,Çocuk,A1 Temel
+    der,Zug,Tren,Ulaşım
+    die,Stadt,Şehir,Ulaşım
+    das,Mädchen,Kız çocuk,A1 Temel
+    der,Kaffee,Kahve,Yiyecek & İçecek
+    die,Milch,Süt,Yiyecek & İçecek
+    das,Brot,Ekmek,Yiyecek & İçecek
+    der,Bahnhof,Tren istasyonu,Ulaşım
+    die,Zeitung,Gazete,Günlük Eşyalar
+    das,Handy,Cep telefonu,Günlük Eşyalar
+    der,Computer,Bilgisayar,Günlük Eşyalar
+    die,Uhr,Saat,Günlük Eşyalar
+    das,Zimmer,Oda,A1 Temel
+    """
+
     struct ImportOutcome {
         var cards: [Flashcard]
         var added: Int
@@ -234,11 +459,15 @@ enum CsvCards {
             }
             let rawArtikel = columns[0]
             let cleanWord = columns[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if lineIdx == 0 && isHeader(rawArtikel: rawArtikel, word: cleanWord) { continue }
+            // Garbage rows inside an accepted file are skipped, not imported.
+            guard isPlausibleRow(columns) else {
+                invalid += 1
+                continue
+            }
             let cleanMeaning = columns.count >= 3 ? columns[2].trimmingCharacters(in: .whitespacesAndNewlines) : ""
             let deckRaw = (columns.count >= 4 ? columns[3] : fallback).trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanDeck = deckRaw.isEmpty ? fallback : deckRaw
-
-            if lineIdx == 0 && isHeader(rawArtikel: rawArtikel, word: cleanWord) { continue }
 
             // Empty OR not der/die/das (typo) -> article-less word.
             let artikel = Artikel.parse(rawArtikel)

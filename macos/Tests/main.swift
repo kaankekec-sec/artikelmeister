@@ -200,5 +200,6 @@ do {
     check(again.stage == .relearning && again.lapses == 1, "sm2 again -> relearning")
 }
 
+runCsvSafetyTests()
 print("\(total - failures)/\(total) checks passed")
 exit(failures == 0 ? 0 : 1)

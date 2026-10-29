@@ -187,6 +187,252 @@ object ArtikelFilter {
 }
 
 object CsvCards {
+    // ------------------------------------------------------------------ Validation (runs BEFORE any data is touched)
+
+    enum class Rejection { BAD_EXTENSION, EMPTY, TOO_LARGE, BINARY, BAD_ENCODING, NOT_CSV_FORMAT, NO_COLUMNS, NO_VALID_ROWS, TOO_MANY_INVALID }
+
+    /** Thrown when a file is not an importable word list. Nothing has been changed when this is thrown. */
+    class RejectedException(val reason: Rejection, message: String) : IllegalArgumentException(message)
+
+    data class Validation(
+        val ok: Boolean,
+        val reason: Rejection? = null,
+        val message: String = "",
+        val validRows: Int = 0,
+        val invalidRows: Int = 0
+    )
+
+    const val MAX_BYTES = 10 * 1024 * 1024
+    /** Reject when MORE than this share of the non-empty data rows is invalid (a header row is not counted). */
+    const val MAX_INVALID_RATIO = 0.5
+    private const val MAX_COLUMNS = 8
+    private const val MAX_ARTICLE_CHARS = 12
+    private const val MAX_WORD_CHARS = 80
+    private const val MAX_WORD_TOKENS = 6
+    private const val MAX_MEANING_CHARS = 200
+    private const val MAX_DECK_CHARS = 60
+    private val WHITESPACE = Regex("\\s+")
+    private const val FORBIDDEN_WORD_CHARS = "{}[]<>|\\"
+
+    val ACCEPTED_MIME_TYPES = arrayOf(
+        "text/csv", "text/comma-separated-values", "application/csv",
+        "text/plain", "application/vnd.ms-excel",
+        // Some providers (Drive, file managers) report .csv as octet-stream; the extension check is the real gate.
+        "application/octet-stream"
+    )
+
+    private fun message(reason: Rejection, valid: Int = 0, invalid: Int = 0): String = when (reason) {
+        Rejection.BAD_EXTENSION -> "Lütfen .csv uzantılı bir dosya seçin. Seçilen dosya CSV değil; hiçbir veri değiştirilmedi."
+        Rejection.EMPTY -> "Dosya boş; içe aktarılacak kelime bulunamadı. Hiçbir veri değiştirilmedi."
+        Rejection.TOO_LARGE -> "Dosya çok büyük (en fazla 10 MB). Hiçbir veri değiştirilmedi."
+        Rejection.BINARY -> "Bu dosya bir metin/CSV dosyası değil (resim, PDF gibi ikili içerik algılandı). Hiçbir veri değiştirilmedi."
+        Rejection.BAD_ENCODING -> "Dosyanın karakter kodlaması okunamadı. Dosyayı UTF-8 olarak kaydedip tekrar deneyin. Hiçbir veri değiştirilmedi."
+        Rejection.NOT_CSV_FORMAT -> "Bu dosya CSV değil (JSON/XML/HTML benzeri içerik). JSON yedekleri için Ayarlar'daki yedek içe aktarmayı kullanın. Hiçbir veri değiştirilmedi."
+        Rejection.NO_COLUMNS -> "Dosyada sütun yapısı bulunamadı. Satırlar virgül, noktalı virgül veya sekme ile ayrılmış olmalı: artikel,kelime,anlam,deste. Hiçbir veri değiştirilmedi."
+        Rejection.NO_VALID_ROWS -> "Dosyada geçerli kelime satırı bulunamadı. Beklenen biçim: artikel,kelime,anlam,deste. Hiçbir veri değiştirilmedi."
+        Rejection.TOO_MANY_INVALID -> "Dosyadaki satırların çoğu geçersiz ($invalid / ${valid + invalid} satır). Doğru bir CSV dosyası seçtiğinizden emin olun. Hiçbir veri değiştirilmedi."
+    }
+
+    private fun reject(reason: Rejection): Nothing = throw RejectedException(reason, message(reason))
+
+    /** True when a display name ends in .csv (case-insensitive). */
+    fun hasCsvExtension(displayName: String?): Boolean =
+        displayName != null && displayName.trim().lowercase(Locale.ROOT).endsWith(".csv")
+
+    /**
+     * Throws [RejectedException] (BAD_EXTENSION) unless the name ends with .csv. A null name cannot be
+     * checked and is allowed (content validation still applies).
+     */
+    fun requireCsvName(displayName: String?) {
+        if (displayName != null && !hasCsvExtension(displayName)) reject(Rejection.BAD_EXTENSION)
+    }
+
+    private fun strictDecode(bytes: ByteArray, charset: java.nio.charset.Charset, offset: Int = 0): String? = try {
+        charset.newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+            .decode(java.nio.ByteBuffer.wrap(bytes, offset, bytes.size - offset))
+            .toString()
+    } catch (_: java.nio.charset.CharacterCodingException) {
+        null
+    }
+
+    /**
+     * Decodes raw file bytes: UTF-8, UTF-16 with BOM, or Windows-1254 (Turkish Excel) as fallback.
+     * Throws [RejectedException] for empty, oversized, binary or undecodable input.
+     */
+    fun decode(bytes: ByteArray): String {
+        if (bytes.isEmpty()) reject(Rejection.EMPTY)
+        if (bytes.size > MAX_BYTES) reject(Rejection.TOO_LARGE)
+        fun b(i: Int) = bytes[i].toInt() and 0xFF
+        // BOMs first: UTF-16 text legitimately contains NUL bytes.
+        if (bytes.size >= 2 && b(0) == 0xFF && b(1) == 0xFE) {
+            return strictDecode(bytes, Charsets.UTF_16LE, 2) ?: reject(Rejection.BAD_ENCODING)
+        }
+        if (bytes.size >= 2 && b(0) == 0xFE && b(1) == 0xFF) {
+            return strictDecode(bytes, Charsets.UTF_16BE, 2) ?: reject(Rejection.BAD_ENCODING)
+        }
+        if (bytes.any { it == 0.toByte() }) reject(Rejection.BINARY)
+        strictDecode(bytes, Charsets.UTF_8)?.let { return it }
+        val cp1254 = java.nio.charset.Charset.forName("windows-1254")
+        return strictDecode(bytes, cp1254) ?: reject(Rejection.BAD_ENCODING)
+    }
+
+    /**
+     * A row is plausible vocabulary data: 2..8 columns, a short single-token article column, a short
+     * word without markup or sentence punctuation, and sane meaning/deck lengths. Used by both
+     * validation and import so garbage rows inside an accepted file are skipped, not imported.
+     */
+    fun isPlausibleRow(columns: List<String>): Boolean {
+        if (columns.size < 2 || columns.size > MAX_COLUMNS) return false
+        val article = columns[0].trim()
+        val word = columns[1].trim()
+        if (word.isEmpty()) return false
+        if (article.length > MAX_ARTICLE_CHARS || article.any { it.isWhitespace() }) return false
+        if (word.length > MAX_WORD_CHARS) return false
+        if (word.split(WHITESPACE).size > MAX_WORD_TOKENS) return false
+        if (word.any { it in FORBIDDEN_WORD_CHARS }) return false
+        if (word.last() in ".!?;:") return false
+        if (columns.size >= 3 && columns[2].length > MAX_MEANING_CHARS) return false
+        if (columns.size >= 4 && columns[3].length > MAX_DECK_CHARS) return false
+        return true
+    }
+
+    /** Validates decoded text. Pure; never throws. */
+    fun validate(content: String): Validation {
+        fun fail(r: Rejection, v: Int = 0, i: Int = 0) = Validation(false, r, message(r, v, i), v, i)
+        val text = content.replace("﻿", "")
+        if (text.isBlank()) return fail(Rejection.EMPTY)
+        if (text.length > MAX_BYTES) return fail(Rejection.TOO_LARGE)
+
+        var nonPrintable = 0
+        for (ch in text) {
+            val bad = ch == '\u0000' || ch == '�' || ch == '\u007F' ||
+                (ch.code < 0x20 && ch != '\n' && ch != '\r' && ch != '\t')
+            if (bad) nonPrintable++
+        }
+        if (text.contains('\u0000') || nonPrintable.toDouble() / text.length > 0.01) return fail(Rejection.BINARY)
+
+        val first = text.trimStart()[0]
+        if (first == '{' || first == '[' || first == '<') return fail(Rejection.NOT_CSV_FORMAT)
+
+        var valid = 0
+        var invalid = 0
+        var multiColumn = 0
+        for ((lineIdx, raw) in text.split("\r\n", "\n", "\r").withIndex()) {
+            val line = raw.trimEnd()
+            if (line.isBlank()) continue
+            val columns = parseRow(line)
+            if (columns.size >= 2) multiColumn++
+            if (lineIdx == 0 && columns.size >= 2 && isHeader(columns[0], columns[1].trim())) continue
+            if (isPlausibleRow(columns)) valid++ else invalid++
+        }
+        if (valid + invalid == 0) return fail(Rejection.EMPTY)
+        if (multiColumn == 0) return fail(Rejection.NO_COLUMNS, valid, invalid)
+        if (valid == 0) return fail(Rejection.NO_VALID_ROWS, valid, invalid)
+        if (invalid.toDouble() / (valid + invalid) > MAX_INVALID_RATIO) return fail(Rejection.TOO_MANY_INVALID, valid, invalid)
+        return Validation(true, null, "", valid, invalid)
+    }
+
+    /** Validates and throws [RejectedException] on rejection. */
+    fun requireValid(content: String): Validation {
+        val v = validate(content)
+        if (!v.ok) throw RejectedException(v.reason!!, v.message)
+        return v
+    }
+
+    /** Decode + validate raw bytes (the extension is checked separately). Returns the decoded text. */
+    fun decodeAndValidate(bytes: ByteArray): String {
+        val text = decode(bytes)
+        requireValid(text)
+        return text
+    }
+
+    /** Bundled starter pack (must always pass [validate]). */
+    val STARTER_PACK_CSV: String = """
+        artikel,kelime,anlam,deste
+        der,Tisch,Masa,A1 Temel
+        die,Katze,Kedi,A1 Temel
+        das,Buch,Kitap,A1 Temel
+        der,Stuhl,Sandalye,A1 Temel
+        die,Sonne,Güneş,A1 Temel
+        das,Haus,Ev,A1 Temel
+        der,Apfel,Elma,Yiyecek & İçecek
+        die,Blume,Çiçek,Doğa
+        das,Auto,Araba,Ulaşım
+        der,Hund,Köpek,A1 Temel
+        die,Schule,Okul,Eğitim
+        das,Wasser,Su,Yiyecek & İçecek
+        der,Baum,Ağaç,Doğa
+        die,Tür,Kapı,A1 Temel
+        das,Fenster,Pencere,A1 Temel
+        der,Schlüssel,Anahtar,Günlük Eşyalar
+        die,Tasche,Çanta,Günlük Eşyalar
+        das,Kind,Çocuk,A1 Temel
+        der,Zug,Tren,Ulaşım
+        die,Stadt,Şehir,Ulaşım
+        das,Mädchen,Kız çocuk,A1 Temel
+        der,Kaffee,Kahve,Yiyecek & İçecek
+        die,Milch,Süt,Yiyecek & İçecek
+        das,Brot,Ekmek,Yiyecek & İçecek
+        der,Bahnhof,Tren istasyonu,Ulaşım
+        die,Zeitung,Gazete,Günlük Eşyalar
+        das,Handy,Cep telefonu,Günlük Eşyalar
+        der,Computer,Bilgisayar,Günlük Eşyalar
+        die,Uhr,Saat,Günlük Eşyalar
+        das,Zimmer,Oda,A1 Temel
+    """.trimIndent()
+
+    // ------------------------------------------------------------------ Undo (pure)
+
+    /** What an import changed, so it can be undone precisely without touching later edits. */
+    class UndoRecord(
+        val addedKeys: Set<String>,
+        /** Cards the import modified, keyed by syncKey, as they were BEFORE the import. */
+        val previousCards: Map<String, Flashcard>,
+        val previousTombstones: Map<String, Long>
+    )
+
+    /** Returns null when the import changed nothing. [before] must be the list passed to [importContent]. */
+    fun buildUndo(before: List<Flashcard>, outcome: ImportOutcome, previousTombstones: Map<String, Long>): UndoRecord? {
+        if (outcome.added == 0 && outcome.updated == 0) return null
+        val previous = HashMap<String, Flashcard>()
+        for (i in before.indices) {
+            if (outcome.cards[i] != before[i]) previous[before[i].syncKey] = before[i]
+        }
+        return UndoRecord(outcome.addedKeys, previous, previousTombstones)
+    }
+
+    /**
+     * Removes cards the import added (tombstoned with [now] so cloud sync cannot bring them back), restores the
+     * previous meaning/deck of updated cards (with updatedAt = [now] so the old values win the next cloud merge)
+     * and restores tombstones the import had cleared. Cards and tombstones changed after the import are kept.
+     */
+    fun applyUndo(
+        undo: UndoRecord,
+        cards: List<Flashcard>,
+        tombstones: Map<String, Long>,
+        now: Long
+    ): Pair<List<Flashcard>, Map<String, Long>> {
+        val tomb = tombstones.toMutableMap()
+        val kept = ArrayList<Flashcard>(cards.size)
+        for (card in cards) {
+            val key = card.syncKey
+            val prev = undo.previousCards[key]
+            when {
+                key in undo.addedKeys -> tomb[key] = now
+                prev != null -> kept.add(card.copy(meaning = prev.meaning, deckName = prev.deckName, updatedAt = now))
+                else -> kept.add(card)
+            }
+        }
+        for ((k, ts) in undo.previousTombstones) {
+            if (k !in undo.addedKeys) tomb.putIfAbsent(k, ts)
+        }
+        return Pair(kept, tomb)
+    }
+
+    // ------------------------------------------------------------------ Import
+
     data class ImportOutcome(
         val cards: List<Flashcard>,
         val added: Int,
@@ -226,10 +472,13 @@ object CsvCards {
             }
             val rawArtikel = columns[0]
             val cleanWord = columns[1].trim()
+            if (lineIdx == 0 && isHeader(rawArtikel, cleanWord)) continue
+            if (!isPlausibleRow(columns)) {
+                invalid += 1
+                continue
+            }
             val cleanMeaning = if (columns.size >= 3) columns[2].trim() else ""
             val cleanDeck = (if (columns.size >= 4) columns[3] else fallback).trim().ifEmpty { fallback }
-
-            if (lineIdx == 0 && isHeader(rawArtikel, cleanWord)) continue
 
             // Empty OR not der/die/das (or an old alias m/f/n/...) -> article-less word.
             val artikel = Artikel.parse(rawArtikel)

@@ -1082,28 +1082,72 @@ final class DeckStore: ObservableObject {
 
     // MARK: - CSV Import / Export
 
+    /// Gates, all BEFORE any data is touched: .csv extension, decoding, content validation.
+    /// Throws `CsvCards.RejectedError` (Turkish message) on rejection.
     func importCSV(from url: URL, defaultDeckName: String = "Genel") throws -> CSVImportResult {
-        let rawContent: String
-        if let utf8 = try? String(contentsOf: url, encoding: .utf8) {
-            rawContent = utf8
-        } else if let latin1 = try? String(contentsOf: url, encoding: .isoLatin1) {
-            rawContent = latin1
-        } else {
-            throw NSError(domain: "CSVImport", code: 1, userInfo: [NSLocalizedDescriptionKey: "CSV dosyası okunamadı. Lütfen UTF-8 formatında olduğundan emin olun."])
+        try CsvCards.requireCsvName(url.lastPathComponent)
+        let data: Data
+        do { data = try Data(contentsOf: url) } catch {
+            throw NSError(domain: "CSVImport", code: 1, userInfo: [NSLocalizedDescriptionKey: "CSV dosyası okunamadı."])
         }
+        let rawContent = try CsvCards.decodeAndValidate(data)
 
+        // Only validated files are kept in ImportedCSVs.
         ensureDirectoriesExist()
         let timestamp = Int(Date().timeIntervalSince1970)
         let backupFileName = "\(timestamp)_\(url.lastPathComponent)"
         let backupURL = importedCSVsDirectory.appendingPathComponent(backupFileName)
         try? rawContent.write(to: backupURL, atomically: true, encoding: .utf8)
 
-        return importCSVContent(rawContent, defaultDeckName: defaultDeckName)
+        return try importCSVContent(rawContent, defaultDeckName: defaultDeckName)
     }
 
-    func importCSVContent(_ content: String, defaultDeckName: String = "Genel") -> CSVImportResult {
+    // MARK: Import safety net
+
+    private var importUndo: CsvCards.UndoRecord?
+    /// True while the last successful CSV import can still be undone ("Geri al").
+    var canUndoImport: Bool { importUndo != nil }
+
+    /// Full pre-import snapshot (cards, progress, settings, tombstones) as a backup file; keeps the last few.
+    private func writeImportSnapshot() {
+        ensureDirectoriesExist()
+        let file = backupsDirectory.appendingPathComponent("pre_import_\(Int(Date().timeIntervalSince1970 * 1000)).json")
+        try? exportBackupJSONString(includeProgress: true).write(to: file, atomically: true, encoding: .utf8)
+        if let files = try? FileManager.default.contentsOfDirectory(at: backupsDirectory, includingPropertiesForKeys: nil) {
+            let snaps = files.filter { $0.lastPathComponent.hasPrefix("pre_import_") && $0.pathExtension == "json" }
+                .sorted { $0.lastPathComponent > $1.lastPathComponent }
+            for old in snaps.dropFirst(3) { try? FileManager.default.removeItem(at: old) }
+        }
+    }
+
+    /// Reverts the last CSV import (added cards removed + tombstoned, updated cards restored with a fresh
+    /// updatedAt so the old values win the next cloud merge). Returns false if there is nothing to undo.
+    @discardableResult
+    func undoLastImport() -> Bool {
+        guard let undo = importUndo else { return false }
+        let result = CsvCards.applyUndo(undo, cards: cards, tombstones: deletedCardKeys, now: Date())
+        cards = result.cards
+        deletedCardKeys = result.tombstones
+        saveDeletedCardsFileOnly()
+        importUndo = nil
+        saveCards()
+        rebuildStudyQueue()
+        return true
+    }
+
+    /// Validates, snapshots, then imports. A rejected file throws and leaves cards, decks, tombstones
+    /// and cloud state completely untouched (no save, no sync).
+    func importCSVContent(_ content: String, defaultDeckName: String = "Genel") throws -> CSVImportResult {
+        try CsvCards.requireValid(content)
+        writeImportSnapshot()
+        let before = cards
+        let previousTombstones = deletedCardKeys
+
         // Rows with an empty / non-der/die/das article column become article-less words.
         let outcome = CsvCards.importContent(content, fallbackDeck: defaultDeckName, existing: cards)
+        if let undo = CsvCards.buildUndo(before: before, outcome: outcome, previousTombstones: previousTombstones) {
+            importUndo = undo
+        }
         var removedTombstone = false
         for key in outcome.addedKeys where deletedCardKeys.removeValue(forKey: key) != nil {
             removedTombstone = true
@@ -1120,39 +1164,9 @@ final class DeckStore: ObservableObject {
     }
 
     func loadStarterGermanPack() -> CSVImportResult {
-        let sampleCSV = """
-        artikel,kelime,anlam,deste
-        der,Tisch,Masa,A1 Temel
-        die,Katze,Kedi,A1 Temel
-        das,Buch,Kitap,A1 Temel
-        der,Stuhl,Sandalye,A1 Temel
-        die,Sonne,Güneş,A1 Temel
-        das,Haus,Ev,A1 Temel
-        der,Apfel,Elma,Yiyecek & İçecek
-        die,Blume,Çiçek,Doğa
-        das,Auto,Araba,Ulaşım
-        der,Hund,Köpek,A1 Temel
-        die,Schule,Okul,Eğitim
-        das,Wasser,Su,Yiyecek & İçecek
-        der,Baum,Ağaç,Doğa
-        die,Tür,Kapı,A1 Temel
-        das,Fenster,Pencere,A1 Temel
-        der,Schlüssel,Anahtar,Günlük Eşyalar
-        die,Tasche,Çanta,Günlük Eşyalar
-        das,Kind,Çocuk,A1 Temel
-        der,Zug,Tren,Ulaşım
-        die,Stadt,Şehir,Ulaşım
-        das,Mädchen,Kız çocuk,A1 Temel
-        der,Kaffee,Kahve,Yiyecek & İçecek
-        die,Milch,Süt,Yiyecek & İçecek
-        das,Brot,Ekmek,Yiyecek & İçecek
-        der,Bahnhof,Tren istasyonu,Ulaşım
-        die,Zeitung,Gazete,Günlük Eşyalar
-        das,Handy,Cep telefonu,Günlük Eşyalar
-        der,Computer,Bilgisayar,Günlük Eşyalar
-        die,Uhr,Saat,Günlük Eşyalar
-        das,Zimmer,Oda,A1 Temel
-        """
-        return importCSVContent(sampleCSV, defaultDeckName: "A1 Temel")
+        let sampleCSV = CsvCards.starterPackCSV
+        // The bundled pack always validates (unit-tested); a failure would only mean nothing is imported.
+        return (try? importCSVContent(sampleCSV, defaultDeckName: "A1 Temel"))
+            ?? CSVImportResult(addedCount: 0, updatedCount: 0, skippedCount: 0, invalidLines: 0)
     }
 }

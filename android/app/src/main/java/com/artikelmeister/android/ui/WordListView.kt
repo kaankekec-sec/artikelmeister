@@ -118,6 +118,7 @@ import androidx.compose.ui.window.Dialog
 import com.artikelmeister.android.Artikel
 import com.artikelmeister.android.ArtikelFilter
 import com.artikelmeister.android.CardStage
+import com.artikelmeister.android.CsvCards
 import com.artikelmeister.android.DeckStore
 import com.artikelmeister.android.Flashcard
 import com.artikelmeister.android.GeminiAuthManager
@@ -175,6 +176,8 @@ fun WordListView(
     var showNewDeckSheet by remember { mutableStateOf(false) }
     var deckToRename by remember { mutableStateOf<String?>(null) }
     var alertMessage by remember { mutableStateOf<String?>(null) }
+    // True only while alertMessage is a successful CSV import result that can still be undone.
+    var offerImportUndo by remember { mutableStateOf(false) }
     var showAIGenerator by remember { mutableStateOf(false) }
 
     // Deferred deletion: cards are hidden immediately and only removed from the store when the
@@ -258,7 +261,9 @@ fun WordListView(
                     R.string.words_import_result,
                     res.addedCount, res.updatedCount, res.skippedCount, res.invalidLines
                 )
+                offerImportUndo = store.canUndoImport
             }.onFailure { err ->
+                offerImportUndo = false
                 alertMessage = err.localizedMessage ?: context.getString(R.string.words_import_failed)
             }
         }
@@ -283,7 +288,7 @@ fun WordListView(
         }
     }
 
-    val launchImport = { importCsvLauncher.launch(arrayOf("text/*", "application/csv", "*/*")) }
+    val launchImport = { importCsvLauncher.launch(CsvCards.ACCEPTED_MIME_TYPES) }
     val launchExport = { exportCsvLauncher.launch(context.getString(R.string.words_export_file_name)) }
 
     fun submitQuickAdd(): Boolean? {
@@ -558,14 +563,25 @@ fun WordListView(
 
     alertMessage?.let { message ->
         AlertDialog(
-            onDismissRequest = { alertMessage = null },
+            onDismissRequest = { alertMessage = null; offerImportUndo = false },
             title = { Text(stringResource(R.string.dialog_info_title)) },
             text = { Text(message, style = MaterialTheme.typography.bodyMedium) },
             confirmButton = {
-                TextButton(onClick = { alertMessage = null }) {
+                TextButton(onClick = { alertMessage = null; offerImportUndo = false }) {
                     Text(stringResource(R.string.action_ok))
                 }
-            }
+            },
+            dismissButton = if (offerImportUndo && store.canUndoImport) {
+                {
+                    TextButton(onClick = {
+                        val undone = store.undoLastImport()
+                        offerImportUndo = false
+                        alertMessage = if (undone) "İçe aktarma geri alındı." else null
+                    }) {
+                        Text("Geri al")
+                    }
+                }
+            } else null
         )
     }
 }
