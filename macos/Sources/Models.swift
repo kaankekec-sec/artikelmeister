@@ -138,7 +138,8 @@ enum UniversalDateHelper {
 
 struct Flashcard: Identifiable, Codable, Equatable {
     var id: UUID
-    var artikel: Artikel
+    /// nil = article-less word ("artikelsiz").
+    var artikel: Artikel?
     var word: String
     var meaning: String
     var deckName: String
@@ -160,17 +161,29 @@ struct Flashcard: Identifiable, Codable, Equatable {
         return cleaned.isEmpty ? "Genel" : cleaned
     }
 
+    var isArticleless: Bool { artikel == nil }
+
+    /// "der"/"die"/"das", or "-" for article-less words (display only).
+    var displayArtikel: String { artikel?.rawValue ?? ArtikelFilter.none }
+
     var fullGermanTerm: String {
-        "\(artikel.rawValue) \(word)"
+        if let artikel = artikel { return "\(artikel.rawValue) \(word)" }
+        return word
     }
 
-    var syncKey: String {
-        "\(artikel.rawValue.lowercased())_\(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    /// Dedup / tombstone key. Valid cards: "der_tisch". Article-less: "none_tisch" (word only),
+    /// so article-less 'Tisch' and 'der Tisch' stay distinct. Mirrors Android Flashcard.keyFor.
+    var syncKey: String { Flashcard.keyFor(artikel: artikel, word: word) }
+
+    static func keyFor(artikel: Artikel?, word: String) -> String {
+        let w = word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let artikel = artikel { return "\(artikel.rawValue)_\(w)" }
+        return "none_\(w)"
     }
 
     init(
         id: UUID = UUID(),
-        artikel: Artikel,
+        artikel: Artikel?,
         word: String,
         meaning: String = "",
         deckName: String = "Genel",
@@ -209,6 +222,13 @@ struct Flashcard: Identifiable, Codable, Equatable {
     }
 
     init(from decoder: Decoder) throws {
+        try self.init(from: decoder, articleless: false)
+    }
+
+    /// - articleless: true when decoding an entry of "articlelessCards" (the "artikel" field
+    ///   is ignored). When false (entries of "cards"), a missing/invalid article THROWS so the
+    ///   lenient list decoder can skip just this card.
+    init(from decoder: Decoder, articleless: Bool) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if let uuid = try? container.decode(UUID.self, forKey: .id) {
             self.id = uuid
@@ -217,8 +237,16 @@ struct Flashcard: Identifiable, Codable, Equatable {
         } else {
             self.id = UUID()
         }
-        self.artikel = try container.decode(Artikel.self, forKey: .artikel)
-        self.word = try container.decode(String.self, forKey: .word)
+        if articleless {
+            self.artikel = nil
+        } else {
+            self.artikel = try container.decode(Artikel.self, forKey: .artikel)
+        }
+        let decodedWord = try container.decode(String.self, forKey: .word)
+        guard !decodedWord.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw DecodingError.dataCorruptedError(forKey: .word, in: container, debugDescription: "empty word")
+        }
+        self.word = decodedWord
         self.meaning = try container.decodeIfPresent(String.self, forKey: .meaning) ?? ""
         let rawDeck = try container.decodeIfPresent(String.self, forKey: .deckName)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Genel"
         self.deckName = rawDeck.isEmpty ? "Genel" : rawDeck
@@ -283,7 +311,11 @@ struct Flashcard: Identifiable, Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id.uuidString, forKey: .id)
-        try container.encode(artikel, forKey: .artikel)
+        // Article-less cards are persisted in the separate "articlelessCards" list and carry
+        // no "artikel" field.
+        if let artikel = artikel {
+            try container.encode(artikel, forKey: .artikel)
+        }
         try container.encode(word, forKey: .word)
         try container.encode(meaning, forKey: .meaning)
         try container.encode(cleanDeckName, forKey: .deckName)
@@ -299,6 +331,39 @@ struct Flashcard: Identifiable, Codable, Equatable {
             try container.encode(UniversalDateHelper.format(last), forKey: .lastReviewedAt)
         }
         try container.encode(totalReviews, forKey: .totalReviews)
+    }
+}
+
+/// Lenient decoder for a JSON array of cards: a bad entry is skipped, it never fails the
+/// whole decode (throws only if the value is not an array at all).
+struct LossyCardList: Decodable {
+    let cards: [Flashcard]
+
+    init(cards: [Flashcard]) { self.cards = cards }
+
+    init(from decoder: Decoder) throws {
+        try self.init(from: decoder, articleless: false)
+    }
+
+    init(from decoder: Decoder, articleless: Bool) throws {
+        var container = try decoder.unkeyedContainer()
+        var result: [Flashcard] = []
+        while !container.isAtEnd {
+            // superDecoder() always advances past the element, even when the card is invalid.
+            let element = try container.superDecoder()
+            if let card = try? Flashcard(from: element, articleless: articleless) {
+                result.append(card)
+            }
+        }
+        self.cards = result
+    }
+}
+
+/// Same as LossyCardList but for "articlelessCards" entries.
+struct LossyArticlelessCardList: Decodable {
+    let cards: [Flashcard]
+    init(from decoder: Decoder) throws {
+        self.cards = try LossyCardList(from: decoder, articleless: true).cards
     }
 }
 
@@ -406,6 +471,7 @@ struct ArtikelMeisterBackup: Codable {
     var version: Int = 2
     var exportedAt: Date = Date()
     var includesProgress: Bool = true
+    /// ALL cards in memory (valid + article-less); split into two arrays when encoded.
     var cards: [Flashcard]
     var settings: AppSettings? = nil
     var studyHistory: [String: DailyProgress]? = nil
@@ -413,7 +479,7 @@ struct ArtikelMeisterBackup: Codable {
     var userEmail: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case version, exportedAt, includesProgress, cards, settings, studyHistory, deletedCardKeys, userEmail
+        case version, exportedAt, includesProgress, cards, articlelessCards, settings, studyHistory, deletedCardKeys, userEmail
     }
 
     init(
@@ -449,7 +515,16 @@ struct ArtikelMeisterBackup: Codable {
             self.exportedAt = Date()
         }
         self.includesProgress = try c.decodeIfPresent(Bool.self, forKey: .includesProgress) ?? true
-        self.cards = try c.decodeIfPresent([Flashcard].self, forKey: .cards) ?? []
+        // Lenient: bad cards are skipped; only a non-array value throws (callers then abort
+        // instead of overwriting data).
+        var allCards: [Flashcard] = []
+        if c.contains(.cards), (try? c.decodeNil(forKey: .cards)) == false {
+            allCards += try LossyCardList(from: try c.superDecoder(forKey: .cards)).cards
+        }
+        if c.contains(.articlelessCards), (try? c.decodeNil(forKey: .articlelessCards)) == false {
+            allCards += try LossyArticlelessCardList(from: try c.superDecoder(forKey: .articlelessCards)).cards
+        }
+        self.cards = allCards
         self.settings = try c.decodeIfPresent(AppSettings.self, forKey: .settings)
         self.studyHistory = try c.decodeIfPresent([String: DailyProgress].self, forKey: .studyHistory)
 
@@ -474,7 +549,12 @@ struct ArtikelMeisterBackup: Codable {
         try c.encode(version, forKey: .version)
         try c.encode(UniversalDateHelper.format(exportedAt), forKey: .exportedAt)
         try c.encode(includesProgress, forKey: .includesProgress)
-        try c.encode(cards, forKey: .cards)
+        // "cards" ONLY holds valid der/die/das cards (older clients choke on others).
+        try c.encode(cards.filter { !$0.isArticleless }, forKey: .cards)
+        let articleless = cards.filter { $0.isArticleless }
+        if !articleless.isEmpty {
+            try c.encode(articleless, forKey: .articlelessCards)
+        }
         if let settings = settings {
             try c.encode(settings, forKey: .settings)
         }
