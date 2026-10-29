@@ -145,13 +145,11 @@ private val LightAppColors = ArtikelMeisterColors(
 val LocalAppColors = staticCompositionLocalOf { DarkAppColors }
 
 /** Theme color for an article. Use this instead of `Artikel.color` (hardcoded in Models.kt). */
-fun ArtikelMeisterColors.artikelColor(artikel: Artikel): Color = when (artikel) {
+fun ArtikelMeisterColors.artikelColor(artikel: Artikel?): Color = when (artikel) {
     Artikel.DER -> artikelDer
     Artikel.DIE -> artikelDie
     Artikel.DAS -> artikelDas
-    // TODO(CONTRACT.md): map the article-less entry ('-') to artikelNone explicitly once it lands.
-    // (`else` is intentionally kept so adding an enum entry in Models.kt doesn't break the build.)
-    else -> artikelNone
+    null -> artikelNone // article-less word ('-')
 }
 
 @Composable

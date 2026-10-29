@@ -26,6 +26,11 @@
     <string name="splash_tap_to_skip">Geçmek için dokunun</string>
     <string name="splash_skip_a11y">Açılış ekranını geç</string>
 
+    <!-- Study: article-less cards -->
+    <string name="study_meaning_prompt">Kelimenin Türkçe anlamını yazın:</string>
+    <string name="study_meaning_label">Türkçe anlam</string>
+    <string name="study_meaning_placeholder">Türkçe anlam…</string>
+
     <!-- Theme mode -->
     <string name="theme_section_title">Görünüm</string>
     <string name="theme_mode_label">Tema</string>
@@ -63,8 +68,9 @@
     <string name="words_search_clear">Aramayı temizle</string>
     <string name="words_filter_all">Tümü</string>
     <string name="words_filter_artikel_a11y">Artikele göre filtrele</string>
-    <!-- TODO(CONTRACT.md): label for the article-less ('-') filter chip -->
-    <string name="words_filter_no_article">–</string>
+    <!-- Article-less ('-') words: label must stay the plain ASCII '-' used in data/CSV. -->
+    <string name="words_filter_no_article">-</string>
+    <string name="words_articleless_meaning_required">Artikelsiz kelimelerde anlam zorunludur: çalışırken bu anlamı yazacaksın.</string>
     <string name="words_filter_no_article_a11y">Artikelsiz kelimeler</string>
     <string name="words_filter_stage">Duruma göre filtrele</string>
     <string name="words_filter_stage_active">Durum filtresi: %1$s</string>

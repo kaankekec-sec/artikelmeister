@@ -116,6 +116,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.artikelmeister.android.Artikel
+import com.artikelmeister.android.ArtikelFilter
 import com.artikelmeister.android.CardStage
 import com.artikelmeister.android.DeckStore
 import com.artikelmeister.android.Flashcard
@@ -134,22 +135,8 @@ import kotlin.math.roundToInt
 
 private const val FILTER_ALL = ""
 
-/**
- * Key used for the article-less ('-') filter option.
- *
- * TODO(CONTRACT.md): the engineer is adding article-less words to the data layer. When the
- *  contract lands: (1) flip [SHOW_NO_ARTICLE_FILTER] to true, (2) implement
- *  [matchesNoArticle] against the real model field. The chip row / segmented pickers already
- *  reserve layout space for a 5th segment (Tümü + der + die + das + '-').
- */
-private const val FILTER_NO_ARTICLE = "-"
-private const val SHOW_NO_ARTICLE_FILTER = false
-
-@Suppress("UNUSED_PARAMETER")
-private fun matchesNoArticle(card: Flashcard): Boolean {
-    // TODO(CONTRACT.md): return true for article-less cards once the model supports them.
-    return false
-}
+/** Filter key for article-less words ('-'); see ArtikelFilter in CardLogic.kt / CONTRACT.md. */
+private const val FILTER_NO_ARTICLE = ArtikelFilter.NONE
 
 private val trLocale = Locale("tr", "TR")
 
@@ -177,7 +164,8 @@ fun WordListView(
     var selectedStageFilter by rememberSaveable { mutableStateOf<CardStage?>(null) }
 
     // Quick-add form state (shared between the inline bar on wide screens and the dialog on phones)
-    var newArtikel by rememberSaveable { mutableStateOf(Artikel.DER) }
+    // null = article-less ('-') word.
+    var newArtikel by rememberSaveable { mutableStateOf<Artikel?>(Artikel.DER) }
     var newWord by rememberSaveable { mutableStateOf("") }
     var newMeaning by rememberSaveable { mutableStateOf("") }
     var newDeckName by rememberSaveable { mutableStateOf("Genel") }
@@ -236,22 +224,26 @@ fun WordListView(
         store.cards.filter { card ->
             if (pendingDeleteIds.contains(card.id)) return@filter false
             if (selectedDeckFilter != null && card.deckName != selectedDeckFilter) return@filter false
-            when (artikelFilterKey) {
-                FILTER_ALL -> Unit
-                FILTER_NO_ARTICLE -> if (!matchesNoArticle(card)) return@filter false
-                else -> if (card.artikel.rawValue != artikelFilterKey) return@filter false
-            }
+            if (!ArtikelFilter.matches(card, artikelFilterKey.ifEmpty { null })) return@filter false
             if (selectedStageFilter != null && card.stage != selectedStageFilter) return@filter false
             if (q.isNotEmpty()) {
                 return@filter card.word.lowercase(trLocale).contains(q) ||
                     card.meaning.lowercase(trLocale).contains(q) ||
-                    card.artikel.rawValue.lowercase(Locale.ROOT).contains(q) ||
+                    card.displayArtikel.lowercase(Locale.ROOT).contains(q) ||
                     card.deckName.lowercase(trLocale).contains(q)
             }
             true
         }
     }
     val visibleTotal = store.cards.size - pendingDeleteIds.size
+    val artikelCounts = remember(store.cards, selectedDeckFilter, pendingDeleteIds.toList()) {
+        ArtikelFilter.counts(
+            store.cards.filter { c ->
+                !pendingDeleteIds.contains(c.id) &&
+                    (selectedDeckFilter == null || c.deckName == selectedDeckFilter)
+            }
+        )
+    }
     val hasActiveFilters = searchText.isNotBlank() || artikelFilterKey != FILTER_ALL ||
         selectedStageFilter != null || selectedDeckFilter != null
 
@@ -297,6 +289,7 @@ fun WordListView(
     fun submitQuickAdd(): Boolean? {
         val word = newWord.trim()
         if (word.isEmpty()) return null
+        if (newArtikel == null && newMeaning.isBlank()) return null
         val added = store.addCard(newArtikel, word, newMeaning, newDeckName)
         if (added) {
             newWord = ""
@@ -382,6 +375,7 @@ fun WordListView(
                     // Article filter: Tümü / der / die / das (/ '-')
                     ArtikelFilterSegments(
                         selectedKey = artikelFilterKey,
+                        counts = artikelCounts,
                         onSelect = { artikelFilterKey = it },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -855,6 +849,7 @@ private fun StageFilterButton(
 @Composable
 private fun ArtikelFilterSegments(
     selectedKey: String,
+    counts: ArtikelFilter.Counts,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -866,17 +861,15 @@ private fun ArtikelFilterSegments(
         Artikel.entries.forEach { art ->
             add(Option(art.rawValue, art.rawValue, art.rawValue, art.themeColor()))
         }
-        // TODO(CONTRACT.md): 4th article group ('-') — enable via SHOW_NO_ARTICLE_FILTER.
-        if (SHOW_NO_ARTICLE_FILTER) {
-            add(
-                Option(
-                    FILTER_NO_ARTICLE,
-                    stringResource(R.string.words_filter_no_article),
-                    stringResource(R.string.words_filter_no_article_a11y),
-                    colors.artikelNone
-                )
+        // 4th article group: article-less words ('-').
+        add(
+            Option(
+                FILTER_NO_ARTICLE,
+                stringResource(R.string.words_filter_no_article),
+                stringResource(R.string.words_filter_no_article_a11y),
+                colors.artikelNone
             )
-        }
+        )
     }
     val groupLabel = stringResource(R.string.words_filter_artikel_a11y)
 
@@ -897,14 +890,24 @@ private fun ArtikelFilterSegments(
                     inactiveContentColor = colors.primaryText,
                     inactiveBorderColor = colors.cardBorderSubtle
                 ),
-                modifier = Modifier.semantics { contentDescription = option.a11y }
+                modifier = Modifier.semantics {
+                    contentDescription = "${option.a11y}, ${counts.forFilter(option.key.ifEmpty { null })}"
+                }
             ) {
-                Text(
-                    text = option.label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1
-                )
+                // Label + count stacked: 5 equal segments still fit a 360dp phone.
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = option.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "${counts.forFilter(option.key.ifEmpty { null })}",
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1
+                    )
+                }
             }
         }
     }
@@ -1053,16 +1056,17 @@ private fun DeckChip(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ArtikelPicker(
-    selected: Artikel,
-    onSelect: (Artikel) -> Unit,
+    selected: Artikel?,
+    onSelect: (Artikel?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalAppColors.current
-    // TODO(CONTRACT.md): add the article-less ('-') option here once the model supports it.
-    val options = Artikel.entries
+    // null = article-less word ('-').
+    val options: List<Artikel?> = Artikel.entries + listOf(null)
+    val noArticleA11y = stringResource(R.string.words_filter_no_article_a11y)
     SingleChoiceSegmentedButtonRow(modifier = modifier) {
         options.forEachIndexed { index, art ->
-            val artColor = art.themeColor()
+            val artColor = colors.artikelColor(art)
             SegmentedButton(
                 selected = selected == art,
                 onClick = { onSelect(art) },
@@ -1075,10 +1079,15 @@ private fun ArtikelPicker(
                     inactiveContainerColor = colors.textBackground,
                     inactiveContentColor = artColor,
                     inactiveBorderColor = colors.cardBorderSubtle
-                )
+                ),
+                modifier = if (art == null) {
+                    Modifier.semantics { contentDescription = noArticleA11y }
+                } else {
+                    Modifier
+                }
             ) {
                 Text(
-                    text = art.rawValue,
+                    text = art?.rawValue ?: ArtikelFilter.NONE,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -1156,8 +1165,8 @@ private fun DeckSelector(
 @Composable
 private fun QuickAddInlineBar(
     store: DeckStore,
-    artikel: Artikel,
-    onArtikelChange: (Artikel) -> Unit,
+    artikel: Artikel?,
+    onArtikelChange: (Artikel?) -> Unit,
     word: String,
     onWordChange: (String) -> Unit,
     meaning: String,
@@ -1206,7 +1215,7 @@ private fun QuickAddInlineBar(
         )
         Button(
             onClick = { onSubmit() },
-            enabled = word.trim().isNotEmpty(),
+            enabled = word.trim().isNotEmpty() && (artikel != null || meaning.isNotBlank()),
             colors = ButtonDefaults.buttonColors(
                 containerColor = colors.accentBlue,
                 contentColor = colors.onAccent
@@ -1223,8 +1232,8 @@ private fun QuickAddInlineBar(
 @Composable
 private fun AddWordDialog(
     store: DeckStore,
-    artikel: Artikel,
-    onArtikelChange: (Artikel) -> Unit,
+    artikel: Artikel?,
+    onArtikelChange: (Artikel?) -> Unit,
     word: String,
     onWordChange: (String) -> Unit,
     meaning: String,
@@ -1241,7 +1250,7 @@ private fun AddWordDialog(
     val duplicateTemplate = stringResource(R.string.words_duplicate_feedback, "%s")
 
     fun submit() {
-        val term = "${artikel.rawValue} ${word.trim()}"
+        val term = Flashcard(artikel = artikel, word = word.trim()).fullGermanTerm
         when (onSubmit()) {
             true -> feedback = addedTemplate.replace("%s", term) to true
             false -> feedback = duplicateTemplate.replace("%s", term) to false
@@ -1285,6 +1294,9 @@ private fun AddWordDialog(
                     value = meaning,
                     onValueChange = onMeaningChange,
                     label = { Text(stringResource(R.string.words_meaning_hint)) },
+                    supportingText = if (artikel == null) {
+                        { Text(stringResource(R.string.words_articleless_meaning_required)) }
+                    } else null,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { submit() }),
@@ -1327,7 +1339,7 @@ private fun AddWordDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = { submit() },
-                        enabled = word.trim().isNotEmpty(),
+                        enabled = word.trim().isNotEmpty() && (artikel != null || meaning.isNotBlank()),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colors.accentBlue,
                             contentColor = colors.onAccent
@@ -1418,7 +1430,7 @@ private fun WordRowItem(
                 }
                 .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp)
         ) {
-            ArtikelBadge(card.artikel)
+            ArtikelBadge(card)
 
             Spacer(modifier = Modifier.width(12.dp))
 
@@ -1495,8 +1507,9 @@ private fun WordRowItem(
 }
 
 @Composable
-private fun ArtikelBadge(artikel: Artikel) {
-    val artColor = artikel.themeColor()
+private fun ArtikelBadge(card: Flashcard) {
+    val artColor = LocalAppColors.current.artikelColor(card.artikel)
+    val noArticleA11y = stringResource(R.string.words_filter_no_article_a11y)
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -1506,10 +1519,15 @@ private fun ArtikelBadge(artikel: Artikel) {
             .padding(vertical = 6.dp)
     ) {
         Text(
-            text = artikel.rawValue,
+            text = card.displayArtikel,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold,
-            color = artColor
+            color = artColor,
+            modifier = if (card.isArticleless) {
+                Modifier.semantics { contentDescription = noArticleA11y }
+            } else {
+                Modifier
+            }
         )
     }
 }
@@ -1864,6 +1882,9 @@ fun EditWordDialog(
                     value = editMeaning,
                     onValueChange = { editMeaning = it },
                     label = { Text(stringResource(R.string.edit_word_meaning_label)) },
+                    supportingText = if (editArtikel == null) {
+                        { Text(stringResource(R.string.words_articleless_meaning_required)) }
+                    } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1913,7 +1934,8 @@ fun EditWordDialog(
                             )
                             onDismiss()
                         },
-                        enabled = editWord.trim().isNotEmpty(),
+                        enabled = editWord.trim().isNotEmpty() &&
+                            (editArtikel != null || editMeaning.isNotBlank()),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colors.accentBlue,
                             contentColor = colors.onAccent
