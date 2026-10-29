@@ -90,6 +90,9 @@ import androidx.core.view.WindowCompat
 import com.artikelmeister.android.Artikel
 import com.artikelmeister.android.CEFRLevel
 import com.artikelmeister.android.DeckStore
+import com.artikelmeister.android.GeminiScopeException
+import com.artikelmeister.android.SyncErrors
+import com.artikelmeister.android.runCatchingCancellable
 import com.artikelmeister.android.GeminiAuthManager
 import com.artikelmeister.android.GeminiAuthMode
 import com.artikelmeister.android.GeminiVocabularyGenerator
@@ -124,15 +127,9 @@ fun AIGeneratorDialog(
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        scope.launch {
-            runCatching {
-                errorMessage = null
-                authManager.handleGoogleSignInResult(result.data, context)
-                showAuthConfig = false
-                store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = true)
-            }.onFailure { err ->
-                errorMessage = err.localizedMessage
-            }
+        errorMessage = null
+        store.completeGoogleSignIn(result.data, authManager, silentSync = true) { error ->
+            if (error == null) showAuthConfig = false else errorMessage = error
         }
     }
 
@@ -143,7 +140,7 @@ fun AIGeneratorDialog(
         if (!authManager.isAuthorized) {
             showAuthConfig = true
         } else {
-            runCatching { authManager.verifyCredentials() }
+            runCatchingCancellable { authManager.verifyCredentials() }
         }
     }
 
@@ -180,7 +177,12 @@ fun AIGeneratorDialog(
                 }
                 newlyAddedWords = addedItems
             } catch (e: Exception) {
-                errorMessage = e.localizedMessage ?: "Kelime üretilirken bir hata oluştu."
+                // Dismissing the sheet cancels generation; that is never an error to show.
+                val message = SyncErrors.userMessage(e, "Kelime üretilirken bir hata oluştu.")
+                if (message == null) throw e
+                errorMessage = message
+                // Missing Gemini scopes: reveal the "Google Hesabını Yeniden Bağla" re-consent button.
+                if (e is GeminiScopeException) showAuthConfig = true
             } finally {
                 isGenerating = false
                 progressMessage = ""
@@ -504,7 +506,7 @@ fun AIGeneratorDialog(
                                                 Button(
                                                     onClick = {
                                                         scope.launch {
-                                                            runCatching {
+                                                            runCatchingCancellable {
                                                                 errorMessage = null
                                                                 authManager.authMode = GeminiAuthMode.API_KEY
                                                                 authManager.verifyCredentials()

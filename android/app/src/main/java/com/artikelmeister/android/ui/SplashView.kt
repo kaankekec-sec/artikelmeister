@@ -578,7 +578,7 @@ fun MainContentView(
     // Automatically sync with Google Drive on startup or whenever Google account connects
     LaunchedEffect(authManager.isGoogleAccountConnected) {
         if (authManager.isGoogleAccountConnected) {
-            store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = false)
+            store.requestCloudSync(authManager)
         }
     }
 
@@ -1182,9 +1182,7 @@ private fun UniversalProfileSidebarCard(
             .clip(RoundedCornerShape(12.dp))
             .clickable {
                 if (isConnected) {
-                    scope.launch {
-                        store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = false)
-                    }
+                    store.requestCloudSync(authManager)
                 } else {
                     onShowSignInDialog()
                 }
@@ -1276,15 +1274,10 @@ fun OnboardingSetupScreen(
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        scope.launch {
-            errorMessage = null
-            runCatching {
-                authManager.handleGoogleSignInResult(result.data, context)
-                store.syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = false)
-                onComplete()
-            }.onFailure { err ->
-                errorMessage = err.localizedMessage ?: "Giriş yapılamadı."
-            }
+        errorMessage = null
+        // Store scope, not this screen's scope: onComplete() removes this screen from composition.
+        store.completeGoogleSignIn(result.data, authManager) { error ->
+            if (error == null) onComplete() else errorMessage = error
         }
     }
 

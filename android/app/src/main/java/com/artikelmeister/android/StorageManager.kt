@@ -918,7 +918,7 @@ class DeckStore(private val appContext: Context) {
 
         try {
             if (authManager.userEmail.isBlank()) {
-                runCatching { authManager.fetchUserProfile() }
+                runCatchingCancellable { authManager.fetchUserProfile() }
             }
 
             val snapshot = GoogleDriveSyncService.fetchCloudSnapshot(authManager)
@@ -1026,10 +1026,70 @@ class DeckStore(private val appContext: Context) {
                     "Google Drive ile başarıyla eşitlendi (${cards.size} kelime, $currentStreakDays gün seri)."
             }
         } catch (e: Exception) {
+            // Cancellation (e.g. the calling composition left the screen) is NOT a sync error:
+            // never show it to the user. Rethrow so structured concurrency keeps working;
+            // isSyncingCloud is reset in finally either way.
+            val message = SyncErrors.userMessage(e, "Bağlantı kurulamadı")
+            if (message == null) {
+                if (!isSilentAutoSync) cloudSyncStatusMessage = null
+                throw e
+            }
             cloudSyncIsError = true
-            cloudSyncStatusMessage = "Bulut eşitleme hatası: ${e.localizedMessage ?: "Bağlantı kurulamadı"}"
+            cloudSyncStatusMessage = "Bulut eşitleme hatası: $message"
         } finally {
             isSyncingCloud = false
+        }
+    }
+
+    /** Starts a sync in the store's own long-lived scope (survives the calling screen leaving composition). */
+    fun requestCloudSync(authManager: GeminiAuthManager, isSilentAutoSync: Boolean = false) {
+        scope.launch { syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = isSilentAutoSync) }
+    }
+
+    /**
+     * Handles the native Google sign-in result and the first sync in the store's scope.
+     * Sign-in flips hasCompletedOnboarding, which removes the onboarding screen from composition;
+     * doing this work in that screen's rememberCoroutineScope used to cancel the sync mid-flight
+     * ("The coroutine scope left the composition").
+     * [onFinished] runs on the main thread with null on success or a user-facing error message.
+     */
+    fun completeGoogleSignIn(
+        data: android.content.Intent?,
+        authManager: GeminiAuthManager,
+        silentSync: Boolean = false,
+        onFinished: (String?) -> Unit = {}
+    ) {
+        scope.launch {
+            var error: String? = null
+            try {
+                authManager.handleGoogleSignInResult(data, appContext)
+            } catch (e: Exception) {
+                error = SyncErrors.userMessage(e, "Google girişi başarısız oldu.")
+                if (error == null) throw e
+                cloudSyncStatusMessage = error
+                cloudSyncIsError = true
+            }
+            if (error == null) {
+                // Sync reports its own errors via cloudSyncStatusMessage; the sign-in itself succeeded.
+                syncWithGoogleDrive(authManager = authManager, isSilentAutoSync = silentSync)
+            }
+            onFinished(error)
+        }
+    }
+
+    /** Account deletion must not be half-cancelled by a screen change, so it runs in the store scope. */
+    fun requestDeleteAccountAndAllData(authManager: GeminiAuthManager, onFinished: () -> Unit = {}) {
+        scope.launch {
+            try {
+                deleteAccountAndAllData(authManager)
+            } catch (e: Exception) {
+                val message = SyncErrors.userMessage(e, "Hesap silinemedi.")
+                if (message == null) throw e
+                cloudSyncIsError = true
+                cloudSyncStatusMessage = "Hesap silme hatası: $message"
+            } finally {
+                onFinished()
+            }
         }
     }
 
