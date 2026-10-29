@@ -1,5 +1,15 @@
 package com.artikelmeister.android.ui
 
+import androidx.compose.material3.MaterialTheme
+import com.artikelmeister.android.R
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.selection.selectable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -321,7 +331,7 @@ private fun StudyHeaderBar(
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.Menu,
-                        contentDescription = "Menü",
+                        contentDescription = stringResource(R.string.action_open_menu),
                         tint = colors.primaryText,
                         modifier = Modifier.size(17.dp)
                     )
@@ -377,7 +387,7 @@ private fun StudyHeaderBar(
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = store.selectedStudyDeck ?: "Tüm Desteler",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             color = colors.primaryText,
                             maxLines = 1,
@@ -456,7 +466,7 @@ private fun StudyHeaderBar(
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = "AI Kelime",
-                    fontSize = 11.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1
                 )
@@ -479,7 +489,7 @@ private fun StudyHeaderBar(
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = "CSV",
-                    fontSize = 11.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     color = colors.primaryText,
                     maxLines = 1
                 )
@@ -546,7 +556,7 @@ private fun StudyHeaderBar(
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "${store.currentStreakDays} Gün",
-                            fontSize = 11.sp,
+                            fontSize = MaterialTheme.typography.labelSmall.fontSize,
                             fontWeight = FontWeight.Bold,
                             color = colors.accentOrange,
                             maxLines = 1
@@ -623,7 +633,7 @@ private fun ActiveCardSessionView(
                 ) {
                     Text(
                         text = card.stage.title.uppercase(Locale("tr", "TR")),
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = card.stage.color,
                         modifier = Modifier
@@ -646,7 +656,7 @@ private fun ActiveCardSessionView(
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = card.deckName,
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = colors.secondaryText,
                             maxLines = 1
@@ -656,7 +666,7 @@ private fun ActiveCardSessionView(
                     if (card.totalReviews > 0) {
                         Text(
                             text = "Kolaylık: ${(card.easeFactor * 100).toInt()}% • Tekrar: ${card.totalReviews}",
-                            fontSize = 11.sp,
+                            fontSize = MaterialTheme.typography.labelSmall.fontSize,
                             color = colors.secondaryText,
                             modifier = Modifier.align(Alignment.CenterVertically)
                         )
@@ -685,7 +695,7 @@ private fun ActiveCardSessionView(
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "Dinle",
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             color = colors.primaryText
                         )
@@ -710,13 +720,25 @@ private fun ActiveCardSessionView(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "Doğru artikeli seçin:",
-                                fontSize = 13.sp,
+                                text = if (card.isArticleless) {
+                                    stringResource(R.string.study_meaning_prompt)
+                                } else {
+                                    "Doğru artikeli seçin:"
+                                },
+                                fontSize = MaterialTheme.typography.bodySmall.fontSize,
                                 fontWeight = FontWeight.Medium,
                                 color = colors.secondaryText,
                                 textAlign = TextAlign.Center
                             )
 
+                            if (card.isArticleless) {
+                                ArticlelessFront(
+                                    card = card,
+                                    typed = typedArtikel,
+                                    onTypedChange = onTypedArtikelChange,
+                                    onSubmit = onCheckAndReveal
+                                )
+                            } else {
                             // Row: Left 3 Artikel Buttons stacked vertically, Right: Word (die is horizontally aligned with the word)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -732,20 +754,23 @@ private fun ActiveCardSessionView(
                                 ) {
                                     Artikel.entries.forEach { art ->
                                         val isSelected = typedArtikel.trim().equals(art.rawValue, ignoreCase = true)
+                                        val artColor = art.themeColor()
                                         Surface(
-                                            color = if (isSelected) art.color else colors.textBackground,
+                                            color = if (isSelected) artColor else colors.textBackground,
                                             shape = RoundedCornerShape(10.dp),
                                             border = BorderStroke(
                                                 width = if (isSelected) 2.dp else 1.5.dp,
-                                                color = if (isSelected) art.color else art.color.copy(alpha = 0.55f)
+                                                color = if (isSelected) artColor else artColor.copy(alpha = 0.55f)
                                             ),
                                             shadowElevation = if (isSelected) 4.dp else 0.dp,
                                             modifier = Modifier
                                                 .width(76.dp)
-                                                .height(40.dp)
-                                                .clickable {
-                                                    onTypedArtikelChange(art.rawValue)
-                                                }
+                                                .height(48.dp)
+                                                .selectable(
+                                                    selected = isSelected,
+                                                    role = Role.RadioButton,
+                                                    onClick = { onTypedArtikelChange(art.rawValue) }
+                                                )
                                         ) {
                                             Box(
                                                 contentAlignment = Alignment.Center,
@@ -753,9 +778,9 @@ private fun ActiveCardSessionView(
                                             ) {
                                                 Text(
                                                     text = art.rawValue,
-                                                    fontSize = 16.sp,
+                                                    style = MaterialTheme.typography.titleSmall,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = if (isSelected) Color.White else art.color
+                                                    color = if (isSelected) colors.onAccent else artColor
                                                 )
                                             }
                                         }
@@ -786,10 +811,13 @@ private fun ActiveCardSessionView(
                                 )
                             }
 
-                            if (store.settings.showMeaningOnFront && card.meaning.isNotEmpty()) {
+                            }
+
+                            // The meaning is the answer for article-less cards -> never on the front.
+                            if (!card.isArticleless && store.settings.showMeaningOnFront && card.meaning.isNotEmpty()) {
                                 Text(
                                     text = card.meaning,
-                                    fontSize = 18.sp,
+                                    style = MaterialTheme.typography.titleMedium,
                                     color = colors.secondaryText,
                                     textAlign = TextAlign.Center
                                 )
@@ -820,7 +848,7 @@ private fun ActiveCardSessionView(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 val statusText = if (guessResult == ArtikelGuessResult.CORRECT) {
-                                    "DOĞRU! (${card.artikel?.grammaticalLabel ?: card.meaning})"
+                                    if (card.isArticleless) "DOĞRU!" else "DOĞRU! (${card.artikel?.grammaticalLabel})"
                                 } else {
                                     val userCleaned = typedArtikel.trim()
                                     if (userCleaned.isEmpty()) {
@@ -831,7 +859,7 @@ private fun ActiveCardSessionView(
                                 }
                                 Text(
                                     text = statusText,
-                                    fontSize = 13.sp,
+                                    style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Bold,
                                     color = wordHighlightColor
                                 )
@@ -860,13 +888,15 @@ private fun ActiveCardSessionView(
                                     .fillMaxWidth()
                                     .padding(horizontal = 8.dp)
                             ) {
-                                Text(
-                                    text = card.artikel?.rawValue ?: "",
-                                    fontSize = revealedArtikelFontSize,
-                                    fontWeight = FontWeight.Black,
-                                    color = wordHighlightColor
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
+                                card.artikel?.let { art ->
+                                    Text(
+                                        text = art.rawValue,
+                                        fontSize = revealedArtikelFontSize,
+                                        fontWeight = FontWeight.Black,
+                                        color = wordHighlightColor
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                }
                                 Text(
                                     text = card.word,
                                     fontSize = revealedWordFontSize,
@@ -887,7 +917,7 @@ private fun ActiveCardSessionView(
                                 )
                                 Text(
                                     text = card.meaning,
-                                    fontSize = 20.sp,
+                                    style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Medium,
                                     color = colors.secondaryText,
                                     textAlign = TextAlign.Center
@@ -899,14 +929,16 @@ private fun ActiveCardSessionView(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Legend for artikel colors
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ArtikelLegendDot(artikel = Artikel.DER, label = "der (Eril)")
-                    ArtikelLegendDot(artikel = Artikel.DIE, label = "die (Dişil)")
-                    ArtikelLegendDot(artikel = Artikel.DAS, label = "das (Nötr)")
+                // Legend for artikel colors (irrelevant for article-less cards)
+                if (!card.isArticleless) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ArtikelLegendDot(artikel = Artikel.DER, label = "der (Eril)")
+                        ArtikelLegendDot(artikel = Artikel.DIE, label = "die (Dişil)")
+                        ArtikelLegendDot(artikel = Artikel.DAS, label = "das (Nötr)")
+                    }
                 }
             }
         }
@@ -941,7 +973,7 @@ private fun ActiveCardSessionView(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Kontrol Et",
-                        fontSize = 15.sp,
+                        style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -949,7 +981,7 @@ private fun ActiveCardSessionView(
                 if (guessResult == ArtikelGuessResult.WRONG) {
                     Text(
                         text = "Yanlış cevaplandığı için sadece 'Tekrar' veya 'Zor' seçilebilir:",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Medium,
                         color = colors.vividRed,
                         textAlign = TextAlign.Center
@@ -957,7 +989,7 @@ private fun ActiveCardSessionView(
                 } else {
                     Text(
                         text = "Hatırlama zorluğunu seçin:",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         color = colors.secondaryText,
                         textAlign = TextAlign.Center
                     )
@@ -1015,7 +1047,7 @@ private fun WaitingForLearningCardView(
 
         Text(
             text = "Öğrenme Kartı Zamanlayıcısı",
-            fontSize = 22.sp,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = colors.primaryText
         )
@@ -1024,7 +1056,7 @@ private fun WaitingForLearningCardView(
 
         Text(
             text = "Sıradaki tekrar kelimesi vaat edilen süre dolduğunda otomatik olarak ekrana gelecektir:",
-            fontSize = 14.sp,
+            style = MaterialTheme.typography.bodyMedium,
             color = colors.secondaryText,
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 460.dp)
@@ -1034,7 +1066,7 @@ private fun WaitingForLearningCardView(
 
         Text(
             text = timeString,
-            fontSize = 42.sp,
+            style = MaterialTheme.typography.displayLarge,
             fontWeight = FontWeight.Black,
             fontFamily = FontFamily.Monospace,
             color = colors.accentOrange,
@@ -1101,7 +1133,7 @@ private fun EmptyDatabaseView(
 
         Text(
             text = "Henüz Kelime Eklenmedi",
-            fontSize = 22.sp,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = colors.primaryText
         )
@@ -1110,7 +1142,7 @@ private fun EmptyDatabaseView(
 
         Text(
             text = "İlk sütunu artikel (der, die, das), ikinci sütunu Almanca kelime olan bir CSV dosyası yükleyerek veya Gemini AI ile üreterek hemen başlayabilirsiniz.",
-            fontSize = 14.sp,
+            style = MaterialTheme.typography.bodyMedium,
             color = colors.secondaryText,
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 480.dp)
@@ -1192,7 +1224,7 @@ private fun SessionCompletedView(
             } else {
                 "Bugünkü Çalışma Tamamlandı!"
             },
-            fontSize = 22.sp,
+            fontSize = MaterialTheme.typography.headlineSmall.fontSize,
             fontWeight = FontWeight.Bold,
             color = colors.primaryText,
             textAlign = TextAlign.Center
@@ -1202,7 +1234,7 @@ private fun SessionCompletedView(
 
         Text(
             text = "Günlük hedeflerinizi ve bekleyen tekrarlarınızı tamamladınız. Kartlarınız hatırlama durumunuza göre sonraki günlere planlandı.",
-            fontSize = 14.sp,
+            style = MaterialTheme.typography.bodyMedium,
             color = colors.secondaryText,
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 480.dp)
@@ -1302,7 +1334,7 @@ private fun CounterPill(
         Spacer(modifier = Modifier.width(5.dp))
         Text(
             text = title,
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
             color = colors.secondaryText,
             maxLines = 1
@@ -1310,7 +1342,7 @@ private fun CounterPill(
         Spacer(modifier = Modifier.width(4.dp))
         Text(
             text = "$count",
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = color,
             maxLines = 1
@@ -1331,11 +1363,11 @@ private fun ArtikelLegendDot(
         Box(
             modifier = Modifier
                 .size(8.dp)
-                .background(artikel.color, CircleShape)
+                .background(artikel.themeColor(), CircleShape)
         )
         Text(
             text = label,
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             color = colors.secondaryText,
             maxLines = 1
         )
@@ -1356,7 +1388,7 @@ private fun RatingButton(
     ) {
         Text(
             text = intervalText,
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
             color = rating.color,
             maxLines = 1
@@ -1372,7 +1404,7 @@ private fun RatingButton(
         ) {
             Text(
                 text = rating.title,
-                fontSize = 13.sp,
+                style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 maxLines = 1
@@ -1399,13 +1431,13 @@ private fun StatMiniBox(
     ) {
         Text(
             text = value,
-            fontSize = 22.sp,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = color
         )
         Text(
             text = title,
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             color = colors.secondaryText,
             maxLines = 1
         )
@@ -1421,11 +1453,11 @@ private fun ArtikelBadge(
 ) {
     val colors = LocalAppColors.current
     Surface(
-        color = if (isSelected) artikel.color else colors.textBackground,
+        color = if (isSelected) artikel.themeColor() else colors.textBackground,
         shape = RoundedCornerShape(10.dp),
         border = BorderStroke(
             width = if (isSelected) 2.dp else 1.5.dp,
-            color = if (isSelected) artikel.color else artikel.color.copy(alpha = 0.55f)
+            color = if (isSelected) artikel.themeColor() else artikel.themeColor().copy(alpha = 0.55f)
         ),
         shadowElevation = if (isSelected) 4.dp else 0.dp,
         modifier = modifier
@@ -1439,9 +1471,9 @@ private fun ArtikelBadge(
         ) {
             Text(
                 text = artikel.rawValue,
-                fontSize = 16.sp,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color = if (isSelected) Color.White else artikel.color
+                color = if (isSelected) Color.White else artikel.themeColor()
             )
         }
     }
@@ -1483,7 +1515,7 @@ fun StudyCardQuestionPreview() {
                 ) {
                     Text(
                         text = "Artikel'i Seçin",
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF98989F)
                     )
 
@@ -1519,7 +1551,7 @@ fun StudyCardQuestionPreview() {
 
                         Text(
                             text = sampleCard.word,
-                            fontSize = 32.sp,
+                            style = MaterialTheme.typography.displaySmall,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFF5F5F7)
                         )
@@ -1527,7 +1559,7 @@ fun StudyCardQuestionPreview() {
 
                     Text(
                         text = "Kelimeyi hatırlamaya çalışın ve uygun artikeli seçin",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF98989F)
                     )
                 }
@@ -1570,7 +1602,7 @@ fun StudyCardRevealedPreview() {
                 ) {
                     Text(
                         text = "Doğru!",
-                        fontSize = 15.sp,
+                        style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                         color = Color(0.12f, 0.78f, 0.35f)
                     )
@@ -1582,14 +1614,14 @@ fun StudyCardRevealedPreview() {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = "das",
-                                fontSize = 34.sp,
+                                style = MaterialTheme.typography.displayMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Artikel.DAS.color
+                                color = Artikel.DAS.themeColor()
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
                                 text = sampleCard.word,
-                                fontSize = 34.sp,
+                                style = MaterialTheme.typography.displayMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0.12f, 0.78f, 0.35f)
                             )
@@ -1597,7 +1629,7 @@ fun StudyCardRevealedPreview() {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = sampleCard.meaning,
-                            fontSize = 17.sp,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Medium,
                             color = Color(0xFF98989F)
                         )
@@ -1616,7 +1648,7 @@ fun StudyCardRevealedPreview() {
                                     .height(38.dp),
                                 contentPadding = PaddingValues(0.dp)
                             ) {
-                                Text(text = rating.title, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(text = rating.title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1674,7 +1706,7 @@ fun StudyHeaderBarPreview() {
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Tüm Desteler", fontSize = 11.sp, color = Color(0xFFF5F5F7))
+                    Text("Tüm Desteler", style = MaterialTheme.typography.labelSmall, color = Color(0xFFF5F5F7))
                     Spacer(modifier = Modifier.width(2.dp))
                     Icon(
                         Icons.Default.ArrowDropDown,
@@ -1693,7 +1725,7 @@ fun StudyHeaderBarPreview() {
             ) {
                 Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(13.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("AI Kelime", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text("AI Kelime", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
             }
             OutlinedButton(
                 onClick = {},
@@ -1709,8 +1741,60 @@ fun StudyHeaderBarPreview() {
                     modifier = Modifier.size(13.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("CSV", fontSize = 11.sp, color = Color(0xFFF5F5F7))
+                Text("CSV", style = MaterialTheme.typography.labelSmall, color = Color(0xFFF5F5F7))
             }
         }
+    }
+}
+
+
+/**
+ * Front of an article-less card: the German word alone (no der/die/das buttons) and a
+ * single-line field for the Turkish meaning. IME "Done" submits like "Kontrol Et".
+ */
+@Composable
+private fun ArticlelessFront(
+    card: Flashcard,
+    typed: String,
+    onTypedChange: (String) -> Unit,
+    onSubmit: () -> Unit
+) {
+    val colors = LocalAppColors.current
+    val focusManager = LocalFocusManager.current
+    val wordFontSize = when {
+        card.word.length > 22 -> 20.sp
+        card.word.length > 16 -> 24.sp
+        card.word.length > 12 -> 28.sp
+        else -> 34.sp
+    }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = card.word,
+            fontSize = wordFontSize,
+            fontWeight = FontWeight.Bold,
+            color = colors.primaryText,
+            textAlign = TextAlign.Center,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis
+        )
+        OutlinedTextField(
+            value = typed,
+            onValueChange = onTypedChange,
+            singleLine = true,
+            placeholder = { Text(stringResource(R.string.study_meaning_placeholder)) },
+            label = { Text(stringResource(R.string.study_meaning_label)) },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = {
+                focusManager.clearFocus()
+                onSubmit()
+            }),
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .fillMaxWidth()
+        )
     }
 }
