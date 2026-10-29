@@ -36,6 +36,12 @@ do {
     check(out.cards[0].isArticleless && out.cards[0].word == "Tisch" && out.cards[0].meaning == "Masa", "csv articleless fields")
 }
 do {
+    let out = CsvCards.importContent("m,A\nMaskulin,B\nf,C\nfeminine,D\nN,E\nneutrum,F\nneuter,G\nmasculine,H\nfeminin,I", fallbackDeck: "Genel", existing: [])
+    check(out.cards.map { $0.artikel } == [.der, .der, .die, .die, .das, .das, .das, .der, .die], "csv old aliases")
+    let x = CsvCards.importContent("x,A\nmann,B", fallbackDeck: "Genel", existing: [])
+    check(x.cards.allSatisfy { $0.isArticleless }, "csv unknown stays articleless")
+}
+do {
     let out = CsvCards.importContent("artikel,kelime\ndre,Tisch\nderr,Haus", fallbackDeck: "Genel", existing: [])
     check(out.added == 2 && out.cards.allSatisfy { $0.isArticleless }, "csv typo -> articleless, header skipped")
 }
@@ -73,12 +79,23 @@ do {
     check(!AnswerChecker.isCorrect(card: c, typed: "die"), "answer valid wrong")
     check(!AnswerChecker.isCorrect(card: c, typed: ""), "answer valid empty wrong")
     check(!AnswerChecker.isCorrect(card: c, typed: "-"), "answer valid '-' wrong")
-    let n = card(nil, "Hallo")
-    check(AnswerChecker.isCorrect(card: n, typed: "-"), "answer articleless '-'")
-    check(AnswerChecker.isCorrect(card: n, typed: "  - "), "answer articleless trimmed")
-    check(AnswerChecker.isCorrect(card: n, typed: ""), "answer articleless empty")
-    check(!AnswerChecker.isCorrect(card: n, typed: "der"), "answer articleless 'der' wrong")
-    check(AnswerChecker.expectedLabel(card: n) == "-" && n.fullGermanTerm == "Hallo", "label / fullGermanTerm")
+    let n = card(nil, "Hallo", meaning: "Merhaba, selam; selamlar / Hos geldin")
+    check(AnswerChecker.isCorrect(card: n, typed: "merhaba"), "meaning basic")
+    check(AnswerChecker.isCorrect(card: n, typed: "  SELAM "), "meaning trim/case")
+    check(AnswerChecker.isCorrect(card: n, typed: "selamlar"), "meaning ; part")
+    check(AnswerChecker.isCorrect(card: n, typed: "hos   geldin"), "meaning / part, collapse whitespace")
+    check(AnswerChecker.isCorrect(card: n, typed: "Merhaba, selam; selamlar / Hos geldin"), "meaning whole text")
+    check(!AnswerChecker.isCorrect(card: n, typed: "merhab"), "meaning wrong")
+    check(!AnswerChecker.isCorrect(card: n, typed: ""), "meaning blank wrong")
+    check(!AnswerChecker.isCorrect(card: n, typed: "-"), "meaning '-' wrong")
+    check(!AnswerChecker.isCorrect(card: card(nil, "X"), typed: ""), "empty meaning + blank wrong")
+    check(n.fullGermanTerm == "Hallo" && AnswerChecker.expectedLabel(card: n) == "Merhaba, selam; selamlar / Hos geldin", "label / fullGermanTerm")
+    let tr = card(nil, "Fisch", meaning: "ISIK, \u{0130}ncir")
+    check(AnswerChecker.isCorrect(card: tr, typed: "\u{0131}s\u{0131}k"), "turkish dotless i")
+    check(AnswerChecker.isCorrect(card: tr, typed: "ISIK"), "turkish I")
+    check(AnswerChecker.isCorrect(card: tr, typed: "incir"), "turkish dotted capital")
+    check(AnswerChecker.isCorrect(card: tr, typed: "\u{0130}NC\u{0130}R"), "turkish all caps dotted")
+    check(!AnswerChecker.isCorrect(card: tr, typed: "isik"), "turkish i != dotless")
 }
 
 // ---------- Filter ----------

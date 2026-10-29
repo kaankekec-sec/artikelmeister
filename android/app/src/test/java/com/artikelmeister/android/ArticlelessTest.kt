@@ -36,6 +36,14 @@ class ArticlelessTest {
         assertEquals("Masa", out.cards[0].meaning)
     }
 
+    @Test fun csv_oldAliasesStillMapToArticles() {
+        val out = CsvCards.importContent("m,A\nMaskulin,B\nf,C\nfeminine,D\nN,E\nneutrum,F\nneuter,G\nmasculine,H\nfeminin,I", "Genel", emptyList())
+        assertEquals(listOf(Artikel.DER, Artikel.DER, Artikel.DIE, Artikel.DIE, Artikel.DAS, Artikel.DAS, Artikel.DAS, Artikel.DER, Artikel.DIE),
+            out.cards.map { it.artikel })
+        val x = CsvCards.importContent("x,A\nmann,B", "Genel", emptyList())
+        assertTrue(x.cards.all { it.isArticleless })
+    }
+
     @Test fun csv_typoArticleBecomesArticleless_headerSkipped() {
         val out = CsvCards.importContent("artikel,kelime\ndre,Tisch\nderr,Haus", "Genel", emptyList())
         assertEquals(2, out.added)
@@ -96,14 +104,29 @@ class ArticlelessTest {
         assertFalse(AnswerChecker.isCorrect(c, "-"))
     }
 
-    @Test fun answer_articleless() {
-        val c = card(null, "Hallo")
-        assertTrue(AnswerChecker.isCorrect(c, "-"))
-        assertTrue(AnswerChecker.isCorrect(c, "  - "))
-        assertTrue(AnswerChecker.isCorrect(c, ""))
+    @Test fun answer_articleless_meaning() {
+        val c = card(null, "Hallo", meaning = "Merhaba, selam; selamlar / Hos geldin")
+        assertTrue(AnswerChecker.isCorrect(c, "merhaba"))
+        assertTrue(AnswerChecker.isCorrect(c, "  SELAM "))
+        assertTrue(AnswerChecker.isCorrect(c, "selamlar"))
+        assertTrue(AnswerChecker.isCorrect(c, "hos   geldin"))
+        assertTrue(AnswerChecker.isCorrect(c, "Merhaba, selam; selamlar / Hos geldin"))
+        assertFalse(AnswerChecker.isCorrect(c, "merhab"))
+        assertFalse(AnswerChecker.isCorrect(c, ""))
+        assertFalse(AnswerChecker.isCorrect(c, "-"))
         assertFalse(AnswerChecker.isCorrect(c, "der"))
-        assertEquals("-", AnswerChecker.expectedLabel(c))
+        assertFalse(AnswerChecker.isCorrect(card(null, "X", meaning = ""), ""))
         assertEquals("Hallo", c.fullGermanTerm)
+        assertEquals("Merhaba, selam; selamlar / Hos geldin", AnswerChecker.expectedLabel(c))
+    }
+
+    @Test fun answer_articleless_turkishCase() {
+        val c = card(null, "Fisch", meaning = "ISIK, \u0130ncir")
+        assertTrue(AnswerChecker.isCorrect(c, "\u0131s\u0131k"))   // dotless i
+        assertTrue(AnswerChecker.isCorrect(c, "ISIK"))
+        assertTrue(AnswerChecker.isCorrect(c, "incir"))
+        assertTrue(AnswerChecker.isCorrect(c, "\u0130NC\u0130R"))
+        assertFalse(AnswerChecker.isCorrect(c, "isik"))            // dotted i is a different letter
     }
 
     // ---------- Filter ----------

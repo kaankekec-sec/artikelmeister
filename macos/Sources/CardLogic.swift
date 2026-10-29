@@ -116,22 +116,43 @@ enum CardMerge {
 }
 
 enum AnswerChecker {
-    /// Typed/selected answers that mean "this word has no article".
-    static let noneTokens: Set<String> = ["-", "\u{2013}", "\u{2014}"]
+    private static let turkish = Locale(identifier: "tr_TR")
 
-    /// Typed-answer check. Case-insensitive and whitespace-trimmed.
-    /// - Valid card: typed must equal der/die/das.
-    /// - Article-less card: correct answer is "-" (en/em dash accepted) or an empty answer.
-    static func isCorrect(card: Flashcard, typed: String) -> Bool {
-        let t = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if let art = card.artikel {
-            return t == art.rawValue
-        }
-        return t.isEmpty || noneTokens.contains(t)
+    /// Trim, collapse inner whitespace, lowercase with Turkish rules (I -> dotless i, U+0130 -> i).
+    static func normalizeMeaning(_ s: String) -> String {
+        let collapsed = s.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        return collapsed.lowercased(with: turkish)
     }
 
-    /// Text to show as the "correct article" in feedback: "der"/"die"/"das" or "-".
-    static func expectedLabel(card: Flashcard) -> String { card.displayArtikel }
+    /// Accepted answers for an article-less card: each meaning split on , ; / (and the whole text).
+    static func acceptedMeanings(_ meaning: String) -> Set<String> {
+        var out = Set<String>()
+        let whole = normalizeMeaning(meaning)
+        if !whole.isEmpty { out.insert(whole) }
+        for part in meaning.split(whereSeparator: { ",;/".contains($0) }) {
+            let n = normalizeMeaning(String(part))
+            if !n.isEmpty { out.insert(n) }
+        }
+        return out
+    }
+
+    /// Typed-answer check.
+    /// - Valid card: typed (trimmed, case-insensitive) must equal der/die/das (unchanged).
+    /// - Article-less card: typed must equal the card's Turkish MEANING (trimmed, inner whitespace
+    ///   collapsed, Turkish case rules). With several meanings separated by comma, semicolon or
+    ///   '/', ANY ONE is correct. A blank answer is never correct.
+    static func isCorrect(card: Flashcard, typed: String) -> Bool {
+        if let art = card.artikel {
+            return typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == art.rawValue
+        }
+        let t = normalizeMeaning(typed)
+        return !t.isEmpty && acceptedMeanings(card.meaning).contains(t)
+    }
+
+    /// Text to show as the correct answer in feedback: article, or the meaning for article-less cards.
+    static func expectedLabel(card: Flashcard) -> String {
+        card.artikel?.rawValue ?? card.meaning.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 enum ArtikelFilter {
@@ -220,7 +241,7 @@ enum CsvCards {
             if lineIdx == 0 && isHeader(rawArtikel: rawArtikel, word: cleanWord) { continue }
 
             // Empty OR not der/die/das (typo) -> article-less word.
-            let artikel = Artikel.parseStrict(rawArtikel)
+            let artikel = Artikel.parse(rawArtikel)
             guard !cleanWord.isEmpty else {
                 invalid += 1
                 continue
@@ -257,7 +278,7 @@ enum CsvCards {
         let a = rawArtikel.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let w = word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return a == "artikel" || a == "article" ||
-            (Artikel.parseStrict(a) == nil && ["kelime", "word", "wort"].contains(w))
+            (Artikel.parse(a) == nil && ["kelime", "word", "wort"].contains(w))
     }
 
     static func exportString(_ cards: [Flashcard]) -> String {

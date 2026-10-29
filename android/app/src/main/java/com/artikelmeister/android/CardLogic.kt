@@ -117,27 +117,37 @@ object CardMerge {
 }
 
 object AnswerChecker {
-    /** Typed/selected answers that mean "this word has no article". */
-    val NONE_TOKENS = setOf("-", "–", "—")
+    private val TURKISH = Locale("tr", "TR")
+    private val SEPARATORS = Regex("[,;/]")
+    private val WHITESPACE = Regex("\\s+")
 
-    /**
-     * Typed-answer check. Case-insensitive and whitespace-trimmed.
-     * - Valid card: typed must equal der/die/das.
-     * - Article-less card: correct answer is "-" (the '-' choice; en/em dash accepted)
-     *   or an empty/blank answer (no article given).
-     */
-    fun isCorrect(card: Flashcard, typed: String): Boolean {
-        val t = typed.trim().lowercase(Locale.ROOT)
-        val art = card.artikel
-        return if (art == null) {
-            t.isEmpty() || t in NONE_TOKENS
-        } else {
-            t == art.rawValue
-        }
+    /** Trim, collapse inner whitespace, lowercase with Turkish rules (I->i dotless, \u0130->i). */
+    fun normalizeMeaning(s: String): String = s.trim().replace(WHITESPACE, " ").lowercase(TURKISH)
+
+    /** Accepted answers for an article-less card: each of the meanings split on , ; / (and the whole text). */
+    fun acceptedMeanings(meaning: String): Set<String> {
+        val out = linkedSetOf<String>()
+        normalizeMeaning(meaning).takeIf { it.isNotEmpty() }?.let { out.add(it) }
+        meaning.split(SEPARATORS).map { normalizeMeaning(it) }.filter { it.isNotEmpty() }.forEach { out.add(it) }
+        return out
     }
 
-    /** Text to show as the "correct article" in feedback: "der"/"die"/"das" or "-". */
-    fun expectedLabel(card: Flashcard): String = card.displayArtikel
+    /**
+     * Typed-answer check.
+     * - Valid card: typed (trimmed, case-insensitive) must equal der/die/das (unchanged).
+     * - Article-less card: typed must equal the card's Turkish MEANING (trimmed, inner whitespace
+     *   collapsed, Turkish case rules). If the meaning lists several meanings separated by
+     *   comma, semicolon or '/', ANY ONE of them is correct. A blank answer is never correct.
+     */
+    fun isCorrect(card: Flashcard, typed: String): Boolean {
+        val art = card.artikel
+        if (art != null) return typed.trim().lowercase(Locale.ROOT) == art.rawValue
+        val t = normalizeMeaning(typed)
+        return t.isNotEmpty() && t in acceptedMeanings(card.meaning)
+    }
+
+    /** Text to show as the correct answer in feedback: article, or the meaning for article-less cards. */
+    fun expectedLabel(card: Flashcard): String = card.artikel?.rawValue ?: card.meaning.trim()
 }
 
 object ArtikelFilter {
@@ -221,8 +231,8 @@ object CsvCards {
 
             if (lineIdx == 0 && isHeader(rawArtikel, cleanWord)) continue
 
-            // Empty OR not der/die/das (typo) -> article-less word.
-            val artikel = Artikel.parseStrict(rawArtikel)
+            // Empty OR not der/die/das (or an old alias m/f/n/...) -> article-less word.
+            val artikel = Artikel.parse(rawArtikel)
             if (cleanWord.isEmpty()) {
                 invalid += 1
                 continue
@@ -269,7 +279,7 @@ object CsvCards {
         val a = rawArtikel.trim().lowercase(Locale.ROOT)
         val w = word.trim().lowercase(Locale.ROOT)
         return a == "artikel" || a == "article" ||
-            (Artikel.parseStrict(a) == null && w in setOf("kelime", "word", "wort"))
+            (Artikel.parse(a) == null && w in setOf("kelime", "word", "wort"))
     }
 
     fun exportString(cards: List<Flashcard>): String {
