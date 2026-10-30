@@ -39,6 +39,12 @@ android/captures/
 .system_generated/
 scratch/
 
+# Keystores & Signing Keys
+*.jks
+*.keystore
+keystore/
+android/app/keystore/
+
 # Claude Code files and folders (any case)
 *[Cc][Ll][Aa][Uu][Dd][Ee]*
 AGENT_HANDOFF.md
