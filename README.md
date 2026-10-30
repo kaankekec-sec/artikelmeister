@@ -1,5 +1,7 @@
 # artikelmeister
 
+https://kaankekec-sec.github.io/artikelmeister/
+
 got tired of guessing *der*, *die*, *das* so i made an app for it.
 
 it has a bloody brain icon because remembering ef'ing artikels hurts.
