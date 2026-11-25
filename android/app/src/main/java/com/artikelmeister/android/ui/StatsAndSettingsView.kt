@@ -128,6 +128,7 @@ fun StatsView(
     val derCount = store.cards.count { it.artikel == Artikel.DER }
     val dieCount = store.cards.count { it.artikel == Artikel.DIE }
     val dasCount = store.cards.count { it.artikel == Artikel.DAS }
+    val noneCount = store.cards.count { it.isArticleless }
 
     val activeStudyDaysCount = store.studyHistory.values.count { it.totalAnswersCount > 0 }
 
@@ -424,6 +425,16 @@ fun StatsView(
                     total = max(1, totalCards),
                     color = Artikel.DAS.themeColor()
                 )
+                // The total includes article-less words, so their share must be visible too;
+                // otherwise the three bars silently under-represent the deck.
+                if (noneCount > 0) {
+                    DistributionRow(
+                        label = "Artikelsiz (-)",
+                        count = noneCount,
+                        total = max(1, totalCards),
+                        color = colors.artikelColor(null)
+                    )
+                }
             }
         }
 
@@ -821,11 +832,11 @@ fun SettingsView(
                 }
 
                 Slider(
-                    value = store.settings.dailyNewCardLimit.coerceIn(1, 200).toFloat(),
+                    value = store.settings.dailyNewCardLimit.coerceIn(1, 500).toFloat(),
                     onValueChange = { v ->
                         store.updateSettings { it.copy(dailyNewCardLimit = v.roundToInt().coerceIn(1, 500)) }
                     },
-                    valueRange = 1f..200f,
+                    valueRange = 1f..500f,
                     colors = SliderDefaults.colors(
                         thumbColor = colors.accentBlue,
                         activeTrackColor = colors.accentBlue
@@ -885,12 +896,12 @@ fun SettingsView(
                 }
 
                 Slider(
-                    value = store.settings.dailyReviewLimit.coerceIn(10, 500).toFloat(),
+                    value = store.settings.dailyReviewLimit.coerceIn(10, 1000).toFloat(),
                     onValueChange = { v ->
                         val stepped = ((v / 10f).roundToInt() * 10).coerceIn(10, 1000)
                         store.updateSettings { it.copy(dailyReviewLimit = stepped) }
                     },
-                    valueRange = 10f..500f,
+                    valueRange = 10f..1000f,
                     colors = SliderDefaults.colors(
                         thumbColor = colors.accentBlue,
                         activeTrackColor = colors.accentBlue

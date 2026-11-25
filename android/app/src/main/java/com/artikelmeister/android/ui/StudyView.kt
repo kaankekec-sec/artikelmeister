@@ -14,6 +14,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -170,9 +172,15 @@ fun StudyView(
         guessResult = ArtikelGuessResult.NONE
     }
 
-    fun checkAndRevealCard(card: Flashcard) {
+    /**
+     * Reveals the card for an explicit answer. Article buttons pass their value directly, so the
+     * result cannot read a stale `typedArtikel` from the previous composition (that would make the
+     * instantly-revealed card judge the wrong answer).
+     */
+    fun revealCard(card: Flashcard, answer: String) {
         if (isRevealed) return
-        guessResult = if (com.artikelmeister.android.AnswerChecker.isCorrect(card, typedArtikel)) {
+        typedArtikel = answer
+        guessResult = if (com.artikelmeister.android.AnswerChecker.isCorrect(card, answer)) {
             ArtikelGuessResult.CORRECT
         } else {
             ArtikelGuessResult.WRONG
@@ -182,6 +190,8 @@ fun StudyView(
             SpeechManager.speak(card.fullGermanTerm)
         }
     }
+
+    fun checkAndRevealCard(card: Flashcard) = revealCard(card, typedArtikel)
 
     fun submitRating(card: Flashcard, rating: ReviewRating) {
         if (guessResult == ArtikelGuessResult.WRONG && (rating == ReviewRating.GOOD || rating == ReviewRating.EASY)) {
@@ -245,6 +255,7 @@ fun StudyView(
                         guessResult = guessResult,
                         availableRatings = availableRatingsForCurrentState,
                         onCheckAndReveal = { checkAndRevealCard(currentCard) },
+                        onSelectArtikel = { art -> revealCard(currentCard, art.rawValue) },
                         onSubmitRating = { rating -> submitRating(currentCard, rating) }
                     )
                 }
@@ -595,23 +606,37 @@ private fun ActiveCardSessionView(
     guessResult: ArtikelGuessResult,
     availableRatings: List<ReviewRating>,
     onCheckAndReveal: () -> Unit,
+    onSelectArtikel: (Artikel) -> Unit,
     onSubmitRating: (ReviewRating) -> Unit
 ) {
     val colors = LocalAppColors.current
 
-    val cardBorderColor = when {
-        !isRevealed -> colors.cardBorderSubtle
-        guessResult == ArtikelGuessResult.CORRECT -> colors.vividGreen.copy(alpha = 0.85f)
-        guessResult == ArtikelGuessResult.WRONG -> colors.vividRed.copy(alpha = 0.85f)
-        else -> colors.cardBorderSubtle
-    }
+    val cardBorderColor by animateColorAsState(
+        targetValue = when {
+            !isRevealed -> colors.cardBorderSubtle
+            guessResult == ArtikelGuessResult.CORRECT -> colors.vividGreen.copy(alpha = 0.85f)
+            guessResult == ArtikelGuessResult.WRONG -> colors.vividRed.copy(alpha = 0.85f)
+            else -> colors.cardBorderSubtle
+        },
+        animationSpec = tween(durationMillis = 180),
+        label = "cardBorderColor"
+    )
+    val cardBorderWidth by animateDpAsState(
+        targetValue = if (isRevealed) 3.5.dp else 1.dp,
+        animationSpec = tween(durationMillis = 180),
+        label = "cardBorderWidth"
+    )
 
-    val wordHighlightColor = when {
-        !isRevealed -> colors.primaryText
-        guessResult == ArtikelGuessResult.CORRECT -> colors.vividGreen
-        guessResult == ArtikelGuessResult.WRONG -> colors.vividRed
-        else -> colors.primaryText
-    }
+    val wordHighlightColor by animateColorAsState(
+        targetValue = when {
+            !isRevealed -> colors.primaryText
+            guessResult == ArtikelGuessResult.CORRECT -> colors.vividGreen
+            guessResult == ArtikelGuessResult.WRONG -> colors.vividRed
+            else -> colors.primaryText
+        },
+        animationSpec = tween(durationMillis = 180),
+        label = "wordHighlightColor"
+    )
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -627,7 +652,7 @@ private fun ActiveCardSessionView(
         Surface(
             color = colors.controlBackground,
             shape = RoundedCornerShape(22.dp),
-            border = BorderStroke(if (isRevealed) 3.5.dp else 1.dp, cardBorderColor),
+            border = BorderStroke(cardBorderWidth, cardBorderColor),
             shadowElevation = if (colors.isDark) (if (isRevealed) 12.dp else 6.dp) else (if (isRevealed) 6.dp else 2.dp),
             modifier = Modifier
                 .widthIn(max = 680.dp)
@@ -641,81 +666,67 @@ private fun ActiveCardSessionView(
                     .fillMaxWidth()
                     .padding(22.dp)
             ) {
-                // Top metadata bar inside card
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                // Top metadata bar inside card. The listen control is a separate fixed column so it
+                // stays pinned to the top-right on narrow phones instead of wrapping into the pills.
+                Row(
+                    verticalAlignment = Alignment.Top,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = card.stage.title.uppercase(Locale("tr", "TR")),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = card.stage.color,
-                        modifier = Modifier
-                            .background(card.stage.color.copy(alpha = 0.15f), CircleShape)
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = card.stage.title.uppercase(Locale("tr", "TR")),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = card.stage.color,
+                            modifier = Modifier
+                                .background(card.stage.color.copy(alpha = 0.15f), CircleShape)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .background(colors.secondaryText.copy(alpha = 0.12f), CircleShape)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = card.deckName,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.secondaryText,
+                                maxLines = 1
+                            )
+                        }
+
+                        if (card.totalReviews > 0) {
+                            Text(
+                                text = "Kolaylık: ${(card.easeFactor * 100).toInt()}% • Tekrar: ${card.totalReviews}",
+                                fontSize = MaterialTheme.typography.labelSmall.fontSize,
+                                color = colors.secondaryText,
+                                modifier = Modifier.align(Alignment.CenterVertically)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    ListenPill(
+                        onClick = {
+                            val spokenText = if (isRevealed) card.fullGermanTerm else card.word
+                            SpeechManager.speak(spokenText)
+                        }
                     )
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .background(colors.secondaryText.copy(alpha = 0.12f), CircleShape)
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Folder,
-                            contentDescription = null,
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = card.deckName,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.secondaryText,
-                            maxLines = 1
-                        )
-                    }
-
-                    if (card.totalReviews > 0) {
-                        Text(
-                            text = "Kolaylık: ${(card.easeFactor * 100).toInt()}% • Tekrar: ${card.totalReviews}",
-                            fontSize = MaterialTheme.typography.labelSmall.fontSize,
-                            color = colors.secondaryText,
-                            modifier = Modifier.align(Alignment.CenterVertically)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    // Dinle Button
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(colors.secondaryText.copy(alpha = 0.12f))
-                            .clickable {
-                                val spokenText = if (isRevealed) card.fullGermanTerm else card.word
-                                SpeechManager.speak(spokenText)
-                            }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = "Almanca telaffuzu dinle",
-                            tint = colors.primaryText,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Dinle",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Medium,
-                            color = colors.primaryText
-                        )
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -785,7 +796,7 @@ private fun ActiveCardSessionView(
                                                 .selectable(
                                                     selected = isSelected,
                                                     role = Role.RadioButton,
-                                                    onClick = { onTypedArtikelChange(art.rawValue) }
+                                                    onClick = { onSelectArtikel(art) }
                                                 )
                                         ) {
                                             Box(
@@ -964,33 +975,46 @@ private fun ActiveCardSessionView(
         // Bottom Action Area (Clean mobile buttons, no keyboard shortcuts)
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 84.dp)
         ) {
             if (!isRevealed) {
-                Button(
-                    onClick = onCheckAndReveal,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.accentBlue,
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .width(240.dp)
-                        .height(46.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Verified,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                // Article cards reveal on tap: the three article buttons above are the answer
+                // controls, so a second "Kontrol Et" step only adds friction. Article-less cards
+                // still need the explicit check because the answer is typed text.
+                if (card.isArticleless) {
+                    Button(
+                        onClick = onCheckAndReveal,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.accentBlue,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .widthIn(min = 200.dp, max = 280.dp)
+                            .heightIn(min = 48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Verified,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Kontrol Et",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else {
                     Text(
-                        text = "Kontrol Et",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold
+                        text = "Bir artikel seçin; cevap hemen gösterilir.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.secondaryText,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
             } else {
@@ -1034,6 +1058,40 @@ private fun ActiveCardSessionView(
     }
 }
 
+/**
+ * Small secondary action inside the card header. Kept at 48dp so the touch target follows the
+ * app-wide accessibility rule while still reading as a quiet pill next to the metadata.
+ */
+@Composable
+private fun ListenPill(onClick: () -> Unit) {
+    val colors = LocalAppColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(50))
+            .background(colors.secondaryText.copy(alpha = 0.12f))
+            .clickable(onClickLabel = "Almanca telaffuzu dinle", role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.VolumeUp,
+            contentDescription = null,
+            tint = colors.primaryText,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = "Dinle",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = colors.primaryText,
+            maxLines = 1
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WaitingForLearningCardView(
     pendingCard: Flashcard,
@@ -1050,7 +1108,10 @@ private fun WaitingForLearningCardView(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier
             .fillMaxSize()
-            .padding(28.dp)
+            // Scrollable: on a 360dp phone the timer, copy and both actions can exceed the
+            // available height once the bottom navigation bar is subtracted.
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 24.dp)
     ) {
         Icon(
             imageVector = Icons.Default.Timer,
@@ -1065,7 +1126,8 @@ private fun WaitingForLearningCardView(
             text = "Öğrenme Kartı Zamanlayıcısı",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
-            color = colors.primaryText
+            color = colors.primaryText,
+            textAlign = TextAlign.Center
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -1093,9 +1155,10 @@ private fun WaitingForLearningCardView(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
             Button(
                 onClick = { store.forcePullNextLearningCard() },
@@ -1103,11 +1166,16 @@ private fun WaitingForLearningCardView(
                     containerColor = colors.accentOrange,
                     contentColor = Color.White
                 ),
-                shape = RoundedCornerShape(10.dp)
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.heightIn(min = 48.dp)
             ) {
                 Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Süreyi Beklemeden Şimdi Çalış", fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = "Süreyi Beklemeden Şimdi Çalış",
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center
+                )
             }
 
             if (store.filteredPoolCards.any { it.stage == com.artikelmeister.android.CardStage.NEW } && store.remainingNewToday == 0) {
@@ -1115,11 +1183,16 @@ private fun WaitingForLearningCardView(
                     onClick = {
                         store.updateSettings { it.copy(dailyNewCardLimit = it.dailyNewCardLimit + 10) }
                     },
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.heightIn(min = 48.dp)
                 ) {
                     Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("+10 Yeni Kelime Aç", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = "+10 Yeni Kelime Aç",
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
         }

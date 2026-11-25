@@ -9,6 +9,7 @@ struct AIGeneratorSheet: View {
     @State private var selectedLevel: CEFRLevel = .a1
     @State private var wordCount: Int = 20
     @State private var topicHint: String = ""
+    @State private var includeArticleless = false
     @State private var targetDeckName: String = "A1 Seviyesi"
     @State private var hasCustomDeckName: Bool = false
     @State private var showAuthConfig: Bool = false
@@ -404,6 +405,21 @@ struct AIGeneratorSheet: View {
                             .tint(wordCount == preset ? .purple : .secondary)
                         }
                     }
+
+                    Toggle(isOn: $includeArticleless) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Artikelsiz kelimeleri de üret")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Fiiller, sıfatlar ve kalıp ifadeler '-' olarak eklenir; çalışırken Türkçe anlam yazılır.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(NSColor.textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
 
                 Divider()
@@ -464,14 +480,15 @@ struct AIGeneratorSheet: View {
 
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(newlyAddedWords) { item in
-                        let art = Artikel.parse(item.artikel) ?? .der
+                        let art = Artikel.parse(item.artikel)
+                        let artColor = art?.color ?? AppPalette.articleNone
                         HStack(spacing: 12) {
-                            Text(art.rawValue)
+                            Text(art?.rawValue ?? ArtikelFilter.none)
                                 .font(.subheadline.bold())
-                                .foregroundColor(art.color)
+                                .foregroundColor(artColor)
                                 .frame(width: 44)
                                 .padding(.vertical, 2)
-                                .background(art.badgeBackground)
+                                .background(artColor.opacity(0.15))
                                 .clipShape(RoundedRectangle(cornerRadius: 5))
 
                             Text(item.word)
@@ -514,6 +531,7 @@ struct AIGeneratorSheet: View {
                 level: selectedLevel,
                 targetCount: wordCount,
                 topicHint: topicHint,
+                includeArticleless: includeArticleless,
                 existingCards: store.cards,
                 authManager: authManager
             ) { status in
@@ -532,6 +550,14 @@ struct AIGeneratorSheet: View {
             for item in generated {
                 if let art = Artikel.parse(item.artikel) {
                     if store.addCard(artikel: art, word: item.word, meaning: item.meaning, deckName: resolvedDeck) {
+                        addedItems.append(item)
+                    }
+                } else if includeArticleless &&
+                            GeminiVocabularyGenerator.isArticlelessMarker(item.artikel) &&
+                            !item.meaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // "-" = article-less (verb/adjective/phrase). Its meaning is the typed
+                    // answer during study, so only non-blank meanings are accepted.
+                    if store.addCard(artikel: nil, word: item.word, meaning: item.meaning, deckName: resolvedDeck) {
                         addedItems.append(item)
                     }
                 }

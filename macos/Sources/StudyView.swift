@@ -92,7 +92,8 @@ struct StudyView: View {
 
     private func focusArtikelInputIfNeeded() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
-            if !isRevealed && currentCard != nil {
+            // Only article-less cards have a text field now; article cards use tap buttons.
+            if !isRevealed && currentCard?.isArticleless == true {
                 isInputFocused = true
             }
         }
@@ -311,45 +312,73 @@ struct StudyView: View {
 
                         Spacer(minLength: 4)
 
-                        // Center Content: Front (Input Box + Word) vs Back (Green/Red Result)
+                        // Center Content: Front (article buttons / typed meaning) vs Back (result)
                         if !isRevealed {
                             VStack(spacing: 16) {
-                                Text(card.isArticleless
-                                     ? "Kelimenin Türkçe anlamını yazıp Enter'a basın:"
-                                     : "Kelimenin artikelini (der / die / das) boşluğa yazıp Enter'a basın:")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
+                                if card.isArticleless {
+                                    Text("Kelimenin Türkçe anlamını yazıp Enter'a basın:")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
 
-                                HStack(alignment: .center, spacing: 14) {
-                                    TextField(card.isArticleless ? "anlam..." : "artikel...", text: $typedArtikel)
-                                        .textFieldStyle(.plain)
-                                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                                        .multilineTextAlignment(.center)
-                                        .frame(width: card.isArticleless ? 240 : 132, height: 54)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .fill(Color(NSColor.textBackgroundColor))
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .stroke(Color.accentColor.opacity(0.75), lineWidth: 2.5)
-                                        )
-                                        .focused($isInputFocused)
-                                        .onSubmit {
-                                            checkAndRevealCard(card)
+                                    HStack(alignment: .center, spacing: 14) {
+                                        TextField("anlam...", text: $typedArtikel)
+                                            .textFieldStyle(.plain)
+                                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                                            .multilineTextAlignment(.center)
+                                            .frame(width: 240, height: 54)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .fill(Color(NSColor.textBackgroundColor))
+                                            )
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .stroke(Color.accentColor.opacity(0.75), lineWidth: 2.5)
+                                            )
+                                            .focused($isInputFocused)
+                                            .onSubmit {
+                                                checkAndRevealCard(card)
+                                            }
+
+                                        Text(card.word)
+                                            .font(.system(size: 42, weight: .bold, design: .rounded))
+                                            .foregroundColor(.primary)
+                                            .lineLimit(2)
+                                            .minimumScaleFactor(0.45)
+                                            .multilineTextAlignment(.leading)
+                                            .textSelection(.enabled)
+                                    }
+                                    .padding(.horizontal, 8)
+                                } else {
+                                    // Article cards reveal on tap. One tap is the whole answer:
+                                    // no separate "Kontrol Et" step.
+                                    Text("Doğru artikeli seçin:")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+
+                                    HStack(spacing: 12) {
+                                        ForEach(Artikel.allCases) { art in
+                                            Button {
+                                                selectArtikelAndReveal(art, card: card)
+                                            } label: {
+                                                Text(art.rawValue)
+                                            }
+                                            .buttonStyle(ArticleGuessButtonStyle(color: art.color))
                                         }
+                                    }
 
                                     Text(card.word)
                                         .font(.system(size: 42, weight: .bold, design: .rounded))
                                         .foregroundColor(.primary)
                                         .lineLimit(2)
                                         .minimumScaleFactor(0.45)
-                                        .multilineTextAlignment(.leading)
+                                        .multilineTextAlignment(.center)
                                         .textSelection(.enabled)
+                                        .padding(.horizontal, 8)
                                 }
-                                .padding(.horizontal, 8)
 
                                 if store.settings.showMeaningOnFront && !card.meaning.isEmpty && !card.isArticleless {
                                     Text(card.meaning)
@@ -441,21 +470,27 @@ struct StudyView: View {
                 // Bottom Action Area
                 VStack(spacing: 8) {
                     if !isRevealed {
-                        Button {
-                            checkAndRevealCard(card)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "checkmark.seal.fill")
-                                Text("Kontrol Et")
-                                    .font(.headline)
-                                Text("(Enter)")
-                                    .font(.subheadline)
-                                    .opacity(0.75)
+                        if card.isArticleless {
+                            Button {
+                                checkAndRevealCard(card)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark.seal.fill")
+                                    Text("Kontrol Et")
+                                        .font(.headline)
+                                    Text("(Enter)")
+                                        .font(.subheadline)
+                                        .opacity(0.75)
+                                }
+                                .frame(width: 240, height: 38)
                             }
-                            .frame(width: 240, height: 38)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                        } else {
+                            Text("Bir artikel seçin; cevap hemen açılır.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
                     } else {
                         if guessResult == .wrong {
                             Text("Yanlış cevaplandığı için sadece 'Tekrar (1)' veya 'Zor (2)' seçilebilir:")
@@ -676,11 +711,21 @@ struct StudyView: View {
 
     // MARK: - Actions & Keyboard Shortcuts
 
-    private func checkAndRevealCard(_ card: Flashcard) {
+    private func selectArtikelAndReveal(_ artikel: Artikel, card: Flashcard) {
+        checkAndRevealCard(card, answer: artikel.rawValue)
+    }
+
+    /// [answer] lets the article buttons pass their value directly. Reading `typedArtikel` right
+    /// after setting it would race the @State update and could grade the previous answer.
+    private func checkAndRevealCard(_ card: Flashcard, answer: String? = nil) {
         guard !isRevealed else { return }
+        let value = answer ?? typedArtikel
+        if let answer {
+            typedArtikel = answer
+        }
         isInputFocused = false
 
-        if AnswerChecker.isCorrect(card: card, typed: typedArtikel) {
+        if AnswerChecker.isCorrect(card: card, typed: value) {
             guessResult = .correct
         } else {
             guessResult = .wrong
@@ -737,8 +782,12 @@ struct StudyView: View {
 
             if !isRevealed {
                 if event.keyCode == 36 || event.keyCode == 76 {
-                    checkAndRevealCard(card)
-                    return nil
+                    // Enter only submits the typed meaning; article cards use the tap buttons.
+                    if card.isArticleless {
+                        checkAndRevealCard(card)
+                        return nil
+                    }
+                    return event
                 }
                 return event
             }
@@ -780,6 +829,28 @@ struct StudyView: View {
 }
 
 // MARK: - Subcomponents
+
+/// Article answer button: tinted outline at rest, solid on press with a restrained 3% scale
+/// (the reveal itself is the main animation).
+private struct ArticleGuessButtonStyle: ButtonStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 21, weight: .bold, design: .rounded))
+            .foregroundColor(configuration.isPressed ? .white : color)
+            .frame(width: 104, height: 46)
+            .background(configuration.isPressed ? color : color.opacity(0.12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(color.opacity(0.55), lineWidth: 1.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
 
 private struct CounterPill: View {
     let title: String

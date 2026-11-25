@@ -121,75 +121,85 @@ struct WordListView: View {
                 }
 
                 // Row 2: Quick manual word entry bar (clean, no label overflow)
-                HStack(spacing: 8) {
-                    Picker("", selection: $newArtikel) {
-                        ForEach(Artikel.allCases) { art in
-                            Text(art.rawValue).tag(Artikel?.some(art))
-                        }
-                        Text(ArtikelFilter.none).tag(Artikel?.none)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    // Four segments (der/die/das/-) need more than the old 140pt; keep their natural
-                    // width so they never draw over the German word field.
-                    .frame(width: 176)
-                    .fixedSize()
-                    .layoutPriority(1)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        ArtikelSegmentedControl(selection: $newArtikel)
+                            .frame(width: 190)
 
-                    TextField("Almanca kelime (örn: Tisch)", text: $newWord)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 140, maxWidth: 200)
+                        TextField("Almanca kelime (örn: Tisch)", text: $newWord)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minWidth: 140, maxWidth: 200)
 
-                    TextField("Türkçe anlamı / açıklama", text: $newMeaning)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 140)
+                        TextField("Türkçe anlamı / açıklama", text: $newMeaning)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minWidth: 140)
 
-                    // Deck selector menu for new word with "+ Yeni Deste Ekle..." at bottom
-                    Menu {
-                        ForEach(store.allDeckNames, id: \.self) { deck in
-                            Button {
-                                newDeckName = deck
-                            } label: {
-                                HStack {
-                                    Text(deck)
-                                    if newDeckName == deck {
-                                        Image(systemName: "checkmark")
+                        // Deck selector menu for new word with "+ Yeni Deste Ekle..." at bottom
+                        Menu {
+                            ForEach(store.allDeckNames, id: \.self) { deck in
+                                Button {
+                                    newDeckName = deck
+                                } label: {
+                                    HStack {
+                                        Text(deck)
+                                        if newDeckName == deck {
+                                            Image(systemName: "checkmark")
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Divider()
-                        Button {
-                            assignNewDeckToEntryForm = true
-                            showNewDeckSheet = true
+                            Divider()
+                            Button {
+                                assignNewDeckToEntryForm = true
+                                showNewDeckSheet = true
+                            } label: {
+                                Label("Yeni Deste Ekle...", systemImage: "folder.badge.plus")
+                            }
                         } label: {
-                            Label("Yeni Deste Ekle...", systemImage: "folder.badge.plus")
+                            HStack(spacing: 4) {
+                                Image(systemName: "folder.fill")
+                                    .foregroundColor(.accentColor)
+                                Text(newDeckName)
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 115, alignment: .leading)
                         }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "folder.fill")
-                                .foregroundColor(.accentColor)
-                            Text(newDeckName)
+                        .menuStyle(.borderedButton)
+                        .fixedSize()
+                        .help("Eklenecek kelimenin destesini seçin")
+
+                        Button {
+                            if store.addCard(artikel: newArtikel, word: newWord, meaning: newMeaning, deckName: newDeckName) {
+                                newWord = ""
+                                newMeaning = ""
+                            }
+                        } label: {
+                            Label("Ekle", systemImage: "plus")
                                 .lineLimit(1)
                         }
-                        .frame(width: 115, alignment: .leading)
+                        .buttonStyle(.borderedProminent)
+                        .fixedSize()
+                        .disabled(
+                            newWord.trimmingCharacters(in: .whitespaces).isEmpty ||
+                                (newArtikel == nil && newMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        )
                     }
-                    .menuStyle(.borderedButton)
-                    .fixedSize()
-                    .help("Eklenecek kelimenin destesini seçin")
 
-                    Button {
-                        if store.addCard(artikel: newArtikel, word: newWord, meaning: newMeaning, deckName: newDeckName) {
-                            newWord = ""
-                            newMeaning = ""
-                        }
-                    } label: {
-                        Label("Ekle", systemImage: "plus")
-                            .lineLimit(1)
+                    // Article-less cards are studied by typing the Turkish meaning. Without one
+                    // the card can never be answered, so the form explains the requirement
+                    // instead of silently creating an unusable card.
+                    if newArtikel == nil {
+                        Label(
+                            "Artikelsiz kelimelerde Türkçe anlam zorunludur; çalışırken bu anlamı yazacaksın.",
+                            systemImage: newMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? "exclamationmark.circle.fill"
+                                : "info.circle"
+                        )
+                        .font(.caption2)
+                        .foregroundColor(
+                            newMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .orange : .secondary
+                        )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .fixedSize()
-                    .disabled(newWord.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
 
                 // Row 3: Decks Bar with "+ Yeni Deste Ekle" button right alongside decks
@@ -582,6 +592,54 @@ private struct DeckFilterChip: View {
     }
 }
 
+// MARK: - Stable four-segment article picker
+
+/// der / die / das / "-" picker with fixed geometry.
+///
+/// The native `Picker(.segmented)` derived its intrinsic width from the selected label and the
+/// previous `.frame + .fixedSize()` combination fought that, so every tap made the whole box grow
+/// and shrink. This control gives every segment `maxWidth: .infinity` inside one fixed frame and
+/// only animates the selection colour, never the layout.
+struct ArtikelSegmentedControl: View {
+    @Binding var selection: Artikel?
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Artikel.allCases) { art in
+                segment(art, label: art.rawValue, color: art.color)
+            }
+            segment(nil, label: ArtikelFilter.none, color: AppPalette.articleNone)
+        }
+        .padding(3)
+        .frame(height: 32)
+        .background(Color(NSColor.textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+        )
+        .animation(.easeOut(duration: 0.12), value: selection)
+    }
+
+    private func segment(_ art: Artikel?, label: String, color: Color) -> some View {
+        let isSelected = selection == art
+        return Button {
+            selection = art
+        } label: {
+            Text(label)
+                .font(.system(size: 12, weight: .bold))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(isSelected ? color : Color.clear)
+                .foregroundColor(isSelected ? .white : color)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(art == nil ? "Artikelsiz" : "\(art!.rawValue) \(art!.grammaticalLabel)")
+        .help(art == nil ? "Artikelsiz (-)" : art!.grammaticalLabel)
+    }
+}
+
 // MARK: - New Deck Creation Modal Sheet
 
 struct NewDeckSheet: View {
@@ -776,61 +834,80 @@ struct EditWordSheet: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Artikel:")
-                    .font(.caption.weight(.semibold))
-                Picker("Artikel", selection: $editArtikel) {
-                    ForEach(Artikel.allCases) { art in
-                        Text("\(art.rawValue) (\(art.grammaticalLabel))").tag(Artikel?.some(art))
+            // Fixed-height scrollable body: the old auto-sized sheet grew/shrank whenever the
+            // picker or the inline validation line changed, which made resizing feel broken.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Artikel:")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Text(editArtikel == nil ? "Artikelsiz (-)" : editArtikel!.grammaticalLabel)
+                            .font(.caption)
+                            .foregroundColor(editArtikel == nil ? AppPalette.articleNone : editArtikel!.color)
                     }
-                    Text(ArtikelFilter.none).tag(Artikel?.none)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
 
-                Text("Almanca Kelime:")
-                    .font(.caption.weight(.semibold))
-                TextField("Almanca kelime", text: $editWord)
-                    .textFieldStyle(.roundedBorder)
+                    // Short labels keep the control readable in a 280pt row; long
+                    // "der (Maskulin (Eril))" segments were squeezing and clipping the sheet.
+                    ArtikelSegmentedControl(selection: $editArtikel)
+                        .frame(width: 280)
 
-                Text("Türkçe Anlamı / Açıklama:")
-                    .font(.caption.weight(.semibold))
-                TextField("Türkçe anlamı", text: $editMeaning)
-                    .textFieldStyle(.roundedBorder)
+                    Text("Almanca Kelime:")
+                        .font(.caption.weight(.semibold))
+                    TextField("Almanca kelime", text: $editWord)
+                        .textFieldStyle(.roundedBorder)
 
-                Text("Deste / Kategori:")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    Menu {
-                        ForEach(store.allDeckNames, id: \.self) { existingDeck in
-                            Button(existingDeck) {
-                                editDeckName = existingDeck
+                    Text("Türkçe Anlamı / Açıklama:")
+                        .font(.caption.weight(.semibold))
+                    TextField("Türkçe anlamı", text: $editMeaning)
+                        .textFieldStyle(.roundedBorder)
+
+                    // Reserved single line: showing/hiding the warning must not resize the sheet.
+                    Text(
+                        editArtikel == nil && editMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? "Artikelsiz kelimede Türkçe anlam zorunludur."
+                            : " "
+                    )
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .frame(height: 16, alignment: .leading)
+
+                    Text("Deste / Kategori:")
+                        .font(.caption.weight(.semibold))
+                    HStack(spacing: 8) {
+                        Menu {
+                            ForEach(store.allDeckNames, id: \.self) { existingDeck in
+                                Button(existingDeck) {
+                                    editDeckName = existingDeck
+                                }
+                            }
+                            Divider()
+                            Button {
+                                showNewDeckSheet = true
+                            } label: {
+                                Label("Yeni Deste Ekle...", systemImage: "folder.badge.plus")
+                            }
+                        } label: {
+                            HStack {
+                                Image(systemName: "folder.fill")
+                                    .foregroundColor(.accentColor)
+                                Text(editDeckName)
+                                Spacer()
                             }
                         }
-                        Divider()
+                        .menuStyle(.borderedButton)
+
                         Button {
                             showNewDeckSheet = true
                         } label: {
-                            Label("Yeni Deste Ekle...", systemImage: "folder.badge.plus")
+                            Label("Yeni Deste", systemImage: "plus")
                         }
-                    } label: {
-                        HStack {
-                            Image(systemName: "folder.fill")
-                                .foregroundColor(.accentColor)
-                            Text(editDeckName)
-                            Spacer()
-                        }
+                        .buttonStyle(.bordered)
                     }
-                    .menuStyle(.borderedButton)
-
-                    Button {
-                        showNewDeckSheet = true
-                    } label: {
-                        Label("Yeni Deste", systemImage: "plus")
-                    }
-                    .buttonStyle(.bordered)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: 370)
 
             Divider()
 
@@ -856,11 +933,14 @@ struct EditWordSheet: View {
                     Label("Değişiklikleri Kaydet", systemImage: "checkmark.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(editWord.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(
+                    editWord.trimmingCharacters(in: .whitespaces).isEmpty ||
+                        (editArtikel == nil && editMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                )
             }
         }
         .padding(22)
-        .frame(width: 440)
+        .frame(width: 520, height: 560)
         .sheet(isPresented: $showNewDeckSheet) {
             NewDeckSheet { created in
                 editDeckName = created

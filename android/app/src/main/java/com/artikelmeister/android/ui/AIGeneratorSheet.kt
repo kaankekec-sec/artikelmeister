@@ -59,6 +59,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -88,6 +90,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import com.artikelmeister.android.Artikel
+import com.artikelmeister.android.ArtikelFilter
 import com.artikelmeister.android.CEFRLevel
 import com.artikelmeister.android.DeckStore
 import com.artikelmeister.android.GeminiScopeException
@@ -114,6 +117,7 @@ fun AIGeneratorDialog(
     var selectedLevel by remember { mutableStateOf(CEFRLevel.A1) }
     var wordCount by remember { mutableIntStateOf(20) }
     var topicHint by remember { mutableStateOf("") }
+    var includeArticleless by remember { mutableStateOf(false) }
     var targetDeckName by remember { mutableStateOf("A1 Seviyesi") }
     var hasCustomDeckName by remember { mutableStateOf(false) }
     var showAuthConfig by remember { mutableStateOf(!authManager.isAuthorized) }
@@ -156,6 +160,7 @@ fun AIGeneratorDialog(
                     level = selectedLevel,
                     targetCount = wordCount,
                     topicHint = topicHint,
+                    includeArticleless = includeArticleless,
                     existingCards = store.cards,
                     authManager = authManager,
                     onProgress = { status ->
@@ -171,6 +176,12 @@ fun AIGeneratorDialog(
                     val art = Artikel.parse(item.artikel)
                     if (art != null) {
                         if (store.addCard(art, item.word, item.meaning, resolvedDeck)) {
+                            addedItems.add(item)
+                        }
+                    } else if (includeArticleless && item.meaning.isNotBlank()) {
+                        // "-" = article-less (verb/adjective/phrase). Its Turkish meaning is the
+                        // answer typed during study, so the generator only returns non-blank ones.
+                        if (store.addCard(null, item.word, item.meaning, resolvedDeck)) {
                             addedItems.add(item)
                         }
                     }
@@ -710,6 +721,43 @@ fun AIGeneratorDialog(
                                 }
                             }
 
+                            // Article-less words (verbs, adjectives, phrases) are optional because
+                            // they change the study interaction: the answer is the typed meaning.
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(colors.textBackground)
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Artikelsiz kelimeleri de üret",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.primaryText
+                                    )
+                                    Text(
+                                        text = "Fiiller, sıfatlar ve kalıp ifadeler '-' olarak eklenir; çalışırken Türkçe anlamı yazılır.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.secondaryText
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Switch(
+                                    checked = includeArticleless,
+                                    onCheckedChange = { includeArticleless = it },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = colors.onAccent,
+                                        checkedTrackColor = colors.accentPurple,
+                                        uncheckedThumbColor = colors.secondaryText,
+                                        uncheckedTrackColor = colors.secondaryText.copy(alpha = 0.25f),
+                                        uncheckedBorderColor = colors.cardBorderSubtle
+                                    )
+                                )
+                            }
+
                             HorizontalDivider(color = colors.cardBorderSubtle)
 
                             // Optional Theme / Topic & Target Deck
@@ -828,7 +876,8 @@ fun AIGeneratorDialog(
                                     color = colors.secondaryText
                                 )
                                 newlyAddedWords.forEach { item ->
-                                    val art = Artikel.parse(item.artikel) ?: Artikel.DER
+                                    val art = Artikel.parse(item.artikel)
+                                    val artColor = colors.artikelColor(art)
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -838,14 +887,14 @@ fun AIGeneratorDialog(
                                             contentAlignment = Alignment.Center,
                                             modifier = Modifier
                                                 .width(44.dp)
-                                                .background(art.badgeBackground, RoundedCornerShape(5.dp))
+                                                .background(artColor.copy(alpha = 0.15f), RoundedCornerShape(5.dp))
                                                 .padding(vertical = 2.dp)
                                         ) {
                                             Text(
-                                                text = art.rawValue,
+                                                text = art?.rawValue ?: ArtikelFilter.NONE,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.Bold,
-                                                color = art.themeColor()
+                                                color = artColor
                                             )
                                         }
                                         Text(

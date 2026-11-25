@@ -14,6 +14,7 @@ struct StatsView: View {
     private var derCount: Int { store.cards.filter { $0.artikel == .der }.count }
     private var dieCount: Int { store.cards.filter { $0.artikel == .die }.count }
     private var dasCount: Int { store.cards.filter { $0.artikel == .das }.count }
+    private var noneCount: Int { store.cards.filter { $0.isArticleless }.count }
 
     private var activeStudyDaysCount: Int {
         store.studyHistory.values.filter { $0.totalAnswersCount > 0 }.count
@@ -151,6 +152,10 @@ struct StatsView: View {
                         DistributionRow(label: "der (Eril)", count: derCount, total: max(1, totalCards), color: Artikel.der.color)
                         DistributionRow(label: "die (Dişil)", count: dieCount, total: max(1, totalCards), color: Artikel.die.color)
                         DistributionRow(label: "das (Nötr)", count: dasCount, total: max(1, totalCards), color: Artikel.das.color)
+                        // Total includes article-less words, so their share needs its own bar.
+                        if noneCount > 0 {
+                            DistributionRow(label: "Artikelsiz (-)", count: noneCount, total: max(1, totalCards), color: AppPalette.articleNone)
+                        }
                     }
                     .padding(12)
                 }
@@ -420,7 +425,7 @@ struct SettingsView: View {
                                     store.saveSettings()
                                 }
                             ),
-                            in: 1...200,
+                            in: 1...500,
                             step: 1
                         )
 
@@ -460,7 +465,7 @@ struct SettingsView: View {
                                     store.saveSettings()
                                 }
                             ),
-                            in: 10...500,
+                            in: 10...1000,
                             step: 10
                         )
                     }

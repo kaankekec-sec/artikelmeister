@@ -727,6 +727,9 @@ class DeckStore(private val appContext: Context) {
         val cleanMeaning = meaning.trim()
         val cleanDeck = deckName.trim().ifEmpty { "Genel" }
         if (cleanWord.isEmpty()) return false
+        // Article-less cards are answered by typing the meaning; a card without one can never
+        // be answered correctly, so the data layer rejects it as well as the forms.
+        if (artikel == null && cleanMeaning.isEmpty()) return false
         val now = System.currentTimeMillis()
 
         val newKey = Flashcard.keyFor(artikel, cleanWord)
@@ -782,6 +785,8 @@ class DeckStore(private val appContext: Context) {
         val cleanWord = word.trim()
         if (cleanWord.isEmpty()) return
         val cleanMeaning = meaning.trim()
+        // Same invariant as addCard: article-less cards need the typed Turkish answer.
+        if (artikel == null && cleanMeaning.isEmpty()) return
         val cleanDeck = deckName.trim().ifEmpty { "Genel" }
         val now = System.currentTimeMillis()
 

@@ -748,6 +748,9 @@ final class DeckStore: ObservableObject {
             ? "Genel"
             : deckName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanWord.isEmpty else { return false }
+        // Article-less cards are answered by typing the meaning; a card without one can never
+        // be answered correctly, so the data layer rejects it as well as the forms.
+        guard !(artikel == nil && cleanMeaning.isEmpty) else { return false }
 
         let newKey = Flashcard.keyFor(artikel: artikel, word: cleanWord)
         if let existingIdx = cards.firstIndex(where: { $0.syncKey == newKey }) {
@@ -784,6 +787,8 @@ final class DeckStore: ObservableObject {
         let cleanWord = word.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanWord.isEmpty else { return }
         let cleanMeaning = meaning.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Same invariant as addCard: article-less cards need the typed Turkish answer.
+        guard !(artikel == nil && cleanMeaning.isEmpty) else { return }
         let cleanDeck = deckName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Genel"
             : deckName.trimmingCharacters(in: .whitespacesAndNewlines)

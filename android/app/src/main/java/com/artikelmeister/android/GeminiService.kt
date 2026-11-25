@@ -1042,6 +1042,7 @@ object GeminiVocabularyGenerator {
         level: CEFRLevel,
         targetCount: Int,
         topicHint: String = "",
+        includeArticleless: Boolean = false,
         existingCards: List<Flashcard>,
         authManager: GeminiAuthManager,
         onProgress: (String) -> Unit
@@ -1071,6 +1072,7 @@ object GeminiVocabularyGenerator {
                     level = level,
                     count = chunkSize,
                     topicHint = topicHint,
+                    includeArticleless = includeArticleless,
                     excludedWords = excludedListForPrompt,
                     authManager = authManager,
                     allowModelAutoDiscoveryRetry = true
@@ -1079,12 +1081,22 @@ object GeminiVocabularyGenerator {
                 var batchAdded = 0
                 for (item in batch) {
                     if (collected.size >= clampedCount) break
-                    val parsedArtikel = Artikel.parse(item.artikel) ?: continue
+                    val parsedArtikel = Artikel.parse(item.artikel)
+                    val articlelessItem = includeArticleless && parsedArtikel == null && isArticlelessMarker(item.artikel)
+                    if (parsedArtikel == null && !articlelessItem) continue
+
                     val cleanWord = item.word.trim()
                     val cleanMeaning = item.meaning.trim()
                     if (cleanWord.isEmpty()) continue
+                    // Article-less cards are answered by typing the meaning, so an empty meaning
+                    // would create a card that can never be answered correctly.
+                    if (articlelessItem && cleanMeaning.isEmpty()) continue
 
-                    val normalizedWord = stripLeadingArtikelIfPresent(cleanWord)
+                    val normalizedWord = if (parsedArtikel != null) {
+                        stripLeadingArtikelIfPresent(cleanWord)
+                    } else {
+                        cleanWord
+                    }
                     if (normalizedWord.isEmpty()) continue
 
                     val lowerKey = normalizedWord.lowercase(Locale.ROOT)
@@ -1093,7 +1105,7 @@ object GeminiVocabularyGenerator {
                         excludedListForPrompt.add(normalizedWord)
                         collected.add(
                             GeneratedWordItem(
-                                artikel = parsedArtikel.rawValue,
+                                artikel = parsedArtikel?.rawValue ?: ArtikelFilter.NONE,
                                 word = normalizedWord,
                                 meaning = cleanMeaning
                             )
@@ -1137,10 +1149,17 @@ object GeminiVocabularyGenerator {
         return rawWord
     }
 
+    /** The model may express "no article" as "-", blank or a word such as "artikelsiz". */
+    private fun isArticlelessMarker(raw: String): Boolean {
+        val s = raw.trim().lowercase(Locale.ROOT)
+        return s.isEmpty() || s == ArtikelFilter.NONE || s == "none" || s == "artikelsiz" || s == "kein"
+    }
+
     private suspend fun requestBatchFromGemini(
         level: CEFRLevel,
         count: Int,
         topicHint: String,
+        includeArticleless: Boolean,
         excludedWords: List<String>,
         authManager: GeminiAuthManager,
         allowModelAutoDiscoveryRetry: Boolean
@@ -1161,16 +1180,36 @@ object GeminiVocabularyGenerator {
             "Öncelikli konu/tema: $topicHint"
         }
 
-        val prompt = """
-            Uzman Almanca öğretmenisin. CEFR **${level.rawValue}** seviyesine uygun, artikeli yalnızca "der", "die" veya "das" olan tam **$count** adet tekil Almanca isim ve Türkçe karşılığını üret.
-            KURALLAR:
-            1. "artikel": "der", "die" veya "das"
-            2. "word": Sadece ismin kendisi (baş harfi büyük, artikelsiz, örn: "Tisch")
-            3. "meaning": Kısa ve net Türkçe anlamı
-            4. $topicInstruction
-            5. Aşağıdaki mevcut kelimelerden HİÇBİRİNİ kullanma:
-            $exclusionText
-        """.trimIndent()
+        val prompt = if (includeArticleless) {
+            """
+                Uzman Almanca öğretmenisin. CEFR **${level.rawValue}** seviyesine uygun, tam **$count** adet Almanca kelime ve Türkçe karşılığını üret.
+                Kelimelerin çoğu isim olsun; ayrıca fiil, sıfat, zarf veya kalıp ifade gibi artikelsiz kelimelere de yer ver (yaklaşık üçte biri).
+                KURALLAR:
+                1. İsimlerde "artikel": "der", "die" veya "das"; artikelsiz kelimelerde "artikel": "-".
+                2. "word": İsimlerde sadece ismin kendisi (baş harfi büyük, örn: "Tisch"); fiillerde mastar hali (örn: "laufen"); sıfatlarda yalın hali.
+                3. "meaning": Kısa ve net Türkçe anlamı. Artikel almayan kelimelerde anlam ZORUNLU.
+                4. $topicInstruction
+                5. Aşağıdaki mevcut kelimelerden HİÇBİRİNİ kullanma:
+                $exclusionText
+            """.trimIndent()
+        } else {
+            """
+                Uzman Almanca öğretmenisin. CEFR **${level.rawValue}** seviyesine uygun, artikeli yalnızca "der", "die" veya "das" olan tam **$count** adet tekil Almanca isim ve Türkçe karşılığını üret.
+                KURALLAR:
+                1. "artikel": "der", "die" veya "das"
+                2. "word": Sadece ismin kendisi (baş harfi büyük, artikelsiz, örn: "Tisch")
+                3. "meaning": Kısa ve net Türkçe anlamı
+                4. $topicInstruction
+                5. Aşağıdaki mevcut kelimelerden HİÇBİRİNİ kullanma:
+                $exclusionText
+            """.trimIndent()
+        }
+
+        val artikelValues = if (includeArticleless) {
+            listOf("der", "die", "das", ArtikelFilter.NONE)
+        } else {
+            listOf("der", "die", "das")
+        }
 
         fun buildPayloadJson(includeThinkingConfig: Boolean): String {
             val genConfig = JSONObject().apply {
@@ -1183,7 +1222,14 @@ object GeminiVocabularyGenerator {
                     "responseSchema",
                     JSONObject().apply {
                         put("type", "ARRAY")
-                        put("description", "German nouns with article and Turkish meaning")
+                        put(
+                            "description",
+                            if (includeArticleless) {
+                                "German words with article or '-' and Turkish meaning"
+                            } else {
+                                "German nouns with article and Turkish meaning"
+                            }
+                        )
                         put(
                             "items",
                             JSONObject().apply {
@@ -1195,7 +1241,7 @@ object GeminiVocabularyGenerator {
                                             "artikel",
                                             JSONObject().apply {
                                                 put("type", "STRING")
-                                                put("enum", JSONArray(listOf("der", "die", "das")))
+                                                put("enum", JSONArray(artikelValues))
                                             }
                                         )
                                         put("word", JSONObject().apply { put("type", "STRING") })
@@ -1313,6 +1359,7 @@ object GeminiVocabularyGenerator {
                     level = level,
                     count = count,
                     topicHint = topicHint,
+                    includeArticleless = includeArticleless,
                     excludedWords = excludedWords,
                     authManager = authManager,
                     allowModelAutoDiscoveryRetry = false
