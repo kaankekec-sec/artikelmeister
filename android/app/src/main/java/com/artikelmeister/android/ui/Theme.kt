@@ -2,9 +2,6 @@ package com.artikelmeister.android.ui
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -51,25 +48,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.artikelmeister.android.Artikel
+import com.artikelmeister.android.CardStage
 import com.artikelmeister.android.DeckStore
+import com.artikelmeister.android.ReviewRating
 
 // =====================================================================================
 // Color tokens
 // =====================================================================================
 
-/**
- * App-wide color tokens. Existing fields are kept (StudyView & others read them);
- * new semantic + article tokens were added with defaults so callers keep compiling.
- *
- * Design note — article vs. feedback colors:
- *  The old palette painted `die` red and `das` green, i.e. exactly the same hues as
- *  "wrong" and "correct" feedback. Articles now use blue / magenta / gold, which are
- *  clearly separated from success-green and error-red in both light and dark themes.
- *  `vividGreen` / `vividRed` remain as aliases of `success` / `error` for old call sites.
- */
+/** App-wide colors. Pair a solid fill with its on-color, or a badge fill with its role color. */
 @Immutable
 data class ArtikelMeisterColors(
-    val isDark: Boolean = true,
+    val isDark: Boolean,
     val windowBackground: Color,
     val controlBackground: Color,
     val textBackground: Color,
@@ -77,26 +67,43 @@ data class ArtikelMeisterColors(
     val cardBorderSubtle: Color,
     val primaryText: Color,
     val secondaryText: Color,
-    val accentBlue: Color = Color(0xFF0A84FF),
-    val accentPurple: Color = Color(0xFFA855F7),
-    val accentOrange: Color = Color(0xFFFF9F0A),
-    // Semantic feedback colors
-    val success: Color = Color(0xFF30D158),
-    val error: Color = Color(0xFFFF453A),
-    val warning: Color = Color(0xFFFF9F0A),
-    val info: Color = Color(0xFF0A84FF),
-    /** Content color for text/icons placed on a filled accent/semantic/article color. */
-    val onAccent: Color = Color.White,
-    // Grammatical gender (article) colors
-    val artikelDer: Color = Color(0xFF4C8DFF),
-    val artikelDie: Color = Color(0xFFF062C0),
-    val artikelDas: Color = Color(0xFFE8B90E),
-    /** Article-less words ("-"), e.g. plurals-only / proper nouns. */
-    val artikelNone: Color = Color(0xFFA1A1AA),
-    // Legacy aliases (kept so StudyView etc. compile unchanged)
-    val vividGreen: Color = success,
-    val vividRed: Color = error
-)
+    val accentBlue: Color,
+    val accentPurple: Color,
+    val accentOrange: Color,
+    val success: Color,
+    val error: Color,
+    val onAccent: Color,
+    val artikelDer: Color,
+    val artikelDie: Color,
+    val artikelDas: Color,
+    val artikelNone: Color,
+    val blueBadgeBackground: Color,
+    val purpleBadgeBackground: Color,
+    val orangeBadgeBackground: Color,
+    val successBadgeBackground: Color,
+    val errorBadgeBackground: Color,
+    val derBadgeBackground: Color,
+    val dieBadgeBackground: Color,
+    val dasBadgeBackground: Color,
+    val articleNoneBadgeBackground: Color
+) {
+    val onBlue: Color get() = onAccent
+    val onPurple: Color get() = onAccent
+    val onOrange: Color get() = onAccent
+    val onSuccess: Color get() = onAccent
+    val onError: Color get() = onAccent
+    val onDer: Color get() = onAccent
+    val onDie: Color get() = onAccent
+    val onDas: Color get() = onAccent
+    val onArticleNone: Color get() = onAccent
+
+    val feedbackCorrect: Color get() = success
+    val feedbackIncorrect: Color get() = error
+    val warning: Color get() = accentOrange
+    val info: Color get() = accentBlue
+    val vividGreen: Color get() = success
+    val vividRed: Color get() = error
+}
 
 private val DarkAppColors = ArtikelMeisterColors(
     isDark = true,
@@ -107,17 +114,25 @@ private val DarkAppColors = ArtikelMeisterColors(
     cardBorderSubtle = Color(0x22FFFFFF),
     primaryText = Color(0xFFF5F5F7),
     secondaryText = Color(0xFFA3A3AB),
-    accentBlue = Color(0xFF0A84FF),
-    accentPurple = Color(0xFFA855F7),
+    accentBlue = Color(0xFF429EFF),
+    accentPurple = Color(0xFFC080FF),
     accentOrange = Color(0xFFFF9F0A),
     success = Color(0xFF30D158),
-    error = Color(0xFFFF453A),
-    warning = Color(0xFFFF9F0A),
-    info = Color(0xFF0A84FF),
-    artikelDer = Color(0xFF4C8DFF),
-    artikelDie = Color(0xFFF062C0),
+    error = Color(0xFFFF6C60),
+    onAccent = Color(0xFF0B1018),
+    artikelDer = Color(0xFF5D9AFF),
+    artikelDie = Color(0xFFF56FCA),
     artikelDas = Color(0xFFE8B90E),
-    artikelNone = Color(0xFFA1A1AA)
+    artikelNone = Color(0xFFA1A1AA),
+    blueBadgeBackground = Color(0xFF192B46),
+    purpleBadgeBackground = Color(0xFF352244),
+    orangeBadgeBackground = Color(0xFF372817),
+    successBadgeBackground = Color(0xFF193526),
+    errorBadgeBackground = Color(0xFF412529),
+    derBadgeBackground = Color(0xFF1A2A46),
+    dieBadgeBackground = Color(0xFF3C2237),
+    dasBadgeBackground = Color(0xFF372D17),
+    articleNoneBadgeBackground = Color(0xFF2D2E36)
 )
 
 private val LightAppColors = ArtikelMeisterColors(
@@ -129,81 +144,180 @@ private val LightAppColors = ArtikelMeisterColors(
     cardBorderSubtle = Color(0x1C000000),
     primaryText = Color(0xFF15171E),
     secondaryText = Color(0xFF555A68),
-    accentBlue = Color(0xFF0066EB),
-    accentPurple = Color(0xFF8438FF),
-    accentOrange = Color(0xFFC26A00),
-    success = Color(0xFF1E8E3E),
-    error = Color(0xFFD92D20),
-    warning = Color(0xFFC26A00),
-    info = Color(0xFF0066EB),
-    artikelDer = Color(0xFF1F63E0),
-    artikelDie = Color(0xFFC0268F),
-    artikelDas = Color(0xFF946C00),
-    artikelNone = Color(0xFF6B7280)
+    accentBlue = Color(0xFF005BCD),
+    accentPurple = Color(0xFF7130D4),
+    accentOrange = Color(0xFF984900),
+    success = Color(0xFF147236),
+    error = Color(0xFFB42318),
+    onAccent = Color.White,
+    artikelDer = Color(0xFF194FB8),
+    artikelDie = Color(0xFFA51E75),
+    artikelDas = Color(0xFF765500),
+    artikelNone = Color(0xFF515968),
+    blueBadgeBackground = Color(0xFFE7EFFD),
+    purpleBadgeBackground = Color(0xFFF1E7FC),
+    orangeBadgeBackground = Color(0xFFF9EDDB),
+    successBadgeBackground = Color(0xFFE5F3E9),
+    errorBadgeBackground = Color(0xFFFCEAE7),
+    derBadgeBackground = Color(0xFFE8F0FD),
+    dieBadgeBackground = Color(0xFFF8EAF4),
+    dasBadgeBackground = Color(0xFFF8F0D7),
+    articleNoneBadgeBackground = Color(0xFFEEF0F4)
 )
 
 val LocalAppColors = staticCompositionLocalOf { DarkAppColors }
 
-/** Theme color for an article. Use this instead of `Artikel.color` (hardcoded in Models.kt). */
+/** Article identity, including null for article-less words. */
 fun ArtikelMeisterColors.artikelColor(artikel: Artikel?): Color = when (artikel) {
     Artikel.DER -> artikelDer
     Artikel.DIE -> artikelDie
     Artikel.DAS -> artikelDas
-    null -> artikelNone // article-less word ('-')
+    null -> artikelNone
+}
+
+fun ArtikelMeisterColors.onArtikel(artikel: Artikel?): Color = when (artikel) {
+    Artikel.DER -> onDer
+    Artikel.DIE -> onDie
+    Artikel.DAS -> onDas
+    null -> onArticleNone
+}
+
+fun ArtikelMeisterColors.artikelBadgeBackground(artikel: Artikel?): Color = when (artikel) {
+    Artikel.DER -> derBadgeBackground
+    Artikel.DIE -> dieBadgeBackground
+    Artikel.DAS -> dasBadgeBackground
+    null -> articleNoneBadgeBackground
 }
 
 @Composable
 @ReadOnlyComposable
 fun Artikel.themeColor(): Color = LocalAppColors.current.artikelColor(this)
 
+fun ArtikelMeisterColors.stageColor(stage: CardStage): Color = when (stage) {
+    CardStage.NEW -> accentBlue
+    CardStage.LEARNING -> accentOrange
+    CardStage.REVIEW -> success
+    CardStage.RELEARNING -> error
+}
+
+fun ArtikelMeisterColors.stageBadgeBackground(stage: CardStage): Color = when (stage) {
+    CardStage.NEW -> blueBadgeBackground
+    CardStage.LEARNING -> orangeBadgeBackground
+    CardStage.REVIEW -> successBadgeBackground
+    CardStage.RELEARNING -> errorBadgeBackground
+}
+
+fun ArtikelMeisterColors.ratingColor(rating: ReviewRating): Color = when (rating) {
+    ReviewRating.AGAIN -> error
+    ReviewRating.HARD -> accentOrange
+    ReviewRating.GOOD -> success
+    ReviewRating.EASY -> accentBlue
+}
+
+fun ArtikelMeisterColors.onRating(rating: ReviewRating): Color = when (rating) {
+    ReviewRating.AGAIN -> onError
+    ReviewRating.HARD -> onOrange
+    ReviewRating.GOOD -> onSuccess
+    ReviewRating.EASY -> onBlue
+}
+
+fun ArtikelMeisterColors.ratingBadgeBackground(rating: ReviewRating): Color = when (rating) {
+    ReviewRating.AGAIN -> errorBadgeBackground
+    ReviewRating.HARD -> orangeBadgeBackground
+    ReviewRating.GOOD -> successBadgeBackground
+    ReviewRating.EASY -> blueBadgeBackground
+}
+
+/** Intro colors are fixed because the intro surface is dark in every appearance. */
+object SplashPalette {
+    val gradientTop = Color(0xFF14242B)
+    val gradientMiddle = Color(0xFF080F1C)
+    val gradientBottom = Color(0xFF03050D)
+    val label = DarkAppColors.secondaryText
+
+    fun artikelColor(artikel: Artikel): Color = DarkAppColors.artikelColor(artikel)
+    fun artikelBadgeBackground(artikel: Artikel): Color = DarkAppColors.artikelBadgeBackground(artikel)
+}
+
+/** Use the same pair for each cell and corresponding legend swatch. */
+@Immutable
+data class HeatmapColors(val background: Color, val foreground: Color)
+
+private val DarkHeatmap = listOf(
+    HeatmapColors(Color(0xFF2D333B), Color.White),
+    HeatmapColors(Color(0xFF1D4F35), Color.White),
+    HeatmapColors(Color(0xFF29784B), Color.White),
+    HeatmapColors(Color(0xFF41A765), DarkAppColors.onAccent),
+    HeatmapColors(Color(0xFF64D981), DarkAppColors.onAccent)
+)
+
+private val LightHeatmap = listOf(
+    HeatmapColors(Color(0xFFEAEDF1), DarkAppColors.onAccent),
+    HeatmapColors(Color(0xFFD8F1DE), DarkAppColors.onAccent),
+    HeatmapColors(Color(0xFFA5DDB5), DarkAppColors.onAccent),
+    HeatmapColors(Color(0xFF4A9C64), DarkAppColors.onAccent),
+    HeatmapColors(Color(0xFF19723D), Color.White)
+)
+
+fun ArtikelMeisterColors.heatmapColors(count: Int): HeatmapColors {
+    val level = when {
+        count <= 0 -> 0
+        count < 5 -> 1
+        count < 15 -> 2
+        count < 35 -> 3
+        else -> 4
+    }
+    return (if (isDark) DarkHeatmap else LightHeatmap)[level]
+}
+
 private val DarkColorPalette = darkColorScheme(
-    primary = Color(0xFF0A84FF),
-    secondary = Color(0xFFA855F7),
-    tertiary = Color(0xFFFF9F0A),
-    error = Color(0xFFFF453A),
-    background = Color(0xFF161618),
-    surface = Color(0xFF212124),
+    primary = DarkAppColors.accentBlue,
+    secondary = DarkAppColors.accentPurple,
+    tertiary = DarkAppColors.accentOrange,
+    error = DarkAppColors.error,
+    background = DarkAppColors.windowBackground,
+    surface = DarkAppColors.controlBackground,
     surfaceVariant = Color(0xFF2C2C30),
-    surfaceContainer = Color(0xFF212124),
+    surfaceContainer = DarkAppColors.controlBackground,
     surfaceContainerHigh = Color(0xFF28282C),
     surfaceContainerHighest = Color(0xFF323236),
-    inverseSurface = Color(0xFFF5F5F7),
-    inverseOnSurface = Color(0xFF15171E),
-    inversePrimary = Color(0xFF0066EB),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onError = Color.White,
-    onBackground = Color(0xFFF5F5F7),
-    onSurface = Color(0xFFF5F5F7),
-    onSurfaceVariant = Color(0xFFA3A3AB),
-    outline = Color(0x38FFFFFF),
-    outlineVariant = Color(0x22FFFFFF)
+    inverseSurface = DarkAppColors.primaryText,
+    inverseOnSurface = LightAppColors.primaryText,
+    inversePrimary = LightAppColors.accentBlue,
+    onPrimary = DarkAppColors.onBlue,
+    onSecondary = DarkAppColors.onPurple,
+    onTertiary = DarkAppColors.onOrange,
+    onError = DarkAppColors.onError,
+    onBackground = DarkAppColors.primaryText,
+    onSurface = DarkAppColors.primaryText,
+    onSurfaceVariant = DarkAppColors.secondaryText,
+    outline = DarkAppColors.secondaryText,
+    outlineVariant = DarkAppColors.cardBorderSubtle
 )
 
 private val LightColorPalette = lightColorScheme(
-    primary = Color(0xFF0066EB),
-    secondary = Color(0xFF8438FF),
-    tertiary = Color(0xFFC26A00),
-    error = Color(0xFFD92D20),
-    background = Color(0xFFF2F4F8),
-    surface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFFEFF1F6),
-    surfaceContainer = Color(0xFFFFFFFF),
+    primary = LightAppColors.accentBlue,
+    secondary = LightAppColors.accentPurple,
+    tertiary = LightAppColors.accentOrange,
+    error = LightAppColors.error,
+    background = LightAppColors.windowBackground,
+    surface = LightAppColors.controlBackground,
+    surfaceVariant = LightAppColors.textBackground,
+    surfaceContainer = LightAppColors.controlBackground,
     surfaceContainerHigh = Color(0xFFF6F7FB),
     surfaceContainerHighest = Color(0xFFEBEDF4),
-    inverseSurface = Color(0xFF212124),
-    inverseOnSurface = Color(0xFFF5F5F7),
-    inversePrimary = Color(0xFF0A84FF),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onError = Color.White,
-    onBackground = Color(0xFF15171E),
-    onSurface = Color(0xFF15171E),
-    onSurfaceVariant = Color(0xFF555A68),
-    outline = Color(0x2E000000),
-    outlineVariant = Color(0x1C000000)
+    inverseSurface = DarkAppColors.controlBackground,
+    inverseOnSurface = DarkAppColors.primaryText,
+    inversePrimary = DarkAppColors.accentBlue,
+    onPrimary = LightAppColors.onBlue,
+    onSecondary = LightAppColors.onPurple,
+    onTertiary = LightAppColors.onOrange,
+    onError = LightAppColors.onError,
+    onBackground = LightAppColors.primaryText,
+    onSurface = LightAppColors.primaryText,
+    onSurfaceVariant = LightAppColors.secondaryText,
+    outline = LightAppColors.secondaryText,
+    outlineVariant = LightAppColors.cardBorderSubtle
 )
 
 // =====================================================================================
@@ -315,48 +429,12 @@ fun resolveDarkTheme(legacyIsDark: Boolean): Boolean = when (UiPreferences.theme
 // =====================================================================================
 
 @Composable
-private fun animated(target: Color, spec: AnimationSpec<Color>, label: String): Color {
-    val value by animateColorAsState(target, spec, label = label)
-    return value
-}
-
-/**
- * App theme. System bar styling lives in exactly one place: MainActivity (enableEdgeToEdge,
- * keyed on the resolved dark value). Compose paints the bar areas itself.
- */
-@Composable
 fun ArtikelMeisterTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    val t = if (darkTheme) DarkAppColors else LightAppColors
-    val spec = tween<Color>(durationMillis = 280)
-
-    val success = animated(t.success, spec, "success")
-    val error = animated(t.error, spec, "error")
-    val appColors = t.copy(
-        windowBackground = animated(t.windowBackground, spec, "windowBg"),
-        controlBackground = animated(t.controlBackground, spec, "controlBg"),
-        textBackground = animated(t.textBackground, spec, "textBg"),
-        sidebarBackground = animated(t.sidebarBackground, spec, "sidebarBg"),
-        cardBorderSubtle = animated(t.cardBorderSubtle, spec, "border"),
-        primaryText = animated(t.primaryText, spec, "primaryText"),
-        secondaryText = animated(t.secondaryText, spec, "secondaryText"),
-        accentBlue = animated(t.accentBlue, spec, "blue"),
-        accentPurple = animated(t.accentPurple, spec, "purple"),
-        accentOrange = animated(t.accentOrange, spec, "orange"),
-        success = success,
-        error = error,
-        warning = animated(t.warning, spec, "warning"),
-        info = animated(t.info, spec, "info"),
-        artikelDer = animated(t.artikelDer, spec, "der"),
-        artikelDie = animated(t.artikelDie, spec, "die"),
-        artikelDas = animated(t.artikelDas, spec, "das"),
-        artikelNone = animated(t.artikelNone, spec, "none"),
-        vividGreen = success,
-        vividRed = error
-    )
-
+    // Swap foregrounds and fills together so they stay paired during an appearance change.
+    val appColors = if (darkTheme) DarkAppColors else LightAppColors
     CompositionLocalProvider(LocalAppColors provides appColors) {
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColorPalette else LightColorPalette,

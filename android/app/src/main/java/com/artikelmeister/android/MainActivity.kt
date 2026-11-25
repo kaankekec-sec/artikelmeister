@@ -31,10 +31,10 @@ class MainActivity : ComponentActivity() {
             val authManager = remember { GeminiAuthManager.getInstance(applicationContext) }
             val isDark = resolveDarkTheme(legacyIsDark = store.settings.isDarkMode)
 
-            // Single source of truth for system bar appearance. Bars are transparent;
-            // Compose draws the surfaces behind them.
-            DisposableEffect(isDark) {
-                applySystemBars(isDark)
+            // The first-run intro is dark regardless of the selected app theme.
+            val darkSystemBarSurface = isDark || !UiPreferences.hasSeenIntro
+            DisposableEffect(darkSystemBarSurface) {
+                applySystemBars(darkSystemBarSurface)
                 onDispose { }
             }
 

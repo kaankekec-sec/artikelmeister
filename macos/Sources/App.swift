@@ -27,11 +27,8 @@ struct ArtikelMeisterApp: App {
         .defaultSize(width: 1040, height: 660)
         .windowStyle(.titleBar)
         .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("Yerel Depolama Klasörünü Aç") {
-                    store.openStorageDirectoryInFinder()
-                }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
+            AppCommands {
+                store.openStorageDirectoryInFinder()
             }
         }
     }

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 let outputDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "build/AppIcon.iconset"
 let fm = FileManager.default
@@ -216,7 +217,7 @@ func makeMasterBitmaps() -> (
     return (squircleFull, squircleNoDrops, brainNoDrops)
 }
 
-func renderScaledPNG(from masterRep: NSBitmapImageRep, pixelSize: Int, insetFraction: CGFloat = 0.0) -> Data {
+func renderScaledPNG(from masterRep: NSBitmapImageRep, pixelSize: Int, onMacIconGrid: Bool = false) -> Data {
     let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil,
         pixelsWide: pixelSize,
@@ -236,12 +237,25 @@ func renderScaledPNG(from masterRep: NSBitmapImageRep, pixelSize: Int, insetFrac
     NSGraphicsContext.current = ctx
 
     let s = CGFloat(pixelSize)
-    let inset = s * insetFraction
-    let destRect = NSRect(x: inset, y: inset, width: s - inset * 2, height: s - inset * 2)
+    let canvas = NSRect(x: 0, y: 0, width: s, height: s)
+    let source = NSRect(x: 0, y: 0, width: masterRep.pixelsWide, height: masterRep.pixelsHigh)
+    var destRect = canvas
+    var sourceRect = source
+    if onMacIconGrid {
+        // The flat ICNS face occupies the centered 824 px square on the 1024 px canvas.
+        let gridScale = s / 1024
+        destRect = canvas.insetBy(dx: 100 * gridScale, dy: 100 * gridScale)
+        let mask = RoundedRectangle(cornerRadius: 185 * gridScale, style: .continuous)
+        ctx.cgContext.addPath(mask.path(in: destRect).cgPath)
+        ctx.cgContext.clip()
 
-    let img = NSImage(size: NSSize(width: masterRep.pixelsWide, height: masterRep.pixelsHigh))
+        // Bleed the source past the clip to remove the original raster rim.
+        sourceRect = source.insetBy(dx: 14, dy: 14)
+    }
+
+    let img = NSImage(size: source.size)
     img.addRepresentation(masterRep)
-    img.draw(in: destRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+    img.draw(in: destRect, from: sourceRect, operation: .sourceOver, fraction: 1.0)
 
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])!
@@ -250,7 +264,7 @@ func renderScaledPNG(from masterRep: NSBitmapImageRep, pixelSize: Int, insetFrac
 func createICOFile(from masterRep: NSBitmapImageRep, outputURL: URL) {
     let icoSizes = [16, 32, 48, 64, 128, 256]
     let pngFrames: [(Int, Data)] = icoSizes.map { sz in
-        (sz, renderScaledPNG(from: masterRep, pixelSize: sz, insetFraction: 0.0))
+        (sz, renderScaledPNG(from: masterRep, pixelSize: sz))
     }
 
     var icoData = Data()
@@ -296,10 +310,10 @@ let masters = makeMasterBitmaps()
 // 1. Generate macOS AppIcon.iconset PNGs
 let macIconSizes = [16, 32, 128, 256, 512]
 for sz in macIconSizes {
-    let png1x = renderScaledPNG(from: masters.squircleFull, pixelSize: sz, insetFraction: 0.035)
+    let png1x = renderScaledPNG(from: masters.squircleFull, pixelSize: sz, onMacIconGrid: true)
     try? png1x.write(to: URL(fileURLWithPath: outputDir).appendingPathComponent("icon_\(sz)x\(sz).png"))
 
-    let png2x = renderScaledPNG(from: masters.squircleFull, pixelSize: sz * 2, insetFraction: 0.035)
+    let png2x = renderScaledPNG(from: masters.squircleFull, pixelSize: sz * 2, onMacIconGrid: true)
     try? png2x.write(to: URL(fileURLWithPath: outputDir).appendingPathComponent("icon_\(sz)x\(sz)@2x.png"))
 }
 
@@ -308,9 +322,9 @@ let rootCandidate = fm.fileExists(atPath: "../shared") ? ".." : "."
 let sharedLogoDir = "\(rootCandidate)/shared/logo"
 try? fm.createDirectory(atPath: sharedLogoDir, withIntermediateDirectories: true)
 
-let full1024 = renderScaledPNG(from: masters.squircleFull, pixelSize: 1024, insetFraction: 0.0)
-let noDropsSquircle1024 = renderScaledPNG(from: masters.squircleNoDrops, pixelSize: 1024, insetFraction: 0.0)
-let noDropsBrain1024 = renderScaledPNG(from: masters.brainNoDrops, pixelSize: 1024, insetFraction: 0.0)
+let full1024 = renderScaledPNG(from: masters.squircleFull, pixelSize: 1024)
+let noDropsSquircle1024 = renderScaledPNG(from: masters.squircleNoDrops, pixelSize: 1024)
+let noDropsBrain1024 = renderScaledPNG(from: masters.brainNoDrops, pixelSize: 1024)
 
 try? full1024.write(to: URL(fileURLWithPath: "\(sharedLogoDir)/app_logo_squircle.png"))
 try? noDropsSquircle1024.write(to: URL(fileURLWithPath: "\(sharedLogoDir)/app_logo_squircle_nodrops.png"))
@@ -324,9 +338,9 @@ createICOFile(from: masters.squircleFull, outputURL: URL(fileURLWithPath: "\(roo
 // 4. Update Android drawable & mipmap resources if present
 let androidResPath = "\(rootCandidate)/android/app/src/main/res"
 if fm.fileExists(atPath: androidResPath) {
-    let drawable512 = renderScaledPNG(from: masters.squircleFull, pixelSize: 512, insetFraction: 0.0)
-    let drawableNoDrops512 = renderScaledPNG(from: masters.squircleNoDrops, pixelSize: 512, insetFraction: 0.0)
-    let drawableBrain512 = renderScaledPNG(from: masters.brainNoDrops, pixelSize: 512, insetFraction: 0.0)
+    let drawable512 = renderScaledPNG(from: masters.squircleFull, pixelSize: 512)
+    let drawableNoDrops512 = renderScaledPNG(from: masters.squircleNoDrops, pixelSize: 512)
+    let drawableBrain512 = renderScaledPNG(from: masters.brainNoDrops, pixelSize: 512)
 
     try? drawable512.write(to: URL(fileURLWithPath: "\(androidResPath)/drawable/bloody_brain_icon.png"))
     try? drawableNoDrops512.write(to: URL(fileURLWithPath: "\(androidResPath)/drawable/bloody_brain_squircle_nodrops.png"))
@@ -340,7 +354,7 @@ if fm.fileExists(atPath: androidResPath) {
         ("mipmap-xxxhdpi", 192)
     ]
     for (folder, px) in mipmaps {
-        let data = renderScaledPNG(from: masters.squircleFull, pixelSize: px, insetFraction: 0.0)
+        let data = renderScaledPNG(from: masters.squircleFull, pixelSize: px)
         try? data.write(to: URL(fileURLWithPath: "\(androidResPath)/\(folder)/ic_launcher.png"))
     }
 }

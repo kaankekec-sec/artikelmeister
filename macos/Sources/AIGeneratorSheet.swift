@@ -1,115 +1,203 @@
 import SwiftUI
 import AppKit
+import Accessibility
 
 struct AIGeneratorSheet: View {
     @EnvironmentObject var store: DeckStore
     @ObservedObject var authManager = GeminiAuthManager.shared
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var selectedLevel: CEFRLevel = .a1
-    @State private var wordCount: Int = 20
-    @State private var topicHint: String = ""
+    @State private var wordCount = 20
+    @State private var topicHint = ""
     @State private var includeArticleless = false
-    @State private var targetDeckName: String = "A1 Seviyesi"
-    @State private var hasCustomDeckName: Bool = false
-    @State private var showAuthConfig: Bool = false
-    @State private var showAdvancedApiKey: Bool = false
+    @State private var targetDeckName = "A1 Seviyesi"
+    @State private var hasCustomDeckName = false
+    @State private var showTargetDeckMenu = false
+    @State private var showAuthConfig = false
+    @State private var showAdvancedApiKey = false
 
-    @State private var isGenerating: Bool = false
-    @State private var progressMessage: String = ""
-    @State private var errorMessage: String? = nil
+    @State private var isGenerating = false
+    @State private var progressMessage = ""
+    @State private var authorizationError: String?
+    @State private var startupValidationError: String?
+    @State private var acceptsStartupValidationError = true
+    @State private var generationError: String?
+    @State private var didFinishGenerating = false
     @State private var newlyAddedWords: [GeneratedWordItem] = []
+
+    private enum ScrollTarget: Hashable {
+        case generationError, results
+    }
+
+    private var automaticDeckName: String {
+        "\(selectedLevel.rawValue) Seviyesi"
+    }
+
+    private var trimmedDeckName: String {
+        targetDeckName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var resultSummary: String {
+        newlyAddedWords.isEmpty ? "Yeni kelime eklenmedi" : "\(newlyAddedWords.count) kelime eklendi"
+    }
+
+    private var visibleAuthorizationError: String? {
+        authorizationError ?? (showAuthConfig && authManager.isAuthorized ? startupValidationError : nil)
+    }
+
+    private var activeCredential: String {
+        if authManager.authMode == .apiKey { return authManager.apiKey }
+        return authManager.oauthRefreshToken.isEmpty ? authManager.oauthAccessToken : authManager.oauthRefreshToken
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Sheet Header
-            HStack {
-                HStack(spacing: 10) {
-                    Image(systemName: "sparkles")
-                        .font(.title2)
-                        .foregroundColor(.purple)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Gemini AI ile Seviyeye Göre Kelime Üret")
-                            .font(.title3.bold())
-                        Text("Kendi Gemini kullanım hakkınızla A1–C1 seviyesinde, listenizde olmayan yeni kelimeler üretin")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+            header
+            Divider()
+            scrollableForm
+            Divider()
+            actionBar
+        }
+        .frame(minWidth: 640, idealWidth: 720, minHeight: 520, idealHeight: 640)
+        .interactiveDismissDisabled(isGenerating)
+        .onChange(of: authManager.selectedModel) {
+            authManager.saveToKeychain()
+        }
+        .onAppear {
+            if authManager.isAuthorized {
+                Task {
+                    do {
+                        try await authManager.verifyCredentials()
+                    } catch {
+                        if acceptsStartupValidationError {
+                            startupValidationError = error.localizedDescription
+                        }
                     }
                 }
-                Spacer()
-
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
             }
-            .padding(20)
-            .background(Color(NSColor.controlBackgroundColor))
+        }
+        .onChange(of: authManager.authMode) { clearAuthorizationError() }
+        .onChange(of: activeCredential) { clearAuthorizationError() }
+        .onChange(of: visibleAuthorizationError) {
+            if visibleAuthorizationError != nil {
+                AccessibilityNotification.Announcement("Gemini yetkilendirmesi doğrulanamadı").post()
+            }
+        }
+    }
 
-            Divider()
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.title2)
+                .foregroundStyle(AppPalette.accentPurple)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Gemini AI ile Seviyeye Göre Kelime Üret")
+                    .font(.title3.bold())
+                    .accessibilityAddTraits(.isHeader)
+                Text("Kendi Gemini kullanım hakkınızla A1–C1 seviyesinde, listenizde olmayan yeni kelimeler üretin")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
 
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(isGenerating)
+            .accessibilityLabel("Kapat")
+            .help("Kapat")
+        }
+        .padding(20)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var scrollableForm: some View {
+        ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // 1. Gemini Authorization Box
                     authorizationSection
+                        .disabled(isGenerating)
 
-                    // 2. Level (A1-C1) & Count (1-100) Configuration Box
                     generationParametersSection
+                        .disabled(isGenerating)
 
-                    // 3. Error / Status / Results
-                    if let error = errorMessage {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                                .textSelection(.enabled)
-                            Spacer()
-                        }
-                        .padding(12)
-                        .background(Color.red.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    if let generationError {
+                        errorNotice(generationError)
+                            .id(ScrollTarget.generationError)
                     }
 
                     if !newlyAddedWords.isEmpty {
                         generatedResultsSection
+                            .id(ScrollTarget.results)
                     }
                 }
                 .padding(20)
             }
-
-            Divider()
-
-            // Bottom Action Bar
-            HStack {
-                Label(
-                    "Mevcut \(store.cards.count) kelime hariç tutulacak",
-                    systemImage: "shield.lefthalf.filled"
-                )
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-                Spacer()
-
+            .onChange(of: isGenerating) {
                 if isGenerating {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(progressMessage)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    AccessibilityNotification.Announcement("Gemini bağlantısı kuruluyor...").post()
+                } else if let generationError {
+                    withAnimation(reduceMotion ? nil : .default) {
+                        proxy.scrollTo(ScrollTarget.generationError, anchor: .top)
                     }
+                    AccessibilityNotification.Announcement(generationError).post()
+                } else if didFinishGenerating {
+                    if !newlyAddedWords.isEmpty {
+                        withAnimation(reduceMotion ? nil : .default) {
+                            proxy.scrollTo(ScrollTarget.results, anchor: .top)
+                        }
+                    }
+                    AccessibilityNotification.Announcement(resultSummary).post()
                 }
+            }
+        }
+    }
+
+    private var actionBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if isGenerating {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityHidden(true)
+                    Text(progressMessage)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+            } else if generationError != nil {
+                Label("Kelime üretilirken bir hata oluştu.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.error)
+            } else if didFinishGenerating {
+                Text(resultSummary)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(newlyAddedWords.isEmpty ? Color.secondary : AppPalette.success)
+            }
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(selectedLevel.rawValue) • \(wordCount) kelime • \(trimmedDeckName.isEmpty ? automaticDeckName : trimmedDeckName)")
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Mevcut \(store.cards.count) kelime hariç tutulacak")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+                Spacer(minLength: 0)
 
                 Button("Kapat") {
                     dismiss()
                 }
                 .buttonStyle(.bordered)
+                .keyboardShortcut(.cancelAction)
                 .disabled(isGenerating)
 
                 Button {
@@ -117,398 +205,467 @@ struct AIGeneratorSheet: View {
                         await generateAndAddWords()
                     }
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "wand.and.stars")
-                        Text("\(selectedLevel.rawValue) Seviyesinde \(wordCount) Kelime Üret ve Ekle")
-                            .fontWeight(.semibold)
-                    }
+                    Label("Üret ve ekle", systemImage: "sparkles")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.purple)
+                .buttonStyle(FilledActionStyle(fill: AppPalette.accentPurple, ink: AppPalette.onPurple))
+                .keyboardShortcut(.return, modifiers: .command)
                 .disabled(isGenerating || !authManager.isAuthorized)
             }
-            .padding(16)
-            .background(Color(NSColor.controlBackgroundColor))
         }
-        .frame(width: 720, height: 640)
-        .onAppear {
-            if !authManager.isAuthorized {
-                showAuthConfig = true
-            } else {
-                Task {
-                    try? await authManager.verifyCredentials()
-                }
-            }
-        }
+        .padding(16)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    // MARK: - Section 1: Gemini Authorization
+    // MARK: - Gemini Authorization
 
     private var authorizationSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: authManager.isAuthorized ? "checkmark.shield.fill" : "lock.shield")
-                            .foregroundColor(authManager.isAuthorized ? .green : .orange)
-                            .font(.title3)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(authManager.isAuthorized ? "Gemini Yetkilendirmesi Aktif" : "Gemini Yetkilendirmesi Gerekli")
-                                .font(.headline)
-                            Text(authManager.authMode.title + " • Model: \(authManager.selectedModel)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                if authManager.isAuthorized {
+                    DisclosureGroup(isExpanded: $showAuthConfig) {
+                        authorizationControls
+                            .padding(.top, 8)
+                    } label: {
+                        authorizationStatus
+                    }
+                    .transaction { transaction in
+                        if reduceMotion {
+                            transaction.animation = nil
+                            transaction.disablesAnimations = true
                         }
                     }
-
-                    Spacer()
-
-                    Picker("Model", selection: $authManager.selectedModel) {
-                        ForEach(authManager.availableModels, id: \.self) { model in
-                            Text(model).tag(model)
-                        }
-                    }
-                    .frame(width: 210)
-                    .onChange(of: authManager.selectedModel) {
-                        authManager.saveToKeychain()
-                    }
-
-                    Button(showAuthConfig ? "Gizle" : "Yetkilendirme Ayarları") {
-                        withAnimation {
-                            showAuthConfig.toggle()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                } else {
+                    authorizationStatus
+                    authorizationControls
                 }
 
-                if showAuthConfig || !authManager.isAuthorized {
-                    Divider()
-
-                    HStack(spacing: 12) {
-                        Text("Aktif Gemini Modeli:")
-                            .font(.caption.weight(.semibold))
-
-                        Picker("", selection: $authManager.selectedModel) {
-                            ForEach(authManager.availableModels, id: \.self) { model in
-                                Text(model).tag(model)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .frame(width: 200)
-                        .onChange(of: authManager.selectedModel) {
-                            authManager.saveToKeychain()
-                        }
-
-                        Spacer()
-                    }
-
-                    // Primary Auth: Google OAuth 2.0 (Only method shown directly)
-                    HStack(spacing: 12) {
-                        Button {
-                            Task {
-                                do {
-                                    errorMessage = nil
-                                    try await authManager.startBrowserOAuthFlow()
-                                    showAuthConfig = false
-                                    await store.syncWithGoogleDrive(authManager: authManager, isSilentAutoSync: true)
-                                } catch {
-                                    errorMessage = error.localizedDescription
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "key.fill")
-                                Text(authManager.isAuthorized && authManager.authMode == .googleOAuth ? "Google Hesabını Yeniden Bağla" : "Google Hesabı ile Giriş Yap (Tek Tık)")
-                                    .fontWeight(.semibold)
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.blue)
-                        .controlSize(.regular)
-                        .disabled(authManager.isAuthenticating)
-
-                        if authManager.isAuthenticating {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                            Text("Yetkilendiriliyor...")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-
-                        Spacer()
-
-                        Button {
-                            withAnimation {
-                                showAdvancedApiKey.toggle()
-                            }
-                        } label: {
-                            Label(showAdvancedApiKey ? "Gelişmiş Seçenekleri Gizle" : "Gelişmiş: API Anahtarı ile Doğrula", systemImage: "slider.horizontal.3")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundColor(.accentColor)
-                    }
-
-                    // Advanced Section: API Key configuration
-                    if showAdvancedApiKey {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Google AI Studio API Anahtarı:")
-                                .font(.caption.weight(.semibold))
-                            Text("Google hesabınızla Google AI Studio üzerinden ücretsiz Gemini API anahtarınızı alıp aşağıya yapıştırabilirsiniz.")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-
-                            HStack(spacing: 10) {
-                                SecureField("Gemini API Anahtarı (AIza...)", text: $authManager.apiKey)
-                                    .textFieldStyle(.roundedBorder)
-
-                                Button {
-                                    authManager.openGoogleAIStudioInBrowser()
-                                } label: {
-                                    Label("Google AI Studio'dan Al", systemImage: "safari")
-                                }
-                                .buttonStyle(.bordered)
-
-                                Button {
-                                    Task {
-                                        do {
-                                            errorMessage = nil
-                                            authManager.authMode = .apiKey
-                                            try await authManager.verifyCredentials()
-                                            showAuthConfig = false
-                                        } catch {
-                                            errorMessage = error.localizedDescription
-                                        }
-                                    }
-                                } label: {
-                                    Label("Doğrula & Kaydet", systemImage: "checkmark.circle")
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(authManager.apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
-                            }
-                        }
-                        .padding(10)
-                        .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                        .cornerRadius(8)
-                    }
-
-                    if let statusMsg = authManager.authStatusMessage {
-                        HStack {
-                            Text(statusMsg)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            if authManager.isAuthorized {
-                                Button("Yetkiyi Kaldır", role: .destructive) {
-                                    authManager.clearAuthorization()
-                                }
-                                .buttonStyle(.link)
-                                .font(.caption)
-                            }
-                        }
-                    }
+                if let visibleAuthorizationError {
+                    errorNotice(visibleAuthorizationError)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
         }
     }
 
-    // MARK: - Section 2: Level & Word Count Selection
+    private var authorizationStatus: some View {
+        HStack(spacing: 8) {
+            Image(systemName: authManager.isAuthorized ? "checkmark.shield.fill" : "lock.shield")
+                .font(.title3)
+                .foregroundStyle(authManager.isAuthorized ? AppPalette.success : AppPalette.accentOrange)
+                .accessibilityHidden(true)
+            Text(authManager.isAuthorized ? "Gemini Yetkilendirmesi Aktif" : "Gemini Yetkilendirmesi Gerekli")
+                .font(.headline)
+            if authManager.isAuthorized {
+                Text("• \(authManager.authMode.title) • \(authManager.selectedModel)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(authManager.isAuthorized ? "Yetkilendirme Ayarları" : "")
+    }
+
+    private var authorizationControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Model", selection: $authManager.selectedModel) {
+                ForEach(authManager.availableModels, id: \.self) { model in
+                    Text(model).tag(model)
+                }
+            }
+            .pickerStyle(.menu)
+            .id(isGenerating)
+
+            Button {
+                Task {
+                    do {
+                        clearAuthorizationError()
+                        try await authManager.startBrowserOAuthFlow()
+                        showAuthConfig = false
+                        await store.syncWithGoogleDrive(authManager: authManager, isSilentAutoSync: true)
+                    } catch {
+                        authorizationError = error.localizedDescription
+                    }
+                }
+            } label: {
+                Label(
+                    authManager.isAuthorized && authManager.authMode == .googleOAuth
+                        ? "Google Hesabını Yeniden Bağla" : "Google Hesabı ile Giriş Yap (Tek Tık)",
+                    systemImage: "person.crop.circle"
+                )
+            }
+            .buttonStyle(FilledActionStyle(fill: AppPalette.accentBlue, ink: AppPalette.onBlue))
+            .disabled(authManager.isAuthenticating)
+
+            if authManager.isAuthenticating {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityHidden(true)
+                    Text("Yetkilendiriliyor...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            DisclosureGroup(isExpanded: $showAdvancedApiKey) {
+                apiKeyControls
+                    .padding(.top, 8)
+            } label: {
+                Label("Gelişmiş: API Anahtarı ile Doğrula", systemImage: "slider.horizontal.3")
+                    .font(.caption)
+            }
+            .transaction { transaction in
+                if reduceMotion {
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
+            }
+
+            if let statusMessage = authManager.authStatusMessage {
+                HStack {
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if authManager.isAuthorized {
+                        Button("Yetkiyi Kaldır", role: .destructive) {
+                            authManager.clearAuthorization()
+                            clearAuthorizationError()
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                }
+            }
+        }
+    }
+
+    private var apiKeyControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Google AI Studio API Anahtarı:")
+                .font(.caption.weight(.semibold))
+            Text("Google hesabınızla Google AI Studio üzerinden ücretsiz Gemini API anahtarınızı alıp aşağıya yapıştırabilirsiniz.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            SecureField("Gemini API Anahtarı", text: $authManager.apiKey, prompt: Text("AIza..."))
+                .textFieldStyle(.roundedBorder)
+
+            HStack(spacing: 10) {
+                Button {
+                    authManager.openGoogleAIStudioInBrowser()
+                } label: {
+                    Label("Google AI Studio'dan Al", systemImage: "arrow.up.right.square")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    Task {
+                        do {
+                            clearAuthorizationError()
+                            authManager.authMode = .apiKey
+                            try await authManager.verifyCredentials()
+                            showAuthConfig = false
+                        } catch {
+                            authorizationError = error.localizedDescription
+                        }
+                    }
+                } label: {
+                    Label("Doğrula & Kaydet", systemImage: "checkmark.circle")
+                }
+                .buttonStyle(FilledActionStyle(fill: AppPalette.accentBlue, ink: AppPalette.onBlue))
+                .disabled(authManager.apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func clearAuthorizationError() {
+        authorizationError = nil
+        startupValidationError = nil
+        acceptsStartupValidationError = false
+    }
+
+    private func errorNotice(_ message: String) -> some View {
+        Label {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(AppPalette.error)
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(AppPalette.errorBadgeBackground, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Generation Parameters
 
     private var generationParametersSection: some View {
-        GroupBox(label: Label("Seviye (A1 – C1) ve Kelime Sayısı (1 – 100)", systemImage: "graduationcap.fill")) {
+        GroupBox {
             VStack(alignment: .leading, spacing: 16) {
-                // CEFR Level Selector
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Almanca Dil Seviyesi (CEFR):")
+                levelSelector
+                Divider()
+                countSelector
+                Divider()
+                topicAndDeckFields
+            }
+            .padding(10)
+        } label: {
+            Label("Seviye (A1 – C1) ve Kelime Sayısı (1 – 100)", systemImage: "graduationcap.fill")
+        }
+    }
+
+    private var levelSelector: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Almanca Dil Seviyesi (CEFR):")
+                .font(.subheadline.weight(.semibold))
+
+            HStack(spacing: 10) {
+                ForEach(CEFRLevel.allCases) { level in
+                    let isSelected = selectedLevel == level
+                    let shape = RoundedRectangle(cornerRadius: 10)
+
+                    Button {
+                        selectedLevel = level
+                        if !hasCustomDeckName {
+                            targetDeckName = automaticDeckName
+                        }
+                    } label: {
+                        Text(level.rawValue)
+                            .font(.title3.bold())
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                isSelected ? AppPalette.purpleBadgeBackground : Color(nsColor: .controlBackgroundColor),
+                                in: shape
+                            )
+                            .overlay {
+                                shape.strokeBorder(
+                                    isSelected ? AppPalette.accentPurple : AppPalette.controlOutline,
+                                    lineWidth: isSelected ? 2 : 1
+                                )
+                            }
+                            .contentShape(shape)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Almanca Dil Seviyesi")
+
+            Text(selectedLevel.description)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var countSelector: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Üretilecek Kelime Sayısı (1 – 100):")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Stepper(value: $wordCount, in: 1...100, step: 1) {
+                    Text("\(wordCount) kelime")
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(AppPalette.accentPurple)
+                }
+            }
+
+            HStack(spacing: 12) {
+                Text("1").font(.caption).foregroundStyle(.secondary)
+                Slider(
+                    value: Binding(
+                        get: { Double(wordCount) },
+                        set: { wordCount = max(1, min(100, Int(round($0)))) }
+                    ),
+                    in: 1...100,
+                    step: 1
+                )
+                .tint(AppPalette.accentPurple)
+                .accessibilityLabel("Kelime sayısı")
+                .accessibilityValue("\(wordCount) kelime")
+                Text("100").font(.caption).foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Text("Hızlı Seçim:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach([5, 10, 20, 30, 50, 75, 100], id: \.self) { preset in
+                    Button {
+                        wordCount = preset
+                    } label: {
+                        Text("\(preset)")
+                            .fontWeight(wordCount == preset ? .bold : .regular)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(wordCount == preset ? AppPalette.accentPurple : nil)
+                    .accessibilityLabel("\(preset) kelime")
+                    .accessibilityAddTraits(wordCount == preset ? .isSelected : [])
+                }
+            }
+
+            Toggle(isOn: $includeArticleless) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Artikelsiz kelimeleri de üret")
                         .font(.subheadline.weight(.semibold))
-
-                    HStack(spacing: 10) {
-                        ForEach(CEFRLevel.allCases) { lvl in
-                            Button {
-                                selectedLevel = lvl
-                                if !hasCustomDeckName {
-                                    targetDeckName = "\(lvl.rawValue) Seviyesi"
-                                }
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Text(lvl.rawValue)
-                                        .font(.title3.bold())
-                                    Text(lvl.title.components(separatedBy: "—").last?.trimmingCharacters(in: .whitespaces) ?? "")
-                                        .font(.caption2)
-                                        .lineLimit(1)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(
-                                    selectedLevel == lvl
-                                        ? Color.purple.opacity(0.2)
-                                        : Color(NSColor.controlBackgroundColor)
-                                )
-                                .foregroundColor(selectedLevel == lvl ? .purple : .primary)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(selectedLevel == lvl ? Color.purple : Color.secondary.opacity(0.2), lineWidth: selectedLevel == lvl ? 2 : 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-
-                    Text(selectedLevel.description)
+                    Text("Fiiller, sıfatlar ve kalıp ifadeler '-' olarak eklenir; çalışırken Türkçe anlam yazılır.")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
+            }
+            .toggleStyle(.switch)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
 
-                Divider()
+    private var topicAndDeckFields: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Konu / Tema (İsteğe bağlı):")
+                    .font(.subheadline.weight(.medium))
+                    .accessibilityHidden(true)
+                TextField(
+                    "Konu / Tema (İsteğe bağlı)",
+                    text: $topicHint,
+                    prompt: Text("Örn: Seyahat, İş Hayatı, Mutfak, Akademik")
+                )
+                .textFieldStyle(.roundedBorder)
+            }
 
-                // Word Count Selector (1 - 100)
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Üretilecek Kelime Sayısı (1 – 100):")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Stepper(value: $wordCount, in: 1...100, step: 1) {
-                            Text("\(wordCount) kelime")
-                                .font(.headline.monospacedDigit())
-                                .foregroundColor(.purple)
-                        }
-                    }
-
-                    HStack(spacing: 12) {
-                        Text("1").font(.caption).foregroundColor(.secondary)
-                        Slider(
-                            value: Binding(
-                                get: { Double(wordCount) },
-                                set: { wordCount = max(1, min(100, Int(round($0)))) }
-                            ),
-                            in: 1...100,
-                            step: 1
-                        )
-                        .tint(.purple)
-                        Text("100").font(.caption).foregroundColor(.secondary)
-                    }
-
-                    // Quick count preset chips
-                    HStack(spacing: 8) {
-                        Text("Hızlı Seçim:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        ForEach([5, 10, 20, 30, 50, 75, 100], id: \.self) { preset in
-                            Button("\(preset)") {
-                                wordCount = preset
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .tint(wordCount == preset ? .purple : .secondary)
-                        }
-                    }
-
-                    Toggle(isOn: $includeArticleless) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Artikelsiz kelimeleri de üret")
-                                .font(.subheadline.weight(.semibold))
-                            Text("Fiiller, sıfatlar ve kalıp ifadeler '-' olarak eklenir; çalışırken Türkçe anlam yazılır.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .toggleStyle(.switch)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(NSColor.textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-
-                Divider()
-
-                // Optional Theme / Topic & Target Deck
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Text("Konu / Tema (İsteğe bağlı):")
-                            .font(.subheadline.weight(.medium))
-                            .frame(width: 190, alignment: .leading)
-                        TextField("Örn: Seyahat, İş Hayatı, Mutfak, Akademik (Boş bırakılırsa genel)", text: $topicHint)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    HStack(spacing: 10) {
-                        Label("Eklenecek Deste / Kategori:", systemImage: "folder.fill")
-                            .font(.subheadline.weight(.medium))
-                            .frame(width: 190, alignment: .leading)
-
-                        TextField("Deste adı (örn: A1 Seviyesi, Seyahat)", text: Binding(
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Eklenecek Deste / Kategori:")
+                    .font(.subheadline.weight(.medium))
+                    .accessibilityHidden(true)
+                HStack(spacing: 10) {
+                    TextField(
+                        "Eklenecek Deste / Kategori",
+                        text: Binding(
                             get: { targetDeckName },
                             set: {
                                 targetDeckName = $0
                                 hasCustomDeckName = true
                             }
-                        ))
-                        .textFieldStyle(.roundedBorder)
+                        ),
+                        prompt: Text("Deste adı (örn: A1 Seviyesi)")
+                    )
+                    .textFieldStyle(.roundedBorder)
 
-                        Menu("Mevcut Desteler") {
-                            Button("\(selectedLevel.rawValue) Seviyesi (Otomatik)") {
-                                targetDeckName = "\(selectedLevel.rawValue) Seviyesi"
-                                hasCustomDeckName = false
-                            }
-                            Divider()
-                            ForEach(store.allDeckNames, id: \.self) { d in
-                                Button(d) {
-                                    targetDeckName = d
-                                    hasCustomDeckName = true
-                                }
-                            }
-                        }
-                        .frame(width: 145)
+                    Button {
+                        showTargetDeckMenu.toggle()
+                    } label: {
+                        let usesExistingDeck = hasCustomDeckName && store.allDeckNames.contains(trimmedDeckName)
+                        Label("Mevcut Desteler", systemImage: usesExistingDeck ? "folder.fill" : "folder")
+                    }
+                    .buttonStyle(.bordered)
+                    .popover(isPresented: $showTargetDeckMenu, arrowEdge: .bottom) {
+                        deckOptions
                     }
                 }
             }
-            .padding(10)
         }
     }
 
-    // MARK: - Section 3: Newly Added Words Preview
+    private var deckOptions: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    targetDeckName = automaticDeckName
+                    hasCustomDeckName = false
+                    showTargetDeckMenu = false
+                } label: {
+                    Label("\(automaticDeckName) (Otomatik)", systemImage: hasCustomDeckName ? "folder" : "folder.fill")
+                }
+                .accessibilityAddTraits(hasCustomDeckName ? [] : .isSelected)
+
+                Divider()
+
+                ForEach(store.allDeckNames, id: \.self) { deck in
+                    let isSelected = hasCustomDeckName && trimmedDeckName == deck
+                    Button {
+                        targetDeckName = deck
+                        hasCustomDeckName = true
+                        showTargetDeckMenu = false
+                    } label: {
+                        Label(deck, systemImage: isSelected ? "folder.fill" : "folder")
+                    }
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+            .buttonStyle(.borderless)
+            .padding(12)
+        }
+        .frame(idealWidth: 250, minHeight: 72, idealHeight: 220)
+    }
+
+    // MARK: - Results
 
     private var generatedResultsSection: some View {
-        GroupBox(label: Label("Kelime Haznesine Eklenen Yeni Kelimeler (\(newlyAddedWords.count) adet)", systemImage: "checkmark.circle.fill")) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Aşağıdaki kelimeler mevcut listenizle karşılaştırıldı, tekrarsız olarak yerel depolama alanına kaydedildi ve çalışma sırasına eklendi:")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+        GroupBox {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(newlyAddedWords) { item in
+                    let article = Artikel.parse(item.artikel)
+                    let articleColor = article?.color ?? AppPalette.articleNone
 
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(newlyAddedWords) { item in
-                        let art = Artikel.parse(item.artikel)
-                        let artColor = art?.color ?? AppPalette.articleNone
-                        HStack(spacing: 12) {
-                            Text(art?.rawValue ?? ArtikelFilter.none)
-                                .font(.subheadline.bold())
-                                .foregroundColor(artColor)
-                                .frame(width: 44)
-                                .padding(.vertical, 2)
-                                .background(artColor.opacity(0.15))
-                                .clipShape(RoundedRectangle(cornerRadius: 5))
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(article?.rawValue ?? ArtikelFilter.none)
+                            .font(.subheadline.bold())
+                            .foregroundStyle(articleColor)
+                            .padding(.horizontal, 6)
+                            .frame(minWidth: 44)
+                            .padding(.vertical, 2)
+                            .background(articleColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
 
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(item.word)
-                                .font(.subheadline.weight(.semibold))
-
-                            Text("—")
-                                .foregroundColor(.secondary)
-
+                                .fontWeight(.semibold)
                             Text(item.meaning)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-
-                            Spacer()
+                                .foregroundStyle(.secondary)
                         }
-                        .padding(.vertical, 2)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .accessibilityElement(children: .combine)
                 }
-                .padding(8)
             }
             .padding(8)
+        } label: {
+            Label("Kelime Havuzuna Eklenen Yeni Kelimeler (\(newlyAddedWords.count) adet)", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(AppPalette.success)
+        }
+    }
+
+    private struct FilledActionStyle: ButtonStyle {
+        @Environment(\.isEnabled) private var isEnabled
+
+        let fill: Color
+        let ink: Color
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .fontWeight(.semibold)
+                .foregroundStyle(isEnabled ? ink : Color.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    isEnabled ? fill : Color(nsColor: .quaternaryLabelColor),
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+                .opacity(configuration.isPressed ? 0.85 : 1)
         }
     }
 
@@ -516,8 +673,12 @@ struct AIGeneratorSheet: View {
 
     @MainActor
     private func generateAndAddWords() async {
-        errorMessage = nil
+        guard !isGenerating, authManager.isAuthorized else { return }
+        clearAuthorizationError()
+        showTargetDeckMenu = false
         isGenerating = true
+        didFinishGenerating = false
+        generationError = nil
         newlyAddedWords = []
         progressMessage = "Gemini bağlantısı kuruluyor..."
 
@@ -562,14 +723,15 @@ struct AIGeneratorSheet: View {
                     }
                 }
             }
-            self.newlyAddedWords = addedItems
+            newlyAddedWords = addedItems
+            didFinishGenerating = true
             if !addedItems.isEmpty {
                 Task {
                     await store.syncWithGoogleDrive(authManager: authManager, isSilentAutoSync: true)
                 }
             }
         } catch {
-            self.errorMessage = error.localizedDescription
+            generationError = error.localizedDescription
         }
     }
 }

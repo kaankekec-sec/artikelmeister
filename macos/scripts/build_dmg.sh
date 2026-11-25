@@ -85,6 +85,7 @@ SOURCES=(
     Sources/StudyView.swift
     Sources/WordListView.swift
     Sources/StatsAndSettingsView.swift
+    Sources/AppCommands.swift
     Sources/App.swift
 )
 

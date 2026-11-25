@@ -22,7 +22,7 @@ private enum AppLogoAssets {
                 return img
             }
         }
-        return NSApp.applicationIconImage
+        return nil
     }
 }
 
@@ -40,6 +40,9 @@ private struct LogoDropletSpec {
 struct BloodyBrainLogoView: View {
     var size: CGFloat = 140
     var animated: Bool = true
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isPulsing = false
 
     private static let droplets: [LogoDropletSpec] = [
         // 1. Middle-left main teardrop below stem (canonical logo position: x=0.3922, y=0.8073)
@@ -75,148 +78,140 @@ struct BloodyBrainLogoView: View {
     ]
 
     var body: some View {
-        if animated {
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: false)) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                let pulse = 0.5 + 0.5 * sin(t * 2.8)
-                let secondaryPulse = 0.5 + 0.5 * cos(t * 4.2)
-
-                ZStack {
-                    // 1. Breathing neon crimson outer aura behind the dark squircle
-                    RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-                        .fill(
-                            RadialGradient(
-                                colors: [
-                                    Color(red: 1.0, green: 0.16, blue: 0.18).opacity(0.28 + 0.24 * pulse),
-                                    Color(red: 0.75, green: 0.04, blue: 0.10).opacity(0.10 + 0.10 * pulse),
-                                    Color.clear
-                                ],
-                                center: .center,
-                                startRadius: size * 0.15,
-                                endRadius: size * 0.66
-                            )
-                        )
-                        .frame(width: size * 1.24, height: size * 1.24)
-                        .scaleEffect(0.96 + 0.09 * pulse)
-
-                    // 2. Exact dark-slate squircle & neon brain base (with the 4 detached drops separated for live animation)
-                    ZStack {
-                        if let baseImg = AppLogoAssets.squircleNoDrops ?? AppLogoAssets.squircleFull {
-                            Image(nsImage: baseImg)
-                                .resizable()
-                                .interpolation(.high)
-                                .scaledToFit()
-                                .frame(width: size, height: size)
-                        }
-
-                        // 3. Pulsing neon-red cortex & stems glow overlay (exact pixel form of the brain)
-                        if let neonBrainImg = AppLogoAssets.brainNoDrops {
-                            Image(nsImage: neonBrainImg)
-                                .resizable()
-                                .interpolation(.high)
-                                .scaledToFit()
-                                .frame(width: size, height: size)
-                                .blendMode(.plusLighter)
-                                .opacity(0.14 + 0.52 * pulse)
-                                .shadow(
-                                    color: Color(red: 1.0, green: 0.18, blue: 0.18).opacity(0.35 + 0.40 * secondaryPulse),
-                                    radius: size * (0.025 + 0.025 * pulse)
-                                )
-                        }
-
-                        // 4. Live animated blood droplets dripping from the exact stem tips of the logo
-                        Canvas { context, canvasSize in
-                            let w = canvasSize.width
-                            let h = canvasSize.height
-
-                            for drop in Self.droplets {
-                                let rawPhase = fmod(t / drop.period + drop.phaseOffset, 1.0)
-                                let phase = rawPhase < 0 ? rawPhase + 1.0 : rawPhase
-
-                                // Phase 0.0..0.20: swells at stem tip; 0.20..0.86: accelerates down; 0.86..1.0: fades out
-                                let fallProgress: CGFloat
-                                let scale: CGFloat
-                                let alpha: Double
-
-                                if phase < 0.20 {
-                                    let p = CGFloat(phase / 0.20)
-                                    fallProgress = p * 0.06
-                                    scale = 0.45 + 0.55 * p
-                                    alpha = Double(0.55 + 0.45 * p)
-                                } else if phase < 0.86 {
-                                    let p = CGFloat((phase - 0.20) / 0.66)
-                                    fallProgress = 0.06 + 0.94 * pow(p, 1.42)
-                                    scale = 1.0
-                                    alpha = 1.0
-                                } else {
-                                    let p = CGFloat((phase - 0.86) / 0.14)
-                                    fallProgress = 1.0 + 0.08 * p
-                                    scale = 1.0 - 0.25 * p
-                                    alpha = Double(1.0 - p)
-                                }
-
-                                let cx = w * drop.normX
-                                let cy = h * (drop.startNormY + (drop.endNormY - drop.startNormY) * fallProgress)
-                                let dw = w * drop.widthFactor * scale
-                                let dh = h * drop.heightFactor * scale
-
-                                let dropRect = CGRect(x: cx - dw * 0.5, y: cy - dh * 0.5, width: dw, height: dh)
-                                let path: Path
-                                if drop.isTeardrop {
-                                    path = BloodTeardropShape().path(in: dropRect)
-                                } else {
-                                    path = Path(ellipseIn: dropRect)
-                                }
-
-                                // Soft neon red halo around droplet
-                                let glowRect = dropRect.insetBy(dx: -dw * 0.35, dy: -dh * 0.35)
-                                let glowPath = Path(ellipseIn: glowRect)
-                                context.fill(
-                                    glowPath,
-                                    with: .radialGradient(
-                                        Gradient(colors: [
-                                            Color(red: 1.0, green: 0.18, blue: 0.18).opacity(alpha * 0.45),
-                                            Color.clear
-                                        ]),
-                                        center: CGPoint(x: cx, y: cy),
-                                        startRadius: 0,
-                                        endRadius: max(dw, dh) * 0.9
-                                    )
-                                )
-
-                                // Bright neon red droplet core matching the exact brain color (#FF2D2D)
-                                context.fill(
-                                    path,
-                                    with: .color(Color(red: 1.0, green: 0.176, blue: 0.176).opacity(alpha))
-                                )
-                            }
-                        }
-                        .frame(width: size, height: size)
-                        .allowsHitTesting(false)
-                    }
-                    .scaleEffect(0.985 + 0.028 * pulse)
-                    .shadow(
-                        color: Color.black.opacity(0.45),
-                        radius: size * 0.06,
-                        x: 0,
-                        y: size * 0.03
-                    )
-                }
-                .frame(width: size, height: size)
+        Group {
+            if animated && !reduceMotion {
+                animatedLogo
+            } else if let fullImage = AppLogoAssets.squircleFull ?? NSApp?.applicationIconImage {
+                logoImage(fullImage)
+                    .shadow(color: .black.opacity(0.28), radius: size * 0.04, x: 0, y: size * 0.02)
             }
-        } else {
-            ZStack {
-                if let fullImg = AppLogoAssets.squircleFull {
-                    Image(nsImage: fullImg)
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .frame(width: size, height: size)
-                        .shadow(color: Color.black.opacity(0.28), radius: size * 0.04, x: 0, y: size * 0.02)
-                }
-            }
-            .frame(width: size, height: size)
         }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+
+    private var animatedLogo: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color(red: 1.0, green: 0.16, blue: 0.18).opacity(isPulsing ? 0.52 : 0.28),
+                            Color(red: 0.75, green: 0.04, blue: 0.10).opacity(isPulsing ? 0.20 : 0.10),
+                            .clear
+                        ],
+                        center: .center,
+                        startRadius: size * 0.15,
+                        endRadius: size * 0.66
+                    )
+                )
+                .frame(width: size * 1.24, height: size * 1.24)
+                .scaleEffect(isPulsing ? 1.05 : 0.96)
+
+            ZStack {
+                if let baseImage = AppLogoAssets.squircleNoDrops ?? AppLogoAssets.squircleFull ?? NSApp?.applicationIconImage {
+                    logoImage(baseImage)
+                }
+
+                if let neonImage = AppLogoAssets.brainNoDrops {
+                    logoImage(neonImage)
+                        .blendMode(.plusLighter)
+                        .opacity(isPulsing ? 0.66 : 0.14)
+                        .shadow(
+                            color: Color(red: 1.0, green: 0.18, blue: 0.18).opacity(isPulsing ? 0.75 : 0.35),
+                            radius: size * (isPulsing ? 0.05 : 0.025)
+                        )
+                }
+
+                TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: false)) { timeline in
+                    droplets(at: timeline.date.timeIntervalSinceReferenceDate)
+                }
+            }
+            .scaleEffect(isPulsing ? 1.013 : 0.985)
+            .shadow(color: .black.opacity(0.45), radius: size * 0.06, x: 0, y: size * 0.03)
+        }
+        .animation(.easeInOut(duration: 1.12).repeatForever(autoreverses: true), value: isPulsing)
+        .onAppear { isPulsing = true }
+        .onDisappear { isPulsing = false }
+    }
+
+    private func logoImage(_ image: NSImage) -> some View {
+        Image(nsImage: image)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: size, height: size)
+    }
+
+    private func droplets(at t: TimeInterval) -> some View {
+        Canvas { context, canvasSize in
+            let w = canvasSize.width
+            let h = canvasSize.height
+
+            for drop in Self.droplets {
+                let rawPhase = fmod(t / drop.period + drop.phaseOffset, 1.0)
+                let phase = rawPhase < 0 ? rawPhase + 1.0 : rawPhase
+
+                // Phase 0.0..0.20: swells at stem tip; 0.20..0.86: accelerates down; 0.86..1.0: fades out
+                let fallProgress: CGFloat
+                let scale: CGFloat
+                let alpha: Double
+
+                if phase < 0.20 {
+                    let p = CGFloat(phase / 0.20)
+                    fallProgress = p * 0.06
+                    scale = 0.45 + 0.55 * p
+                    alpha = Double(0.55 + 0.45 * p)
+                } else if phase < 0.86 {
+                    let p = CGFloat((phase - 0.20) / 0.66)
+                    fallProgress = 0.06 + 0.94 * pow(p, 1.42)
+                    scale = 1.0
+                    alpha = 1.0
+                } else {
+                    let p = CGFloat((phase - 0.86) / 0.14)
+                    fallProgress = 1.0 + 0.08 * p
+                    scale = 1.0 - 0.25 * p
+                    alpha = Double(1.0 - p)
+                }
+
+                let cx = w * drop.normX
+                let cy = h * (drop.startNormY + (drop.endNormY - drop.startNormY) * fallProgress)
+                let dw = w * drop.widthFactor * scale
+                let dh = h * drop.heightFactor * scale
+
+                let dropRect = CGRect(x: cx - dw * 0.5, y: cy - dh * 0.5, width: dw, height: dh)
+                let path: Path
+                if drop.isTeardrop {
+                    path = BloodTeardropShape().path(in: dropRect)
+                } else {
+                    path = Path(ellipseIn: dropRect)
+                }
+
+                // Soft neon red halo around droplet
+                let glowRect = dropRect.insetBy(dx: -dw * 0.35, dy: -dh * 0.35)
+                let glowPath = Path(ellipseIn: glowRect)
+                context.fill(
+                    glowPath,
+                    with: .radialGradient(
+                        Gradient(colors: [
+                            Color(red: 1.0, green: 0.18, blue: 0.18).opacity(alpha * 0.45),
+                            Color.clear
+                        ]),
+                        center: CGPoint(x: cx, y: cy),
+                        startRadius: 0,
+                        endRadius: max(dw, dh) * 0.9
+                    )
+                )
+
+                // Bright neon red droplet core matching the exact brain color (#FF2D2D)
+                context.fill(
+                    path,
+                    with: .color(Color(red: 1.0, green: 0.176, blue: 0.176).opacity(alpha))
+                )
+            }
+        }
+        .frame(width: size, height: size)
+        .allowsHitTesting(false)
     }
 }
 
@@ -237,53 +232,50 @@ private struct BloodTeardropShape: Shape {
             control2: CGPoint(x: w * 1.12, y: h * 0.58)
         )
         path.closeSubpath()
-        return path
+        return path.applying(CGAffineTransform(translationX: rect.minX, y: rect.minY))
     }
 }
 
 struct SplashIntroView: View {
     let onFinished: () -> Void
 
-    @State private var appearScale: CGFloat = 0.74
-    @State private var appearOpacity: Double = 0.0
-    @State private var textOffset: CGFloat = 18
-    @State private var progressValue: CGFloat = 0.0
-    @State private var ringScale: CGFloat = 0.82
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hasAppeared = false
+    @State private var hasFinished = false
 
     var body: some View {
         ZStack {
-            // Deep dark slate-obsidian background matching the new logo squircle
+            AppPalette.splashBackground
+                .ignoresSafeArea()
+
             LinearGradient(
                 colors: [
-                    Color(red: 0.08, green: 0.14, blue: 0.17),
-                    Color(red: 0.03, green: 0.06, blue: 0.11),
-                    Color(red: 0.01, green: 0.02, blue: 0.05)
+                    AppPalette.splashGradientTop,
+                    AppPalette.splashGradientMiddle,
+                    AppPalette.splashGradientBottom
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
             .ignoresSafeArea()
 
-            // Subtle ambient neon red radial backdrop glow
             RadialGradient(
                 colors: [
-                    Color(red: 1.0, green: 0.15, blue: 0.18).opacity(0.16 * appearOpacity),
-                    Color(red: 0.55, green: 0.02, blue: 0.06).opacity(0.06 * appearOpacity),
-                    Color.clear
+                    Color(red: 1.0, green: 0.15, blue: 0.18).opacity(0.16),
+                    Color(red: 0.55, green: 0.02, blue: 0.06).opacity(0.06),
+                    .clear
                 ],
                 center: .center,
                 startRadius: 20,
                 endRadius: 340
             )
-            .scaleEffect(ringScale)
             .ignoresSafeArea()
 
             VStack(spacing: 26) {
                 Spacer()
 
-                BloodyBrainLogoView(size: 196, animated: true)
-                    .scaleEffect(appearScale)
-                    .opacity(appearOpacity)
+                BloodyBrainLogoView(size: 196, animated: !reduceMotion)
+                    .scaleEffect(reduceMotion || hasAppeared ? 1 : 0.74)
 
                 VStack(spacing: 10) {
                     Text("ARTIKELMEISTER")
@@ -292,7 +284,7 @@ struct SplashIntroView: View {
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [
-                                    Color.white,
+                                    .white,
                                     Color(red: 1.0, green: 0.38, blue: 0.40),
                                     Color(red: 1.0, green: 0.16, blue: 0.18)
                                 ],
@@ -300,93 +292,58 @@ struct SplashIntroView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
+                        .accessibilityAddTraits(.isHeader)
 
                     Text("Almanca Artikel & Nöro-Hafıza Çalışma Sistemi")
                         .font(.subheadline.weight(.medium))
-                        .foregroundColor(Color.white.opacity(0.72))
+                        .foregroundStyle(Color.white.opacity(0.72))
 
                     HStack(spacing: 14) {
-                        Text("der")
-                            .font(.caption.bold())
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Artikel.der.color.opacity(0.25))
-                            .foregroundColor(Artikel.der.color)
-                            .clipShape(Capsule())
-
-                        Text("die")
-                            .font(.caption.bold())
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Artikel.die.color.opacity(0.25))
-                            .foregroundColor(Artikel.die.color)
-                            .clipShape(Capsule())
-
-                        Text("das")
-                            .font(.caption.bold())
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Artikel.das.color.opacity(0.25))
-                            .foregroundColor(Artikel.das.color)
-                            .clipShape(Capsule())
+                        ForEach(Artikel.allCases) { artikel in
+                            Text(artikel.rawValue)
+                                .font(.caption.bold())
+                                .foregroundStyle(AppPalette.splashArtikelColor(artikel))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(AppPalette.splashArtikelBadgeBackground(artikel), in: Capsule())
+                        }
                     }
                     .padding(.top, 4)
                 }
-                .offset(y: textOffset)
-                .opacity(appearOpacity)
-
-                // Neon crimson loading progress bar
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.white.opacity(0.12))
-                        .frame(width: 240, height: 6)
-
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 1.0, green: 0.18, blue: 0.18),
-                                    Color(red: 0.78, green: 0.04, blue: 0.10)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: 240 * progressValue, height: 6)
-                        .shadow(color: Color(red: 1.0, green: 0.18, blue: 0.18).opacity(0.6), radius: 6)
-                }
-                .padding(.top, 12)
-                .opacity(appearOpacity)
+                .offset(y: reduceMotion || hasAppeared ? 0 : 18)
+                .opacity(reduceMotion || hasAppeared ? 1 : 0)
 
                 Spacer()
 
-                Text("Geçmek için tıklayın")
-                    .font(.caption2)
-                    .foregroundColor(Color.white.opacity(0.38))
-                    .padding(.bottom, 16)
+                Button(action: finish) {
+                    Text("Açılışı geç")
+                        .foregroundStyle(AppPalette.splashLabel)
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut(.cancelAction)
+                .help("Açılışı geç (Esc)")
             }
             .padding(32)
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            onFinished()
+        .onTapGesture(perform: finish)
+        .environment(\.colorScheme, .dark)
+        .task(id: reduceMotion) {
+            if !reduceMotion {
+                withAnimation(.spring(response: 0.65, dampingFraction: 0.74)) {
+                    hasAppeared = true
+                }
+                try? await Task.sleep(for: .milliseconds(1700))
+            }
+            guard !Task.isCancelled else { return }
+            finish()
         }
-        .onAppear {
-            withAnimation(.spring(response: 0.65, dampingFraction: 0.74)) {
-                appearScale = 1.0
-                appearOpacity = 1.0
-                textOffset = 0
-            }
-            withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
-                ringScale = 1.12
-            }
-            withAnimation(.easeInOut(duration: 2.1)) {
-                progressValue = 1.0
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.35) {
-                onFinished()
-            }
-        }
+    }
+
+    private func finish() {
+        guard !hasFinished else { return }
+        hasFinished = true
+        onFinished()
     }
 }
 
@@ -416,6 +373,11 @@ struct MainContentView: View {
     @State private var showNewDeckSheet: Bool = false
     @State private var deckToRename: String? = nil
     @State private var showManualSignInModal: Bool = false
+
+    private var tabSelectionForCommands: Binding<AppTab>? {
+        guard !showNewDeckSheet, deckToRename == nil, !showManualSignInModal else { return nil }
+        return $selectedTab
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -515,6 +477,7 @@ struct MainContentView: View {
                             } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: allSelected ? "tray.full.fill" : "tray.full")
+                                        .accessibilityHidden(true)
                                         .font(.caption)
                                         .foregroundColor(allSelected ? .accentColor : .secondary)
                                         .frame(width: 16)
@@ -536,6 +499,7 @@ struct MainContentView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityAddTraits(allSelected ? .isSelected : [])
 
                             // Individual Decks
                             ForEach(store.allDeckNames, id: \.self) { deck in
@@ -545,6 +509,7 @@ struct MainContentView: View {
                                 } label: {
                                     HStack(spacing: 8) {
                                         Image(systemName: isDeckSelected ? "folder.fill" : "folder")
+                                            .accessibilityHidden(true)
                                             .font(.caption)
                                             .foregroundColor(isDeckSelected ? .accentColor : .secondary)
                                             .frame(width: 16)
@@ -566,6 +531,7 @@ struct MainContentView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityAddTraits(isDeckSelected ? .isSelected : [])
                                 .contextMenu {
                                     Button {
                                         deckToRename = deck
@@ -681,6 +647,7 @@ struct MainContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 920, minHeight: 600)
+        .focusedSceneValue(\.appTabSelection, tabSelectionForCommands)
         .onAppear {
             if authManager.isGoogleAccountConnected {
                 Task {
@@ -1077,6 +1044,7 @@ struct OnboardingSetupScreen: View {
 
 // MARK: - Root Container View
 struct RootContainerView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject var store: DeckStore
     @EnvironmentObject var authManager: GeminiAuthManager
     @State private var showSplash: Bool = true
@@ -1089,11 +1057,11 @@ struct RootContainerView: View {
         ZStack {
             if showSplash {
                 SplashIntroView {
-                    withAnimation(.easeInOut(duration: 0.45)) {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
                         showSplash = false
                     }
                 }
-                .transition(.opacity)
+                .transition(reduceMotion ? .identity : .opacity)
                 .zIndex(10)
             } else if shouldShowOnboarding {
                 OnboardingSetupScreen {

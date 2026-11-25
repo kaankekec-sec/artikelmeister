@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -31,45 +32,51 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderDelete
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoveToInbox
+import androidx.compose.material.icons.filled.Outbox
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -98,23 +105,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.artikelmeister.android.Artikel
 import com.artikelmeister.android.ArtikelFilter
 import com.artikelmeister.android.CardStage
@@ -146,6 +162,7 @@ private const val WIDE_LAYOUT_MIN_WIDTH_DP = 600
 
 /** Expanded width class: CSV import/export also shown as buttons instead of in the overflow. */
 private const val EXPANDED_LAYOUT_MIN_WIDTH_DP = 840
+private const val AI_GENERATE_LABEL = "AI ile kelime üret"
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -176,6 +193,8 @@ fun WordListView(
     var showNewDeckSheet by remember { mutableStateOf(false) }
     var deckToRename by remember { mutableStateOf<String?>(null) }
     var alertMessage by remember { mutableStateOf<String?>(null) }
+    var alertTitle by remember { mutableStateOf<String?>(null) }
+    var showImportGuide by rememberSaveable { mutableStateOf(false) }
     // True only while alertMessage is a successful CSV import result that can still be undone.
     var offerImportUndo by remember { mutableStateOf(false) }
     var showAIGenerator by remember { mutableStateOf(false) }
@@ -261,8 +280,10 @@ fun WordListView(
                     R.string.words_import_result,
                     res.addedCount, res.updatedCount, res.skippedCount, res.invalidLines
                 )
+                alertTitle = "CSV içe aktarıldı"
                 offerImportUndo = store.canUndoImport
             }.onFailure { err ->
+                alertTitle = "CSV içe aktarılamadı"
                 offerImportUndo = false
                 alertMessage = err.localizedMessage ?: context.getString(R.string.words_import_failed)
             }
@@ -283,12 +304,13 @@ fun WordListView(
                     snackbarHostState.showSnackbar(context.getString(R.string.words_export_success))
                 }
             }.onFailure { err ->
+                alertTitle = null
                 alertMessage = context.getString(R.string.words_export_failed, err.localizedMessage ?: "")
             }
         }
     }
 
-    val launchImport = { importCsvLauncher.launch(CsvCards.ACCEPTED_MIME_TYPES) }
+    val showImport = { showImportGuide = true }
     val launchExport = { exportCsvLauncher.launch(context.getString(R.string.words_export_file_name)) }
 
     fun submitQuickAdd(): Boolean? {
@@ -301,6 +323,18 @@ fun WordListView(
             newMeaning = ""
         }
         return added
+    }
+
+    fun submitInlineWord() {
+        val term = Flashcard(artikel = newArtikel, word = newWord.trim()).fullGermanTerm
+        val added = submitQuickAdd() ?: return
+        val message = context.getString(
+            if (added) R.string.words_added_feedback else R.string.words_duplicate_feedback,
+            term
+        )
+        scope.launch {
+            snackbarHostState.showSnackbar(message)
+        }
     }
 
     BoxWithConstraints(
@@ -327,17 +361,10 @@ fun WordListView(
                     isWide = isWide,
                     showAllActions = isExpanded,
                     canExport = store.cards.isNotEmpty(),
-                    selectedDeck = selectedDeckFilter,
                     onOpenDrawer = onOpenDrawer,
                     onAiGenerate = { showAIGenerator = true },
-                    onImport = launchImport,
-                    onExport = launchExport,
-                    onNewDeck = { showNewDeckSheet = true },
-                    onRenameDeck = { deckToRename = it },
-                    onDeleteDeck = { deck ->
-                        store.deleteDeck(name = deck, deleteWords = false)
-                        if (selectedDeckFilter == deck) selectedDeckFilter = null
-                    }
+                    onImport = showImport,
+                    onExport = launchExport
                 )
 
                 Column(
@@ -356,7 +383,7 @@ fun WordListView(
                             deckName = newDeckName,
                             onDeckChange = { newDeckName = it },
                             onNewDeck = { showNewDeckSheet = true },
-                            onSubmit = { submitQuickAdd() }
+                            onSubmit = ::submitInlineWord
                         )
                     }
 
@@ -388,7 +415,6 @@ fun WordListView(
                     )
                 }
 
-                // Deck filter chips — "Yeni deste" is the leading item, so it's always visible.
                 DeckChipRow(
                     store = store,
                     // Counts exclude cards that are hidden while their Undo snackbar is showing.
@@ -418,29 +444,40 @@ fun WordListView(
                 val emptyModifier = Modifier
                     .fillMaxSize()
                     .padding(bottom = if (isWide) 0.dp else 72.dp)
+                val isPoolEmpty = visibleTotal == 0
+                val isUnfilteredEmptyDeck = selectedDeckFilter != null && searchText.isBlank() &&
+                    artikelFilterKey == FILTER_ALL && selectedStageFilter == null
                 Box(contentAlignment = Alignment.Center, modifier = emptyModifier) {
                     when {
-                        visibleTotal == 0 -> StateMessageView(
-                            icon = Icons.Default.Inbox,
-                            title = stringResource(R.string.words_empty_title),
-                            message = stringResource(R.string.words_empty_message),
-                            primaryActionLabel = stringResource(R.string.words_ai_generate),
-                            primaryActionIcon = Icons.Default.AutoAwesome,
-                            onPrimaryAction = { showAIGenerator = true },
-                            secondaryActionLabel = stringResource(R.string.words_csv_import),
-                            onSecondaryAction = launchImport
-                        )
-                        selectedDeckFilter != null && searchText.isBlank() &&
-                            artikelFilterKey == FILTER_ALL && selectedStageFilter == null -> StateMessageView(
-                            icon = Icons.Default.Folder,
-                            title = stringResource(R.string.words_empty_deck_title, selectedDeckFilter ?: ""),
-                            message = stringResource(R.string.words_empty_deck_message),
-                            primaryActionLabel = stringResource(R.string.words_add_word),
-                            primaryActionIcon = Icons.Default.Add,
-                            onPrimaryAction = { showAddDialog = true },
-                            secondaryActionLabel = stringResource(R.string.words_ai_generate),
-                            onSecondaryAction = { showAIGenerator = true }
-                        )
+                        isPoolEmpty || isUnfilteredEmptyDeck -> Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.verticalScroll(rememberScrollState())
+                        ) {
+                            StateMessageView(
+                                icon = if (isPoolEmpty) Icons.Default.Inbox else Icons.Default.Folder,
+                                title = if (isPoolEmpty) {
+                                    stringResource(R.string.words_empty_title)
+                                } else {
+                                    stringResource(R.string.words_empty_deck_title, selectedDeckFilter.orEmpty())
+                                },
+                                message = stringResource(
+                                    if (isPoolEmpty) R.string.words_empty_message else R.string.words_empty_deck_message
+                                ),
+                                primaryActionLabel = if (isWide) stringResource(R.string.words_add_word) else null,
+                                primaryActionIcon = Icons.Default.Add,
+                                onPrimaryAction = { showAddDialog = true },
+                                secondaryActionLabel = if (isPoolEmpty) stringResource(R.string.words_csv_import) else null,
+                                onSecondaryAction = showImport
+                            )
+                            TextButton(
+                                onClick = { showAIGenerator = true },
+                                colors = ButtonDefaults.textButtonColors(contentColor = colors.accentPurple)
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(AI_GENERATE_LABEL)
+                            }
+                        }
                         else -> StateMessageView(
                             icon = Icons.Default.SearchOff,
                             title = stringResource(R.string.words_no_results_title),
@@ -482,7 +519,7 @@ fun WordListView(
                 icon = { Icon(Icons.Default.Add, contentDescription = null) },
                 text = { Text(stringResource(R.string.words_add_word)) },
                 containerColor = colors.accentBlue,
-                contentColor = colors.onAccent,
+                contentColor = colors.onBlue,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
@@ -561,10 +598,38 @@ fun WordListView(
         )
     }
 
+    if (showImportGuide) {
+        val targetDeck = selectedDeckFilter ?: newDeckName
+        AlertDialog(
+            onDismissRequest = { showImportGuide = false },
+            title = { Text(stringResource(R.string.words_csv_import)) },
+            text = {
+                Text(
+                    "Sütun sırası: Artikel, Kelime, Anlam, Deste (isteğe bağlı).\n\n" +
+                        "Deste belirtilmeyen kelimeler „$targetDeck“ destesine aktarılır."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showImportGuide = false
+                    importCsvLauncher.launch(CsvCards.ACCEPTED_MIME_TYPES)
+                }) {
+                    Text("Dosya seç")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImportGuide = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
     alertMessage?.let { message ->
+        val infoTitle = stringResource(R.string.dialog_info_title)
         AlertDialog(
             onDismissRequest = { alertMessage = null; offerImportUndo = false; store.finishImportUndoWindow() },
-            title = { Text(stringResource(R.string.dialog_info_title)) },
+            title = { Text(alertTitle ?: infoTitle) },
             text = { Text(message, style = MaterialTheme.typography.bodyMedium) },
             confirmButton = {
                 TextButton(onClick = { alertMessage = null; offerImportUndo = false; store.finishImportUndoWindow() }) {
@@ -576,9 +641,10 @@ fun WordListView(
                     TextButton(onClick = {
                         val undone = store.undoLastImport()
                         offerImportUndo = false
+                        alertTitle = null
                         alertMessage = if (undone) "İçe aktarma geri alındı." else null
                     }) {
-                        Text("Geri al")
+                        Text(stringResource(R.string.action_undo))
                     }
                 }
             } else null
@@ -598,14 +664,10 @@ private fun WordPoolTitleRow(
     isWide: Boolean,
     showAllActions: Boolean,
     canExport: Boolean,
-    selectedDeck: String?,
     onOpenDrawer: (() -> Unit)?,
     onAiGenerate: () -> Unit,
     onImport: () -> Unit,
-    onExport: () -> Unit,
-    onNewDeck: () -> Unit,
-    onRenameDeck: (String) -> Unit,
-    onDeleteDeck: (String) -> Unit
+    onExport: () -> Unit
 ) {
     val colors = LocalAppColors.current
     var showOverflow by remember { mutableStateOf(false) }
@@ -649,74 +711,64 @@ private fun WordPoolTitleRow(
             )
         }
 
-        // Primary action (always visible): AI generation.
-        Button(
-            onClick = onAiGenerate,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = colors.accentPurple,
-                contentColor = colors.onAccent
-            ),
-            contentPadding = PaddingValues(start = 12.dp, end = 14.dp),
-            modifier = Modifier.padding(start = 8.dp)
-        ) {
-            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = stringResource(if (isWide) R.string.words_ai_generate else R.string.words_ai_generate_short),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold
-            )
+        if (isWide) {
+            FilledTonalButton(
+                onClick = onAiGenerate,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = colors.purpleBadgeBackground,
+                    contentColor = colors.accentPurple
+                ),
+                modifier = Modifier.padding(start = 8.dp)
+            ) {
+                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(AI_GENERATE_LABEL)
+            }
+        } else {
+            FilledTonalIconButton(
+                onClick = onAiGenerate,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = colors.purpleBadgeBackground,
+                    contentColor = colors.accentPurple
+                )
+            ) {
+                Icon(Icons.Default.AutoAwesome, contentDescription = AI_GENERATE_LABEL)
+            }
         }
 
         if (showAllActions) {
             Spacer(modifier = Modifier.width(8.dp))
             OutlinedButton(onClick = onImport) {
-                Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.MoveToInbox, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(stringResource(R.string.words_csv_import), style = MaterialTheme.typography.labelLarge)
             }
             Spacer(modifier = Modifier.width(8.dp))
             OutlinedButton(onClick = onExport, enabled = canExport) {
-                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Outbox, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(stringResource(R.string.words_csv_export), style = MaterialTheme.typography.labelLarge)
             }
-        }
-
-        // Overflow: everything else, so nothing requires horizontal scrolling on a phone.
-        Box {
-            IconButton(onClick = { showOverflow = true }) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = stringResource(R.string.action_more_options),
-                    tint = colors.primaryText
-                )
-            }
-            DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
-                if (!showAllActions) {
+        } else {
+            Box {
+                IconButton(onClick = { showOverflow = true }) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = stringResource(R.string.action_more_options),
+                        tint = colors.primaryText
+                    )
+                }
+                DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.words_csv_import)) },
-                        leadingIcon = { Icon(Icons.Default.FileUpload, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.Filled.MoveToInbox, contentDescription = null) },
                         onClick = { showOverflow = false; onImport() }
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.words_csv_export)) },
-                        leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.Filled.Outbox, contentDescription = null) },
                         enabled = canExport,
                         onClick = { showOverflow = false; onExport() }
-                    )
-                    HorizontalDivider()
-                }
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.words_new_deck_ellipsis)) },
-                    leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
-                    onClick = { showOverflow = false; onNewDeck() }
-                )
-                if (selectedDeck != null) {
-                    DeckActionMenuItems(
-                        deck = selectedDeck,
-                        onRename = { showOverflow = false; onRenameDeck(selectedDeck) },
-                        onDelete = { showOverflow = false; onDeleteDeck(selectedDeck) }
                     )
                 }
             }
@@ -739,7 +791,7 @@ private fun DeckActionMenuItems(
     if (deck != "Genel") {
         DropdownMenuItem(
             text = { Text(stringResource(R.string.words_delete_deck), color = colors.error) },
-            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = colors.error) },
+            leadingIcon = { Icon(Icons.Filled.FolderDelete, contentDescription = null, tint = colors.error) },
             onClick = onDelete
         )
     }
@@ -752,61 +804,33 @@ private fun SearchField(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalAppColors.current
-    val hint = stringResource(R.string.words_search_hint)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.textBackground)
-            .border(1.dp, colors.cardBorderSubtle, RoundedCornerShape(12.dp))
-            .padding(start = 12.dp)
-    ) {
-        Icon(
-            imageVector = Icons.Default.Search,
-            contentDescription = null,
-            tint = colors.secondaryText,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Box(
-            contentAlignment = Alignment.CenterStart,
-            modifier = Modifier.weight(1f)
-        ) {
-            if (value.isEmpty()) {
-                Text(
-                    text = hint,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.secondaryText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
-                cursorBrush = SolidColor(colors.accentBlue),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics { contentDescription = hint }
+    CompactTextField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = stringResource(R.string.words_search_hint),
+        modifier = modifier,
+        imeAction = ImeAction.Search,
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null,
+                tint = colors.secondaryText,
+                modifier = Modifier.size(20.dp)
             )
-        }
-        if (value.isNotEmpty()) {
-            IconButton(onClick = { onValueChange("") }) {
-                Icon(
-                    imageVector = Icons.Default.Cancel,
-                    contentDescription = stringResource(R.string.words_search_clear),
-                    tint = colors.secondaryText,
-                    modifier = Modifier.size(20.dp)
-                )
+        },
+        trailingAction = if (value.isNotEmpty()) {
+            {
+                IconButton(onClick = { onValueChange("") }) {
+                    Icon(
+                        imageVector = Icons.Default.Cancel,
+                        contentDescription = stringResource(R.string.words_search_clear),
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
-        } else {
-            Spacer(modifier = Modifier.width(12.dp))
-        }
-    }
+        } else null
+    )
 }
 
 @Composable
@@ -816,28 +840,48 @@ private fun StageFilterButton(
 ) {
     val colors = LocalAppColors.current
     var expanded by remember { mutableStateOf(false) }
-    val a11yLabel = stringResource(R.string.words_filter_stage)
-    val a11yState = selected?.let { stringResource(R.string.words_filter_stage_active, it.title) }
-        ?: stringResource(R.string.words_filter_all_stages)
+    val filterLabel = stringResource(R.string.words_filter_stage)
 
     Box {
-        IconButton(
-            onClick = { expanded = true },
-            modifier = Modifier.semantics { stateDescription = a11yState }
-        ) {
-            BadgedBox(badge = { if (selected != null) Badge(containerColor = colors.accentBlue) }) {
+        if (selected == null) {
+            val allStages = stringResource(R.string.words_filter_all_stages)
+            IconButton(
+                onClick = { expanded = true },
+                modifier = Modifier.semantics { stateDescription = allStages }
+            ) {
                 Icon(
                     imageVector = Icons.Default.FilterList,
-                    contentDescription = a11yLabel,
-                    tint = if (selected != null) colors.accentBlue else colors.primaryText
+                    contentDescription = filterLabel,
+                    tint = colors.primaryText
                 )
             }
+        } else {
+            FilterChip(
+                selected = true,
+                onClick = { expanded = true },
+                label = { Text(selected.title) },
+                leadingIcon = { Icon(Icons.Default.FilterList, contentDescription = null) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = colors.blueBadgeBackground,
+                    selectedLabelColor = colors.accentBlue,
+                    selectedLeadingIconColor = colors.accentBlue
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = true,
+                    selectedBorderColor = colors.accentBlue
+                ),
+                modifier = Modifier
+                    .widthIn(max = 168.dp)
+                    .semantics { contentDescription = filterLabel }
+            )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.words_filter_all_stages)) },
                 trailingIcon = { if (selected == null) Icon(Icons.Default.Check, contentDescription = null) },
-                onClick = { onSelect(null); expanded = false }
+                onClick = { onSelect(null); expanded = false },
+                modifier = Modifier.semantics { this.selected = selected == null }
             )
             CardStage.entries.forEach { stage ->
                 DropdownMenuItem(
@@ -846,11 +890,12 @@ private fun StageFilterButton(
                         Box(
                             modifier = Modifier
                                 .size(10.dp)
-                                .background(stage.color, CircleShape)
+                                .background(colors.stageColor(stage), CircleShape)
                         )
                     },
                     trailingIcon = { if (selected == stage) Icon(Icons.Default.Check, contentDescription = null) },
-                    onClick = { onSelect(stage); expanded = false }
+                    onClick = { onSelect(stage); expanded = false },
+                    modifier = Modifier.semantics { this.selected = selected == stage }
                 )
             }
         }
@@ -870,12 +915,18 @@ private fun ArtikelFilterSegments(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalAppColors.current
-    data class Option(val key: String, val label: String, val a11y: String, val color: Color)
+    data class Option(val key: String, val label: String, val a11y: String, val color: Color, val background: Color)
 
     val options = buildList {
-        add(Option(FILTER_ALL, stringResource(R.string.words_filter_all), stringResource(R.string.words_filter_all), colors.accentBlue))
+        val allLabel = stringResource(R.string.words_filter_all)
+        add(Option(FILTER_ALL, allLabel, allLabel, colors.accentBlue, colors.blueBadgeBackground))
         Artikel.entries.forEach { art ->
-            add(Option(art.rawValue, art.rawValue, art.rawValue, art.themeColor()))
+            add(
+                Option(
+                    art.rawValue, art.rawValue, art.rawValue,
+                    colors.artikelColor(art), colors.artikelBadgeBackground(art)
+                )
+            )
         }
         // 4th article group: article-less words ('-').
         add(
@@ -883,7 +934,8 @@ private fun ArtikelFilterSegments(
                 FILTER_NO_ARTICLE,
                 stringResource(R.string.words_filter_no_article),
                 stringResource(R.string.words_filter_no_article_a11y),
-                colors.artikelNone
+                colors.artikelColor(null),
+                colors.artikelBadgeBackground(null)
             )
         )
     }
@@ -899,12 +951,12 @@ private fun ArtikelFilterSegments(
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
                 icon = {},
                 colors = SegmentedButtonDefaults.colors(
-                    activeContainerColor = option.color.copy(alpha = 0.18f),
+                    activeContainerColor = option.background,
                     activeContentColor = option.color,
-                    activeBorderColor = colors.cardBorderSubtle,
+                    activeBorderColor = option.color,
                     inactiveContainerColor = colors.textBackground,
                     inactiveContentColor = colors.primaryText,
-                    inactiveBorderColor = colors.cardBorderSubtle
+                    inactiveBorderColor = MaterialTheme.colorScheme.outline
                 ),
                 modifier = Modifier.semantics {
                     contentDescription = "${option.a11y}, ${counts.forFilter(option.key.ifEmpty { null })}"
@@ -940,57 +992,66 @@ private fun DeckChipRow(
     onDeleteDeck: (String) -> Unit
 ) {
     val colors = LocalAppColors.current
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp),
+    Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(end = 12.dp)
     ) {
-        item(key = "__new_deck") {
-            FilterChip(
-                selected = false,
-                onClick = onNewDeck,
-                label = { Text(stringResource(R.string.words_new_deck), style = MaterialTheme.typography.labelMedium) },
-                leadingIcon = {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(start = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
+            item(key = "__new_deck") {
+                OutlinedButton(
+                    onClick = onNewDeck,
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    border = BorderStroke(1.dp, colors.accentBlue)
+                ) {
                     Icon(
-                        Icons.Default.Add,
+                        Icons.Filled.CreateNewFolder,
                         contentDescription = null,
-                        tint = colors.accentBlue,
-                        modifier = Modifier.size(FilterChipDefaults.IconSize)
+                        modifier = Modifier.size(18.dp)
                     )
-                },
-                border = BorderStroke(1.dp, colors.accentBlue.copy(alpha = 0.45f)),
-                colors = FilterChipDefaults.filterChipColors(
-                    containerColor = colors.accentBlue.copy(alpha = 0.10f),
-                    labelColor = colors.accentBlue
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.words_new_deck), style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            item(key = "__all_decks") {
+                DeckChip(
+                    title = stringResource(R.string.words_all_decks),
+                    count = countFor(null),
+                    isSelected = selectedDeck == null,
+                    onClick = { onSelectDeck(null) }
                 )
-            )
-        }
-        item(key = "__all_decks") {
-            DeckChip(
-                title = stringResource(R.string.words_all_decks),
-                count = countFor(null),
-                isSelected = selectedDeck == null,
-                onClick = { onSelectDeck(null) }
-            )
-        }
-        items(store.allDeckNames, key = { it }) { deck ->
-            var showMenu by remember { mutableStateOf(false) }
-            val isSelected = selectedDeck == deck
-            Box {
+            }
+            items(store.allDeckNames, key = { it }) { deck ->
                 DeckChip(
                     title = deck,
                     count = countFor(deck),
-                    isSelected = isSelected,
-                    showMenuAffordance = isSelected,
-                    // Tapping the already-selected deck opens its actions (discoverable via ▾).
-                    onClick = { if (isSelected) showMenu = true else onSelectDeck(deck) }
+                    isSelected = selectedDeck == deck,
+                    onClick = { if (selectedDeck != deck) onSelectDeck(deck) }
                 )
+            }
+        }
+
+        if (selectedDeck != null) {
+            var showMenu by remember(selectedDeck) { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = stringResource(R.string.words_deck_options, selectedDeck),
+                        tint = colors.primaryText
+                    )
+                }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DeckActionMenuItems(
-                        deck = deck,
-                        onRename = { showMenu = false; onRenameDeck(deck) },
-                        onDelete = { showMenu = false; onDeleteDeck(deck) }
+                        deck = selectedDeck,
+                        onRename = { showMenu = false; onRenameDeck(selectedDeck) },
+                        onDelete = { showMenu = false; onDeleteDeck(selectedDeck) }
                     )
                 }
             }
@@ -1003,12 +1064,10 @@ private fun DeckChip(
     title: String,
     count: Int,
     isSelected: Boolean,
-    onClick: () -> Unit,
-    showMenuAffordance: Boolean = false
+    onClick: () -> Unit
 ) {
     val colors = LocalAppColors.current
     val a11y = stringResource(R.string.words_deck_chip_a11y, title, count)
-    val menuHint = if (showMenuAffordance) stringResource(R.string.words_deck_options, title) else null
     FilterChip(
         selected = isSelected,
         onClick = onClick,
@@ -1026,41 +1085,37 @@ private fun DeckChip(
                 text = "$count",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
+                color = if (isSelected) colors.accentBlue else colors.primaryText,
                 modifier = Modifier
                     .background(
-                        if (isSelected) colors.onAccent.copy(alpha = 0.22f) else colors.secondaryText.copy(alpha = 0.15f),
+                        if (isSelected) colors.blueBadgeBackground else colors.secondaryText.copy(alpha = 0.15f),
                         CircleShape
                     )
                     .padding(horizontal = 6.dp)
             )
         },
-        trailingIcon = if (showMenuAffordance) {
-            {
-                Icon(
-                    Icons.Default.ArrowDropDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(FilterChipDefaults.IconSize)
-                )
-            }
-        } else null,
+        leadingIcon = {
+            Icon(
+                if (isSelected) Icons.Filled.Folder else Icons.Outlined.Folder,
+                contentDescription = null,
+                modifier = Modifier.size(FilterChipDefaults.IconSize)
+            )
+        },
         colors = FilterChipDefaults.filterChipColors(
             containerColor = colors.textBackground,
             labelColor = colors.primaryText,
             iconColor = colors.secondaryText,
             selectedContainerColor = colors.accentBlue,
-            selectedLabelColor = colors.onAccent,
-            selectedTrailingIconColor = colors.onAccent,
-            selectedLeadingIconColor = colors.onAccent
+            selectedLabelColor = colors.onBlue,
+            selectedLeadingIconColor = colors.onBlue
         ),
         border = FilterChipDefaults.filterChipBorder(
             enabled = true,
             selected = isSelected,
-            borderColor = colors.cardBorderSubtle,
+            borderColor = MaterialTheme.colorScheme.outline,
             selectedBorderColor = colors.accentBlue
         ),
-        modifier = Modifier.semantics {
-            contentDescription = if (menuHint != null) "$a11y. $menuHint" else a11y
-        }
+        modifier = Modifier.semantics { contentDescription = a11y }
     )
 }
 
@@ -1090,11 +1145,11 @@ private fun ArtikelPicker(
                 icon = {},
                 colors = SegmentedButtonDefaults.colors(
                     activeContainerColor = artColor,
-                    activeContentColor = colors.onAccent,
+                    activeContentColor = colors.onArtikel(art),
                     activeBorderColor = artColor,
                     inactiveContainerColor = colors.textBackground,
                     inactiveContentColor = artColor,
-                    inactiveBorderColor = colors.cardBorderSubtle
+                    inactiveBorderColor = MaterialTheme.colorScheme.outline
                 ),
                 modifier = if (art == null) {
                     Modifier.semantics { contentDescription = noArticleA11y }
@@ -1127,7 +1182,7 @@ private fun DeckSelector(
         Surface(
             color = colors.textBackground,
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, colors.cardBorderSubtle),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
             onClick = { expanded = true },
             modifier = Modifier
                 .heightIn(min = 48.dp)
@@ -1161,10 +1216,18 @@ private fun DeckSelector(
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             store.allDeckNames.forEach { deck ->
+                val isSelected = deckName == deck
                 DropdownMenuItem(
                     text = { Text(deck) },
-                    trailingIcon = { if (deckName == deck) Icon(Icons.Default.Check, contentDescription = null) },
-                    onClick = { onDeckChange(deck); expanded = false }
+                    leadingIcon = {
+                        Icon(
+                            if (isSelected) Icons.Filled.Folder else Icons.Outlined.Folder,
+                            contentDescription = null
+                        )
+                    },
+                    trailingIcon = { if (isSelected) Icon(Icons.Default.Check, contentDescription = null) },
+                    onClick = { onDeckChange(deck); expanded = false },
+                    modifier = Modifier.semantics { selected = isSelected }
                 )
             }
             HorizontalDivider()
@@ -1190,7 +1253,7 @@ private fun QuickAddInlineBar(
     deckName: String,
     onDeckChange: (String) -> Unit,
     onNewDeck: () -> Unit,
-    onSubmit: () -> Boolean?
+    onSubmit: () -> Unit
 ) {
     val colors = LocalAppColors.current
     FlowRow(
@@ -1217,7 +1280,7 @@ private fun QuickAddInlineBar(
             onValueChange = onMeaningChange,
             placeholder = stringResource(R.string.words_meaning_hint),
             imeAction = ImeAction.Done,
-            onImeAction = { onSubmit() },
+            onDone = onSubmit,
             modifier = Modifier
                 .widthIn(min = 160.dp)
                 .weight(1f)
@@ -1230,11 +1293,11 @@ private fun QuickAddInlineBar(
             modifier = Modifier.widthIn(max = 200.dp)
         )
         Button(
-            onClick = { onSubmit() },
+            onClick = onSubmit,
             enabled = word.trim().isNotEmpty() && (artikel != null || meaning.isNotBlank()),
             colors = ButtonDefaults.buttonColors(
                 containerColor = colors.accentBlue,
-                contentColor = colors.onAccent
+                contentColor = colors.onBlue
             ),
             modifier = Modifier.height(48.dp)
         ) {
@@ -1242,6 +1305,13 @@ private fun QuickAddInlineBar(
             Spacer(modifier = Modifier.width(6.dp))
             Text(stringResource(R.string.words_add), style = MaterialTheme.typography.labelLarge)
         }
+    }
+    if (artikel == null) {
+        Text(
+            text = stringResource(R.string.words_articleless_meaning_required),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.secondaryText
+        )
     }
 }
 
@@ -1262,113 +1332,111 @@ private fun AddWordDialog(
 ) {
     val colors = LocalAppColors.current
     var feedback by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
-    val addedTemplate = stringResource(R.string.words_added_feedback, "%s")
-    val duplicateTemplate = stringResource(R.string.words_duplicate_feedback, "%s")
+    val context = LocalContext.current
 
     fun submit() {
         val term = Flashcard(artikel = artikel, word = word.trim()).fullGermanTerm
-        when (onSubmit()) {
-            true -> feedback = addedTemplate.replace("%s", term) to true
-            false -> feedback = duplicateTemplate.replace("%s", term) to false
-            null -> Unit
-        }
+        val added = onSubmit() ?: return
+        val message = context.getString(
+            if (added) R.string.words_added_feedback else R.string.words_duplicate_feedback,
+            term
+        )
+        feedback = message to added
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            color = colors.controlBackground,
-            shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(1.dp, colors.cardBorderSubtle),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(20.dp)
-            ) {
-                DialogHeader(
-                    icon = Icons.Default.Add,
-                    title = stringResource(R.string.words_add_word),
-                    onClose = onDismiss
-                )
+    WordFormDialog(
+        onDismiss = onDismiss,
+        spacing = 12.dp,
+        content = {
+            DialogHeader(
+                icon = Icons.Default.Add,
+                title = stringResource(R.string.words_add_word),
+                onClose = onDismiss
+            )
 
-                ArtikelPicker(
-                    selected = artikel,
-                    onSelect = onArtikelChange,
-                    modifier = Modifier.fillMaxWidth()
-                )
+            ArtikelPicker(
+                selected = artikel,
+                onSelect = onArtikelChange,
+                modifier = Modifier.fillMaxWidth()
+            )
 
-                OutlinedTextField(
-                    value = word,
-                    onValueChange = { onWordChange(it); feedback = null },
-                    label = { Text(stringResource(R.string.words_german_word_label)) },
-                    placeholder = { Text(stringResource(R.string.words_german_word_hint)) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = meaning,
-                    onValueChange = onMeaningChange,
-                    label = { Text(stringResource(R.string.words_meaning_hint)) },
-                    supportingText = if (artikel == null) {
-                        { Text(stringResource(R.string.words_articleless_meaning_required)) }
-                    } else null,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { submit() }),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                DeckSelector(
-                    store = store,
-                    deckName = deckName,
-                    onDeckChange = onDeckChange,
-                    onNewDeck = onNewDeck,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                AnimatedVisibility(visible = feedback != null, enter = fadeIn(), exit = fadeOut()) {
-                    val (text, ok) = feedback ?: ("" to true)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Inbox,
-                            contentDescription = null,
-                            tint = if (ok) colors.success else colors.warning,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (ok) colors.success else colors.warning
-                        )
-                    }
-                }
-
+            OutlinedTextField(
+                value = word,
+                onValueChange = { onWordChange(it); feedback = null },
+                label = { Text(stringResource(R.string.words_german_word_label)) },
+                placeholder = { Text(stringResource(R.string.words_german_word_hint)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = meaning,
+                onValueChange = onMeaningChange,
+                label = { Text(stringResource(R.string.words_meaning_hint)) },
+                supportingText = if (artikel == null) {
+                    { Text(stringResource(R.string.words_articleless_meaning_required)) }
+                } else null,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
+                modifier = Modifier.fillMaxWidth()
+            )
+            DeckSelector(
+                store = store,
+                deckName = deckName,
+                onDeckChange = onDeckChange,
+                onNewDeck = onNewDeck,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        actions = {
+            AnimatedVisibility(visible = feedback != null, enter = fadeIn(), exit = fadeOut()) {
+                val (text, ok) = feedback ?: ("" to true)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .padding(bottom = 8.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite }
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.action_close))
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { submit() },
-                        enabled = word.trim().isNotEmpty() && (artikel != null || meaning.isNotBlank()),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.accentBlue,
-                            contentColor = colors.onAccent
-                        )
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(stringResource(R.string.words_add))
-                    }
+                    Icon(
+                        imageVector = if (ok) Icons.Default.CheckCircle else Icons.Filled.ContentCopy,
+                        contentDescription = null,
+                        tint = if (ok) colors.success else colors.warning,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (ok) colors.success else colors.warning
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.action_close))
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = { submit() },
+                    enabled = word.trim().isNotEmpty() && (artikel != null || meaning.isNotBlank()),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.accentBlue,
+                        contentColor = colors.onBlue
+                    )
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.words_add))
                 }
             }
         }
-    }
+    )
 }
 
 // =====================================================================================
@@ -1424,10 +1492,10 @@ private fun WordRowItem(
                 Text(
                     text = deleteLabel,
                     style = MaterialTheme.typography.labelLarge,
-                    color = colors.onAccent
+                    color = colors.onError
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Icon(Icons.Default.Delete, contentDescription = null, tint = colors.onAccent)
+                Icon(Icons.Default.Delete, contentDescription = null, tint = colors.onError)
             }
         }
     ) {
@@ -1440,7 +1508,6 @@ private fun WordRowItem(
                 .semantics {
                     customActions = listOf(
                         CustomAccessibilityAction(speakLabel) { onSpeak(); true },
-                        CustomAccessibilityAction(editLabel) { onEdit(); true },
                         CustomAccessibilityAction(deleteLabel) { onDelete(); true }
                     )
                 }
@@ -1476,8 +1543,8 @@ private fun WordRowItem(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    MetaPill(text = card.deckName, color = colors.secondaryText, icon = true)
-                    MetaPill(text = card.stage.title, color = card.stage.color)
+                    MetaPill(text = card.deckName)
+                    MetaPill(text = card.stage.title, stage = card.stage)
                     Text(
                         text = dueText,
                         style = MaterialTheme.typography.labelSmall,
@@ -1524,14 +1591,14 @@ private fun WordRowItem(
 
 @Composable
 private fun ArtikelBadge(card: Flashcard) {
-    val artColor = LocalAppColors.current.artikelColor(card.artikel)
+    val colors = LocalAppColors.current
+    val artColor = colors.artikelColor(card.artikel)
     val noArticleA11y = stringResource(R.string.words_filter_no_article_a11y)
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .width(48.dp)
-            .background(artColor.copy(alpha = 0.16f), RoundedCornerShape(8.dp))
-            .border(1.dp, artColor.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+            .background(colors.artikelBadgeBackground(card.artikel), RoundedCornerShape(8.dp))
             .padding(vertical = 6.dp)
     ) {
         Text(
@@ -1549,27 +1616,32 @@ private fun ArtikelBadge(card: Flashcard) {
 }
 
 @Composable
-private fun MetaPill(text: String, color: Color, icon: Boolean = false) {
+private fun MetaPill(text: String, stage: CardStage? = null) {
+    val colors = LocalAppColors.current
+    val background = stage?.let { colors.stageBadgeBackground(it) }
+        ?: colors.secondaryText.copy(alpha = 0.13f)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .background(color.copy(alpha = 0.13f), CircleShape)
+            .background(background, CircleShape)
             .padding(horizontal = 8.dp, vertical = 2.dp)
     ) {
-        if (icon) {
+        if (stage == null) {
             Icon(
-                imageVector = Icons.Default.Folder,
+                imageVector = Icons.Outlined.Folder,
                 contentDescription = null,
-                tint = color,
+                tint = colors.secondaryText,
                 modifier = Modifier.size(12.dp)
             )
-            Spacer(modifier = Modifier.width(4.dp))
+        } else {
+            Box(Modifier.size(7.dp).background(colors.stageColor(stage), CircleShape))
         }
+        Spacer(modifier = Modifier.width(4.dp))
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
-            color = color,
-            maxLines = 1,
+            color = if (stage == null) colors.secondaryText else colors.primaryText,
+            maxLines = if (stage == null) 1 else 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.widthIn(max = 140.dp)
         )
@@ -1595,45 +1667,65 @@ private fun CompactTextField(
     placeholder: String,
     modifier: Modifier = Modifier,
     imeAction: ImeAction = ImeAction.Default,
-    onImeAction: (() -> Unit)? = null
+    onDone: (() -> Unit)? = null,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingAction: (@Composable () -> Unit)? = null
 ) {
     val colors = LocalAppColors.current
-    Box(
-        contentAlignment = Alignment.CenterStart,
-        modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.textBackground)
-            .border(1.dp, colors.cardBorderSubtle, RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp)
-    ) {
-        if (value.isEmpty()) {
-            Text(
-                text = placeholder,
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.secondaryText,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+    val focusManager = LocalFocusManager.current
+    val shape = RoundedCornerShape(12.dp)
+    val outline = MaterialTheme.colorScheme.outline
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
+        cursorBrush = SolidColor(colors.accentBlue),
+        keyboardOptions = KeyboardOptions(imeAction = imeAction),
+        keyboardActions = KeyboardActions(
+            onNext = { focusManager.moveFocus(FocusDirection.Next) },
+            onDone = { onDone?.invoke() ?: defaultKeyboardAction(ImeAction.Done) }
+        ),
+        modifier = modifier.semantics { contentDescription = placeholder },
+        decorationBox = { innerTextField ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .clip(shape)
+                    .background(colors.textBackground)
+                    .border(1.dp, outline, shape)
+                    .padding(start = 12.dp, end = if (trailingAction == null) 12.dp else 0.dp)
+            ) {
+                if (leadingIcon != null) {
+                    leadingIcon()
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Box(
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clearAndSetSemantics {}
+                        )
+                    }
+                    innerTextField()
+                }
+                trailingAction?.invoke()
+            }
         }
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
-            cursorBrush = SolidColor(colors.accentBlue),
-            keyboardOptions = KeyboardOptions(imeAction = imeAction),
-            keyboardActions = KeyboardActions(onAny = { onImeAction?.invoke() }),
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics { contentDescription = placeholder }
-        )
-    }
+    )
 }
 
 @Composable
 private fun DialogHeader(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     title: String,
     onClose: () -> Unit
 ) {
@@ -1663,6 +1755,48 @@ private fun DialogHeader(
     }
 }
 
+@Composable
+private fun WordFormDialog(
+    onDismiss: () -> Unit,
+    spacing: Dp,
+    content: @Composable () -> Unit,
+    actions: @Composable () -> Unit
+) {
+    val colors = LocalAppColors.current
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(decorFitsSystemWindows = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .safeDrawingPadding()
+                .padding(vertical = 8.dp)
+        ) {
+            Surface(
+                color = colors.controlBackground,
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(spacing),
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                            .padding(top = 20.dp, bottom = spacing)
+                    ) {
+                        content()
+                    }
+                    Column(modifier = Modifier.padding(bottom = 12.dp)) {
+                        actions()
+                    }
+                }
+            }
+        }
+    }
+}
+
 // =====================================================================================
 // New / rename deck dialogs (also used by the sidebar in SplashView.kt)
 // =====================================================================================
@@ -1684,94 +1818,93 @@ fun NewDeckDialog(
         "İş Almancası", "Yiyecek & İçecek", "Seyahat"
     )
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            color = colors.controlBackground,
-            shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(1.dp, colors.cardBorderSubtle),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.padding(20.dp)
-            ) {
-                DialogHeader(
-                    icon = Icons.Default.CreateNewFolder,
-                    title = stringResource(R.string.deck_new_title),
-                    onClose = onDismiss
-                )
+    WordFormDialog(
+        onDismiss = onDismiss,
+        spacing = 14.dp,
+        content = {
+            DialogHeader(
+                icon = Icons.Default.CreateNewFolder,
+                title = stringResource(R.string.deck_new_title),
+                onClose = onDismiss
+            )
 
+            Text(
+                text = stringResource(R.string.deck_new_description),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.secondaryText
+            )
+
+            OutlinedTextField(
+                value = deckName,
+                onValueChange = { deckName = it },
+                label = { Text(stringResource(R.string.words_deck_label)) },
+                placeholder = { Text(stringResource(R.string.deck_new_hint)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = stringResource(R.string.deck_new_description),
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = stringResource(R.string.deck_suggestions),
+                    style = MaterialTheme.typography.labelMedium,
                     color = colors.secondaryText
                 )
-
-                OutlinedTextField(
-                    value = deckName,
-                    onValueChange = { deckName = it },
-                    label = { Text(stringResource(R.string.words_deck_label)) },
-                    placeholder = { Text(stringResource(R.string.deck_new_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = stringResource(R.string.deck_suggestions),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.secondaryText
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        suggestedDecks.forEach { suggestion ->
-                            FilterChip(
-                                selected = deckName == suggestion,
-                                onClick = { deckName = suggestion },
-                                label = { Text(suggestion, style = MaterialTheme.typography.labelMedium) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    containerColor = colors.textBackground,
-                                    labelColor = colors.primaryText,
-                                    selectedContainerColor = colors.accentBlue.copy(alpha = 0.2f),
-                                    selectedLabelColor = colors.accentBlue
-                                )
-                            )
-                        }
-                    }
-                }
-
-                HorizontalDivider(color = colors.cardBorderSubtle)
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End,
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.action_cancel))
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            val created = store.createDeck(deckName)
-                            if (created != null) onCreated(created)
-                        },
-                        enabled = deckName.trim().isNotEmpty(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.accentBlue,
-                            contentColor = colors.onAccent
+                    suggestedDecks.forEach { suggestion ->
+                        FilterChip(
+                            selected = deckName == suggestion,
+                            onClick = { deckName = suggestion },
+                            label = { Text(suggestion, style = MaterialTheme.typography.labelMedium) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = colors.textBackground,
+                                labelColor = colors.primaryText,
+                                selectedContainerColor = colors.blueBadgeBackground,
+                                selectedLabelColor = colors.accentBlue
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = deckName == suggestion,
+                                borderColor = MaterialTheme.colorScheme.outline,
+                                selectedBorderColor = colors.accentBlue
+                            )
                         )
-                    ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(stringResource(R.string.deck_create))
                     }
                 }
             }
+
+            HorizontalDivider(color = colors.cardBorderSubtle)
+        },
+        actions = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        val created = store.createDeck(deckName)
+                        if (created != null) onCreated(created)
+                    },
+                    enabled = deckName.trim().isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.accentBlue,
+                        contentColor = colors.onBlue
+                    )
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.deck_create))
+                }
+            }
         }
-    }
+    )
 }
 
 @Composable
@@ -1829,7 +1962,7 @@ fun RenameDeckDialog(
                         enabled = newName.trim().isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colors.accentBlue,
-                            contentColor = colors.onAccent
+                            contentColor = colors.onBlue
                         )
                     ) {
                         Text(stringResource(R.string.action_save))
@@ -1858,113 +1991,106 @@ fun EditWordDialog(
     var editDeckName by remember(card.id) { mutableStateOf(card.deckName) }
     var showNewDeckSheet by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            color = colors.controlBackground,
-            shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(1.dp, colors.cardBorderSubtle),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(20.dp)
+    WordFormDialog(
+        onDismiss = onDismiss,
+        spacing = 12.dp,
+        content = {
+            DialogHeader(
+                icon = Icons.Default.Edit,
+                title = stringResource(R.string.edit_word_title),
+                onClose = onDismiss
+            )
+
+            Text(
+                text = stringResource(R.string.words_artikel_label),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.secondaryText
+            )
+            ArtikelPicker(
+                selected = editArtikel,
+                onSelect = { editArtikel = it },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            OutlinedTextField(
+                value = editWord,
+                onValueChange = { editWord = it },
+                label = { Text(stringResource(R.string.words_german_word_label)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            OutlinedTextField(
+                value = editMeaning,
+                onValueChange = { editMeaning = it },
+                label = { Text(stringResource(R.string.edit_word_meaning_label)) },
+                supportingText = if (editArtikel == null) {
+                    { Text(stringResource(R.string.words_articleless_meaning_required)) }
+                } else null,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Text(
+                text = stringResource(R.string.edit_word_deck_label),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.secondaryText
+            )
+            DeckSelector(
+                store = store,
+                deckName = editDeckName,
+                onDeckChange = { editDeckName = it },
+                onNewDeck = { showNewDeckSheet = true },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            HorizontalDivider(color = colors.cardBorderSubtle)
+        },
+        actions = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                DialogHeader(
-                    icon = Icons.Default.Edit,
-                    title = stringResource(R.string.edit_word_title),
-                    onClose = onDismiss
-                )
-
-                Text(
-                    text = stringResource(R.string.words_artikel_label),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.secondaryText
-                )
-                ArtikelPicker(
-                    selected = editArtikel,
-                    onSelect = { editArtikel = it },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = editWord,
-                    onValueChange = { editWord = it },
-                    label = { Text(stringResource(R.string.words_german_word_label)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = editMeaning,
-                    onValueChange = { editMeaning = it },
-                    label = { Text(stringResource(R.string.edit_word_meaning_label)) },
-                    supportingText = if (editArtikel == null) {
-                        { Text(stringResource(R.string.words_articleless_meaning_required)) }
-                    } else null,
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Text(
-                    text = stringResource(R.string.edit_word_deck_label),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.secondaryText
-                )
-                DeckSelector(
-                    store = store,
-                    deckName = editDeckName,
-                    onDeckChange = { editDeckName = it },
-                    onNewDeck = { showNewDeckSheet = true },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                HorizontalDivider(color = colors.cardBorderSubtle)
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (onDelete != null) {
-                        IconButton(onClick = onDelete) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = stringResource(R.string.edit_word_delete),
-                                tint = colors.error
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.action_cancel))
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            store.createDeck(editDeckName)
-                            store.updateCard(
-                                id = card.id,
-                                artikel = editArtikel,
-                                word = editWord,
-                                meaning = editMeaning,
-                                deckName = editDeckName
-                            )
-                            onDismiss()
-                        },
-                        enabled = editWord.trim().isNotEmpty() &&
-                            (editArtikel != null || editMeaning.isNotBlank()),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.accentBlue,
-                            contentColor = colors.onAccent
+                if (onDelete != null) {
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = stringResource(R.string.edit_word_delete),
+                            tint = colors.error
                         )
-                    ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(stringResource(R.string.edit_word_save))
                     }
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        store.createDeck(editDeckName)
+                        store.updateCard(
+                            id = card.id,
+                            artikel = editArtikel,
+                            word = editWord,
+                            meaning = editMeaning,
+                            deckName = editDeckName
+                        )
+                        onDismiss()
+                    },
+                    enabled = editWord.trim().isNotEmpty() &&
+                        (editArtikel != null || editMeaning.isNotBlank()),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.accentBlue,
+                        contentColor = colors.onBlue
+                    )
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.edit_word_save))
                 }
             }
         }
-    }
+    )
 
     if (showNewDeckSheet) {
         NewDeckDialog(

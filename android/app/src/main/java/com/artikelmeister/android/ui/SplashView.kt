@@ -1,5 +1,6 @@
 package com.artikelmeister.android.ui
 
+import android.animation.ValueAnimator
 import androidx.compose.material3.MaterialTheme
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -33,6 +34,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -46,6 +49,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -58,6 +62,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -67,18 +72,17 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.FolderDelete
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Style
-import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -106,31 +110,35 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -198,16 +206,17 @@ private val logoDropletSpecs = listOf(
 fun BloodyBrainLogoView(
     size: Dp = 140.dp,
     animated: Boolean = true,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contentDescription: String? = "ArtikelMeister Logo"
 ) {
-    if (!animated) {
+    if (!animated || !ValueAnimator.areAnimatorsEnabled()) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = modifier.size(size)
         ) {
             Image(
                 painter = painterResource(id = R.drawable.bloody_brain_icon),
-                contentDescription = "ArtikelMeister Logo",
+                contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -236,11 +245,6 @@ fun BloodyBrainLogoView(
         label = "masterDripCycle"
     )
 
-    val auraScale = 0.96f + (pulseFraction * 0.09f)
-    val badgeScale = 0.985f + (pulseFraction * 0.028f)
-    val auraAlpha = 0.28f + (pulseFraction * 0.24f)
-    val neonGlowAlpha = 0.14f + (pulseFraction * 0.52f)
-
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier.size(size)
@@ -249,16 +253,22 @@ fun BloodyBrainLogoView(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .scale(auraScale)
+                .graphicsLayer {
+                    val auraScale = 0.96f + pulseFraction * 0.09f
+                    scaleX = auraScale
+                    scaleY = auraScale
+                }
         ) {
+            val pulse = pulseFraction
             val s = this.size.minDimension
+            if (s <= 0f) return@Canvas
             val center = Offset(this.size.width / 2f, this.size.height / 2f)
 
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(1.0f, 0.16f, 0.18f).copy(alpha = auraAlpha),
-                        Color(0.75f, 0.04f, 0.10f).copy(alpha = 0.10f + 0.10f * pulseFraction),
+                        Color(1.0f, 0.16f, 0.18f).copy(alpha = 0.28f + pulse * 0.24f),
+                        Color(0.75f, 0.04f, 0.10f).copy(alpha = 0.10f + 0.10f * pulse),
                         Color.Transparent
                     ),
                     center = center,
@@ -274,11 +284,15 @@ fun BloodyBrainLogoView(
             contentAlignment = Alignment.Center,
             modifier = Modifier
                 .fillMaxSize()
-                .scale(badgeScale)
+                .graphicsLayer {
+                    val badgeScale = 0.985f + pulseFraction * 0.028f
+                    scaleX = badgeScale
+                    scaleY = badgeScale
+                }
         ) {
             Image(
                 painter = painterResource(id = R.drawable.bloody_brain_squircle_nodrops),
-                contentDescription = "ArtikelMeister Logo",
+                contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -287,15 +301,17 @@ fun BloodyBrainLogoView(
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
-                    .alpha(neonGlowAlpha)
+                    .graphicsLayer { alpha = 0.14f + pulseFraction * 0.52f }
             )
 
             Canvas(modifier = Modifier.fillMaxSize()) {
+                val cycle = masterDripCycle
                 val w = this.size.width
                 val h = this.size.height
+                if (w <= 0f || h <= 0f) return@Canvas
 
                 for (drop in logoDropletSpecs) {
-                    val phase = (masterDripCycle * drop.speedMultiplier + drop.phaseOffset) % 1.0f
+                    val phase = (cycle * drop.speedMultiplier + drop.phaseOffset) % 1.0f
 
                     val fallProgress: Float
                     val dropScale: Float
@@ -371,141 +387,152 @@ fun BloodyBrainLogoView(
     }
 }
 
-/**
- * 1:1 Port of SplashIntroView from SplashView.swift
- */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SplashIntroView(onFinished: () -> Unit) {
+    val animated = ValueAnimator.areAnimatorsEnabled()
     var started by remember { mutableStateOf(false) }
-
-    val appearScale by animateFloatAsState(
-        targetValue = if (started) 1.0f else 0.74f,
+    val latestOnFinished by rememberUpdatedState(onFinished)
+    val entrance by animateFloatAsState(
+        targetValue = if (!animated || started) 1f else 0f,
         animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
-        label = "appearScale"
-    )
-    val appearOpacity by animateFloatAsState(
-        targetValue = if (started) 1.0f else 0.0f,
-        animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
-        label = "appearOpacity"
-    )
-    val progressValue by animateFloatAsState(
-        targetValue = if (started) 1.0f else 0.0f,
-        animationSpec = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
-        label = "progressValue"
+        label = "splashEntrance"
     )
 
-    LaunchedEffect(Unit) {
-        started = true
-        delay(1700L)
-        onFinished()
+    LaunchedEffect(animated) {
+        if (animated) {
+            started = true
+            delay(1700L)
+        }
+        latestOnFinished()
     }
 
-    Box(
-        contentAlignment = Alignment.Center,
+    val skipLabel = stringResource(R.string.splash_skip_a11y)
+    val title = "ARTIKELMEISTER"
+    val titleStyle = MaterialTheme.typography.displaySmall.copy(
+        fontWeight = FontWeight.Black,
+        letterSpacing = 3.sp
+    )
+    val titleBrush = remember {
+        Brush.linearGradient(
+            colors = listOf(Color.White, Color(1.0f, 0.38f, 0.40f), Color(1.0f, 0.16f, 0.18f))
+        )
+    }
+    val textMeasurer = rememberTextMeasurer()
+    val titleWidth = remember(textMeasurer, titleStyle) {
+        textMeasurer.measure(
+            text = title,
+            style = titleStyle,
+            maxLines = 1,
+            softWrap = false
+        ).size.width
+    }
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0.08f, 0.14f, 0.17f),
-                        Color(0.03f, 0.06f, 0.11f),
-                        Color(0.01f, 0.02f, 0.05f)
+                        SplashPalette.gradientTop,
+                        SplashPalette.gradientMiddle,
+                        SplashPalette.gradientBottom
                     )
                 )
             )
-            .clickable(onClickLabel = stringResource(R.string.splash_skip_a11y)) { onFinished() }
-            .padding(32.dp)
+            .clickable(onClickLabel = skipLabel, role = Role.Button) { latestOnFinished() }
+            .safeDrawingPadding()
     ) {
+        val density = LocalDensity.current
+        val contentHeight = maxHeight
+        val horizontalPadding = 24.dp
+        val availableTitleWidth = with(density) { (maxWidth - horizontalPadding * 2).toPx() }
+        val titleScale = ((availableTitleWidth - 1f) / titleWidth).coerceIn(0.01f, 1f)
+        val fittedTitleStyle = with(density) {
+            titleStyle.copy(
+                brush = titleBrush,
+                fontSize = (titleStyle.fontSize.toPx() * titleScale).toSp(),
+                lineHeight = (titleStyle.lineHeight.toPx() * titleScale).toSp(),
+                letterSpacing = (titleStyle.letterSpacing.toPx() * titleScale).toSp()
+            )
+        }
+
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .heightIn(min = contentHeight)
+                .padding(horizontal = horizontalPadding, vertical = 16.dp)
         ) {
             Spacer(modifier = Modifier.weight(1f))
 
             BloodyBrainLogoView(
-                size = 196.dp,
-                animated = true,
-                modifier = Modifier.scale(appearScale)
+                size = minOf(196.dp, contentHeight * 0.4f),
+                animated = animated,
+                contentDescription = null,
+                modifier = Modifier.graphicsLayer {
+                    val logoScale = 0.74f + entrance * 0.26f
+                    scaleX = logoScale
+                    scaleY = logoScale
+                }
             )
 
             Spacer(modifier = Modifier.height(26.dp))
 
-            Text(
-                text = "ARTIKELMEISTER",
-                style = TextStyle(
-                    fontSize = MaterialTheme.typography.displaySmall.fontSize,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 3.sp,
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color.White,
-                            Color(1.0f, 0.38f, 0.40f),
-                            Color(1.0f, 0.16f, 0.18f)
-                        )
-                    )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.graphicsLayer { alpha = entrance }
+            ) {
+                Text(
+                    text = title,
+                    style = fittedTitleStyle,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.semantics(mergeDescendants = true) { heading() }
                 )
-            )
 
-            Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-            Text(
-                text = stringResource(R.string.splash_tagline),
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Medium,
-                color = Color.White.copy(alpha = 0.72f * appearOpacity)
-            )
+                Text(
+                    text = stringResource(R.string.splash_tagline),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.72f)
+                )
 
-            Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Artikel.entries.forEach { art ->
-                    val artColor = art.themeColor()
-                    Text(
-                        text = art.rawValue,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = artColor,
-                        modifier = Modifier
-                            .background(artColor.copy(alpha = 0.25f), CircleShape)
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                    )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Artikel.entries.forEach { art ->
+                        Text(
+                            text = art.rawValue,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = SplashPalette.artikelColor(art),
+                            modifier = Modifier
+                                .background(SplashPalette.artikelBadgeBackground(art), CircleShape)
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Neon crimson loading progress bar
-            Box(
-                modifier = Modifier
-                    .width(240.dp)
-                    .height(6.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.12f))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(progressValue)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    Color(1.0f, 0.18f, 0.18f),
-                                    Color(0.78f, 0.04f, 0.10f)
-                                )
-                            )
-                        )
-                )
-            }
-
             Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(
                 text = stringResource(R.string.splash_tap_to_skip),
+                textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.6f)
+                color = SplashPalette.label
             )
         }
     }
@@ -520,7 +547,7 @@ enum class AppTab(val rawValue: String, @StringRes val labelRes: Int) {
     val icon: ImageVector
         get() = when (this) {
             STUDY -> Icons.Default.Style
-            WORDS -> Icons.Default.ViewList
+            WORDS -> Icons.AutoMirrored.Filled.ViewList
             STATS -> Icons.Default.BarChart
             SETTINGS -> Icons.Default.Settings
         }
@@ -623,6 +650,7 @@ fun MainContentView(
                         selectedTab = selectedTab,
                         store = store,
                         authManager = authManager,
+                        onSelectTab = { selectedTab = it },
                         onOpenDrawer = null
                     )
                 }
@@ -738,6 +766,7 @@ fun MainContentView(
                             selectedTab = selectedTab,
                             store = store,
                             authManager = authManager,
+                            onSelectTab = { selectedTab = it },
                             onOpenDrawer = { scope.launch { drawerState.open() } }
                         )
                     }
@@ -783,6 +812,7 @@ private fun ActiveTabContent(
     selectedTab: AppTab,
     store: DeckStore,
     authManager: GeminiAuthManager,
+    onSelectTab: (AppTab) -> Unit,
     onOpenDrawer: (() -> Unit)?
 ) {
     Crossfade(
@@ -793,7 +823,7 @@ private fun ActiveTabContent(
         when (tab) {
             AppTab.STUDY -> StudyView(store = store, authManager = authManager, onOpenDrawer = onOpenDrawer)
             AppTab.WORDS -> WordListView(store = store, authManager = authManager, onOpenDrawer = onOpenDrawer)
-            AppTab.STATS -> StatsView(store = store, onOpenDrawer = onOpenDrawer)
+            AppTab.STATS -> StatsView(store = store, onOpenDrawer = onOpenDrawer, onSelectTab = onSelectTab)
             AppTab.SETTINGS -> SettingsView(store = store, authManager = authManager, onOpenDrawer = onOpenDrawer)
         }
     }
@@ -961,7 +991,7 @@ fun SidebarContent(
                             if (allSelected) colors.accentBlue.copy(alpha = 0.14f)
                             else Color.Transparent
                         )
-                        .clickable { store.selectedStudyDeck = null }
+                        .selectable(selected = allSelected, onClick = { store.selectedStudyDeck = null })
                         .padding(horizontal = 10.dp, vertical = 7.dp)
                 ) {
                     Icon(
@@ -1002,14 +1032,16 @@ fun SidebarContent(
                                     if (isDeckSelected) colors.accentBlue.copy(alpha = 0.14f)
                                     else Color.Transparent
                                 )
+                                .semantics { selected = isDeckSelected }
                                 .combinedClickable(
                                     onClick = { store.selectedStudyDeck = deck },
+                                    onLongClickLabel = "Deste seçenekleri",
                                     onLongClick = { showContextMenu = true }
                                 )
                                 .padding(horizontal = 10.dp, vertical = 7.dp)
                         ) {
                             Icon(
-                                imageVector = if (isDeckSelected) Icons.Default.Folder else Icons.Default.FolderOpen,
+                                imageVector = if (isDeckSelected) Icons.Filled.Folder else Icons.Outlined.Folder,
                                 contentDescription = null,
                                 tint = if (isDeckSelected) colors.accentBlue else colors.secondaryText,
                                 modifier = Modifier.size(15.dp)
@@ -1054,7 +1086,7 @@ fun SidebarContent(
                                     },
                                     leadingIcon = {
                                         Icon(
-                                            Icons.Default.Delete,
+                                            Icons.Filled.FolderDelete,
                                             contentDescription = null,
                                             tint = colors.vividRed
                                         )

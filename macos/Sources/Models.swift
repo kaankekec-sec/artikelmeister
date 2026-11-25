@@ -1,8 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// Shared palette, identical to android ui/Theme.kt (dark / light variants). Article colours are clearly
-/// separated from the success green and error red, so correct/wrong feedback never clashes with die/das.
+/// Shared sRGB palette. Matches Android ui/Theme.kt.
 enum AppPalette {
     private static func rgb(_ hex: UInt32) -> NSColor {
         NSColor(
@@ -13,19 +12,115 @@ enum AppPalette {
         )
     }
 
-    /// Appearance-aware colour: `dark` in dark mode, `light` otherwise.
     static func dynamic(dark: UInt32, light: UInt32) -> Color {
-        Color(NSColor(name: nil) { appearance in
+        Color(nsColor: NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? rgb(dark) : rgb(light)
         })
     }
 
-    static let der = dynamic(dark: 0x4C8DFF, light: 0x1F63E0)      // blue
-    static let die = dynamic(dark: 0xF062C0, light: 0xC0268F)      // magenta
-    static let das = dynamic(dark: 0xE8B90E, light: 0x946C00)      // gold
-    static let articleNone = dynamic(dark: 0xA1A1AA, light: 0x6B7280) // grey ('-')
-    static let success = dynamic(dark: 0x30D158, light: 0x1E8E3E)
-    static let error = dynamic(dark: 0xFF453A, light: 0xD92D20)
+    static let accentBlue = dynamic(dark: 0x429EFF, light: 0x005BCD)
+    static let accentPurple = dynamic(dark: 0xC080FF, light: 0x7130D4)
+    static let accentOrange = dynamic(dark: 0xFF9F0A, light: 0x984900)
+    static let success = dynamic(dark: 0x30D158, light: 0x147236)
+    static let error = dynamic(dark: 0xFF6C60, light: 0xB42318)
+    static let feedbackCorrect = success
+    static let feedbackIncorrect = error
+
+    private static let darkInk: UInt32 = 0x0B1018
+    private static let white: UInt32 = 0xFFFFFF
+    static let onAccent = dynamic(dark: darkInk, light: white)
+    static let onBlue = onAccent
+    static let onPurple = onAccent
+    static let onOrange = onAccent
+    static let onSuccess = onAccent
+    static let onError = onAccent
+    static let onDer = onAccent
+    static let onDie = onAccent
+    static let onDas = onAccent
+    static let onArticleNone = onAccent
+
+    private static let darkDer: UInt32 = 0x5D9AFF
+    private static let darkDie: UInt32 = 0xF56FCA
+    private static let darkDas: UInt32 = 0xE8B90E
+    private static let darkDerBadge: UInt32 = 0x1A2A46
+    private static let darkDieBadge: UInt32 = 0x3C2237
+    private static let darkDasBadge: UInt32 = 0x372D17
+
+    static let der = dynamic(dark: darkDer, light: 0x194FB8)
+    static let die = dynamic(dark: darkDie, light: 0xA51E75)
+    static let das = dynamic(dark: darkDas, light: 0x765500)
+    static let articleNone = dynamic(dark: 0xA1A1AA, light: 0x515968)
+    static let derBadgeBackground = dynamic(dark: darkDerBadge, light: 0xE8F0FD)
+    static let dieBadgeBackground = dynamic(dark: darkDieBadge, light: 0xF8EAF4)
+    static let dasBadgeBackground = dynamic(dark: darkDasBadge, light: 0xF8F0D7)
+    static let articleNoneBadgeBackground = dynamic(dark: 0x2D2E36, light: 0xEEF0F4)
+
+    static let blueBadgeBackground = dynamic(dark: 0x192B46, light: 0xE7EFFD)
+    static let purpleBadgeBackground = dynamic(dark: 0x352244, light: 0xF1E7FC)
+    static let orangeBadgeBackground = dynamic(dark: 0x372817, light: 0xF9EDDB)
+    static let successBadgeBackground = dynamic(dark: 0x193526, light: 0xE5F3E9)
+    static let errorBadgeBackground = dynamic(dark: 0x412529, light: 0xFCEAE7)
+
+    private static let darkSecondaryText: UInt32 = 0xA3A3AB
+    static let controlOutline = dynamic(dark: darkSecondaryText, light: 0x555A68)
+
+    static func onArtikel(_ artikel: Artikel?) -> Color {
+        switch artikel {
+        case .der: return onDer
+        case .die: return onDie
+        case .das: return onDas
+        case nil: return onArticleNone
+        }
+    }
+
+    static func onRating(_ rating: ReviewRating) -> Color {
+        switch rating {
+        case .again: return onError
+        case .hard: return onOrange
+        case .good: return onSuccess
+        case .easy: return onBlue
+        }
+    }
+
+    static let splashBackground = Color(nsColor: rgb(0x070B12))
+    static let splashGradientTop = Color(nsColor: rgb(0x14242B))
+    static let splashGradientMiddle = Color(nsColor: rgb(0x080F1C))
+    static let splashGradientBottom = Color(nsColor: rgb(0x03050D))
+    static let splashLabel = Color(nsColor: rgb(darkSecondaryText))
+
+    static func splashArtikelColor(_ artikel: Artikel) -> Color {
+        switch artikel {
+        case .der: return Color(nsColor: rgb(darkDer))
+        case .die: return Color(nsColor: rgb(darkDie))
+        case .das: return Color(nsColor: rgb(darkDas))
+        }
+    }
+
+    static func splashArtikelBadgeBackground(_ artikel: Artikel) -> Color {
+        switch artikel {
+        case .der: return Color(nsColor: rgb(darkDerBadge))
+        case .die: return Color(nsColor: rgb(darkDieBadge))
+        case .das: return Color(nsColor: rgb(darkDasBadge))
+        }
+    }
+
+    private static let heatmap: [(background: Color, foreground: Color)] = [
+        (dynamic(dark: 0x2D333B, light: 0xEAEDF1), dynamic(dark: white, light: darkInk)),
+        (dynamic(dark: 0x1D4F35, light: 0xD8F1DE), dynamic(dark: white, light: darkInk)),
+        (dynamic(dark: 0x29784B, light: 0xA5DDB5), dynamic(dark: white, light: darkInk)),
+        (dynamic(dark: 0x41A765, light: 0x4A9C64), Color(nsColor: rgb(darkInk))),
+        (dynamic(dark: 0x64D981, light: 0x19723D), onAccent)
+    ]
+
+    static func heatmapColors(_ count: Int) -> (background: Color, foreground: Color) {
+        switch count {
+        case ...0: return heatmap[0]
+        case 1..<5: return heatmap[1]
+        case 5..<15: return heatmap[2]
+        case 15..<35: return heatmap[3]
+        default: return heatmap[4]
+        }
+    }
 }
 
 enum Artikel: String, Codable, CaseIterable, Identifiable {
@@ -37,14 +132,18 @@ enum Artikel: String, Codable, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .der: return AppPalette.der // blue (masculine)
-        case .die: return AppPalette.die // magenta (feminine)
-        case .das: return AppPalette.das // gold (neuter)
+        case .der: return AppPalette.der
+        case .die: return AppPalette.die
+        case .das: return AppPalette.das
         }
     }
 
     var badgeBackground: Color {
-        color.opacity(0.15)
+        switch self {
+        case .der: return AppPalette.derBadgeBackground
+        case .die: return AppPalette.dieBadgeBackground
+        case .das: return AppPalette.dasBadgeBackground
+        }
     }
 
     var grammaticalLabel: String {
@@ -83,10 +182,19 @@ enum CardStage: String, Codable, CaseIterable {
 
     var color: Color {
         switch self {
-        case .new: return .blue
-        case .learning: return .orange
-        case .review: return .green
-        case .relearning: return .red
+        case .new: return AppPalette.accentBlue
+        case .learning: return AppPalette.accentOrange
+        case .review: return AppPalette.success
+        case .relearning: return AppPalette.error
+        }
+    }
+
+    var badgeBackground: Color {
+        switch self {
+        case .new: return AppPalette.blueBadgeBackground
+        case .learning: return AppPalette.orangeBadgeBackground
+        case .review: return AppPalette.successBadgeBackground
+        case .relearning: return AppPalette.errorBadgeBackground
         }
     }
 }
@@ -113,9 +221,18 @@ enum ReviewRating: Int, CaseIterable {
     var color: Color {
         switch self {
         case .again: return AppPalette.error
-        case .hard: return Color(red: 0.92, green: 0.55, blue: 0.15)
+        case .hard: return AppPalette.accentOrange
         case .good: return AppPalette.success
-        case .easy: return Color(red: 0.20, green: 0.52, blue: 0.95)
+        case .easy: return AppPalette.accentBlue
+        }
+    }
+
+    var badgeBackground: Color {
+        switch self {
+        case .again: return AppPalette.errorBadgeBackground
+        case .hard: return AppPalette.orangeBadgeBackground
+        case .good: return AppPalette.successBadgeBackground
+        case .easy: return AppPalette.blueBadgeBackground
         }
     }
 }
