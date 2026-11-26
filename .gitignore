@@ -56,3 +56,4 @@ cloudflare-worker/.wrangler/
 cloudflare-worker/.dev.vars
 node_modules/
 
+cloudflare-worker/
