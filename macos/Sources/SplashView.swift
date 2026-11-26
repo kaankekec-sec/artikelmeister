@@ -294,7 +294,11 @@ struct SplashIntroView: View {
                         )
                         .accessibilityAddTraits(.isHeader)
 
-                    Text("Almanca Artikel & Nöro-Hafıza Çalışma Sistemi")
+                    Text(L10n.text(
+                        "Almanca Artikel & Nöro-Hafıza Çalışma Sistemi",
+                        en: "German Article & Neuro-Memory Study System",
+                        de: "Deutsches Artikel- & Neuro-Gedächtnis-Lernsystem"
+                    ))
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.white.opacity(0.72))
 
@@ -314,19 +318,9 @@ struct SplashIntroView: View {
                 .opacity(reduceMotion || hasAppeared ? 1 : 0)
 
                 Spacer()
-
-                Button(action: finish) {
-                    Text("Açılışı geç")
-                        .foregroundStyle(AppPalette.splashLabel)
-                }
-                .buttonStyle(.bordered)
-                .keyboardShortcut(.cancelAction)
-                .help("Açılışı geç (Esc)")
             }
             .padding(32)
         }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: finish)
         .environment(\.colorScheme, .dark)
         .task(id: reduceMotion) {
             if !reduceMotion {
@@ -348,12 +342,21 @@ struct SplashIntroView: View {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case study = "Çalış"
-    case words = "Kelime Havuzu"
-    case stats = "İstatistikler"
-    case settings = "Ayarlar"
+    case study = "study"
+    case words = "words"
+    case stats = "stats"
+    case settings = "settings"
 
     var id: String { rawValue }
+
+    var localizedTitle: String {
+        switch self {
+        case .study: return L10n.tabStudy()
+        case .words: return L10n.tabWords()
+        case .stats: return L10n.tabStats()
+        case .settings: return L10n.tabSettings()
+        }
+    }
 
     var icon: String {
         switch self {
@@ -369,6 +372,7 @@ struct MainContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var store: DeckStore
     @EnvironmentObject var authManager: GeminiAuthManager
+    @EnvironmentObject var languageManager: LanguageManager
     @State private var selectedTab: AppTab = .study
     @State private var showNewDeckSheet: Bool = false
     @State private var deckToRename: String? = nil
@@ -385,16 +389,10 @@ struct MainContentView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // Sidebar Bloody Brain Emblem Header
                 HStack(spacing: 10) {
-                    BloodyBrainLogoView(size: 40, animated: false)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("ArtikelMeister")
-                            .font(.headline.bold())
-                            .lineLimit(1)
-                        Text("Nöro-Hafıza")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
+                    BloodyBrainLogoView(size: 36, animated: false)
+                    Text("ArtikelMeister")
+                        .font(.headline.bold())
+                        .lineLimit(1)
                     Spacer()
                 }
                 .padding(.horizontal, 14)
@@ -406,7 +404,7 @@ struct MainContentView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         // Section 1: Main Navigation Tabs
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("MENÜ")
+                            Text(L10n.menuSection)
                                 .font(.system(size: 10, weight: .bold))
                                 .foregroundColor(.secondary)
                                 .padding(.horizontal, 10)
@@ -422,7 +420,7 @@ struct MainContentView: View {
                                             .font(.subheadline)
                                             .foregroundColor(isSelected ? .white : .accentColor)
                                             .frame(width: 18)
-                                        Text(tab.rawValue)
+                                        Text(tab.localizedTitle)
                                             .font(.subheadline.weight(isSelected ? .semibold : .medium))
                                             .foregroundColor(isSelected ? .white : .primary)
                                             .lineLimit(1)
@@ -444,9 +442,27 @@ struct MainContentView: View {
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 7)
                                     .background(
-                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .fill(isSelected ? Color.accentColor : Color.clear)
+                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                            .fill(
+                                                isSelected
+                                                    ? AnyShapeStyle(
+                                                        LinearGradient(
+                                                            colors: [Color.accentColor, Color.accentColor.opacity(0.85)],
+                                                            startPoint: .topLeading,
+                                                            endPoint: .bottomTrailing
+                                                        )
+                                                    )
+                                                    : AnyShapeStyle(Color.clear)
+                                            )
                                     )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                            .strokeBorder(
+                                                isSelected ? Color.white.opacity(0.22) : Color.clear,
+                                                lineWidth: 0.75
+                                            )
+                                    )
+                                    .shadow(color: isSelected ? Color.accentColor.opacity(0.22) : .clear, radius: 4, y: 1)
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -459,7 +475,7 @@ struct MainContentView: View {
                         // Section 2: Decks List + "+ Yeni Deste Ekle" Button Right Underneath
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text("DESTELER")
+                                Text(L10n.decksSection)
                                     .font(.system(size: 10, weight: .bold))
                                     .foregroundColor(.secondary)
                                 Spacer()
@@ -481,7 +497,7 @@ struct MainContentView: View {
                                         .font(.caption)
                                         .foregroundColor(allSelected ? .accentColor : .secondary)
                                         .frame(width: 16)
-                                    Text("Tüm Desteler")
+                                    Text(L10n.allDecks)
                                         .font(.caption.weight(allSelected ? .bold : .medium))
                                         .foregroundColor(allSelected ? .accentColor : .primary)
                                         .lineLimit(1)
@@ -492,10 +508,20 @@ struct MainContentView: View {
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                        .fill(allSelected ? Color.accentColor.opacity(0.14) : Color.clear)
-                                )
+                                .background {
+                                    if allSelected {
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(.thinMaterial)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                    .fill(Color.accentColor.opacity(0.14))
+                                            )
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                    .strokeBorder(Color.accentColor.opacity(0.32), lineWidth: 0.75)
+                                            )
+                                    }
+                                }
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -524,10 +550,20 @@ struct MainContentView: View {
                                     }
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                            .fill(isDeckSelected ? Color.accentColor.opacity(0.14) : Color.clear)
-                                    )
+                                    .background {
+                                        if isDeckSelected {
+                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                .fill(.thinMaterial)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                        .fill(Color.accentColor.opacity(0.14))
+                                                )
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                        .strokeBorder(Color.accentColor.opacity(0.32), lineWidth: 0.75)
+                                                )
+                                        }
+                                    }
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -536,14 +572,14 @@ struct MainContentView: View {
                                     Button {
                                         deckToRename = deck
                                     } label: {
-                                        Label("Deste Adını Değiştir...", systemImage: "pencil")
+                                        Label(L10n.text("Deste Adını Değiştir...", en: "Rename Deck...", de: "Stapel umbenennen..."), systemImage: "pencil")
                                     }
                                     if deck != "Genel" {
                                         Divider()
                                         Button(role: .destructive) {
                                             store.deleteDeck(name: deck, deleteWords: false)
                                         } label: {
-                                            Label("Desteyi Sil (Kelimeleri 'Genel'e Taşı)", systemImage: "folder.badge.minus")
+                                            Label(L10n.text("Desteyi Sil (Kelimeleri 'Genel'e Taşı)", en: "Delete Deck (Move Words to 'Genel')", de: "Stapel löschen (Wörter nach ‚Genel‘ verschieben)"), systemImage: "folder.badge.minus")
                                         }
                                     }
                                 }
@@ -556,7 +592,7 @@ struct MainContentView: View {
                                 HStack(spacing: 6) {
                                     Image(systemName: "plus.circle.fill")
                                         .font(.caption)
-                                    Text("Yeni Deste Ekle")
+                                    Text(L10n.newDeckAdd)
                                         .font(.caption.weight(.semibold))
                                         .lineLimit(1)
                                     Spacer()
@@ -610,24 +646,26 @@ struct MainContentView: View {
                 Divider()
 
                 // Bottom Legend
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    HStack(spacing: 4) {
                         Circle().fill(Artikel.der.color).frame(width: 7, height: 7)
                         Text("der").font(.caption2.bold())
+                    }
+                    HStack(spacing: 4) {
                         Circle().fill(Artikel.die.color).frame(width: 7, height: 7)
                         Text("die").font(.caption2.bold())
+                    }
+                    HStack(spacing: 4) {
                         Circle().fill(Artikel.das.color).frame(width: 7, height: 7)
                         Text("das").font(.caption2.bold())
                     }
-                    .foregroundColor(.secondary)
-                    Text(authManager.isGoogleAccountConnected ? "Google Drive & Yerel Depolama Aktif" : "Yerel Depolama Aktif")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
                 }
-                .padding(12)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
-            .frame(width: 220)
-            .background(Color(NSColor.controlBackgroundColor))
+            .frame(width: 224)
+            .background(.ultraThinMaterial)
 
             Divider()
 
@@ -728,8 +766,8 @@ struct UniversalProfileSidebarCard: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(
                         isConnected
-                            ? (!authManager.userEmail.isEmpty ? authManager.userEmail : (!authManager.userName.isEmpty ? authManager.userName : "Google Hesabı Bağlı"))
-                            : "Google ile Giriş Yap"
+                            ? (!authManager.userEmail.isEmpty ? authManager.userEmail : (!authManager.userName.isEmpty ? authManager.userName : L10n.text("Google Hesabı Bağlı", en: "Google Account Connected", de: "Google-Konto verbunden")))
+                            : L10n.text("Google ile Giriş Yap", en: "Sign in with Google", de: "Mit Google anmelden")
                     )
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.primary)
@@ -737,8 +775,8 @@ struct UniversalProfileSidebarCard: View {
 
                     Text(
                         store.isSyncingCloud
-                            ? "Drive ile eşitleniyor..."
-                            : (isConnected ? "Drive Eşitleme & AI Aktif" : "Bulut Eşitleme & AI için dokun")
+                            ? L10n.text("Drive ile eşitleniyor...", en: "Syncing with Drive...", de: "Synchronisiere mit Drive...")
+                            : (isConnected ? L10n.text("Eşitlemek için tıkla", en: "Click to sync", de: "Zum Synchronisieren klicken") : L10n.text("Google ile giriş yap", en: "Sign in with Google", de: "Mit Google anmelden"))
                     )
                     .font(.system(size: 9.5))
                     .foregroundColor(isConnected ? .green : .secondary)
@@ -757,11 +795,11 @@ struct UniversalProfileSidebarCard: View {
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(NSColor.textBackgroundColor))
+                    .fill(.regularMaterial)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75)
             )
             .contentShape(Rectangle())
         }
@@ -800,21 +838,12 @@ struct AnimatedThemeToggleCard: View {
                         .rotationEffect(.degrees(isDarkMode ? 90 : 0))
                 }
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(isDarkMode ? "Karanlık Mod" : "Aydınlık Mod")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .id("title-\(isDarkMode)")
-                        .transition(.opacity)
-
-                    Text(isDarkMode ? "Aydınlık temaya geç" : "Karanlık temaya geç")
-                        .font(.system(size: 9.5))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .id("subtitle-\(isDarkMode)")
-                        .transition(.opacity)
-                }
+                Text(isDarkMode ? L10n.text("Karanlık Mod", en: "Dark Mode", de: "Dunkelmodus") : L10n.text("Aydınlık Mod", en: "Light Mode", de: "Hellmodus"))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .id("title-\(isDarkMode)")
+                    .transition(.opacity)
 
                 Spacer(minLength: 0)
 
@@ -841,11 +870,11 @@ struct AnimatedThemeToggleCard: View {
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(NSColor.textBackgroundColor))
+                    .fill(.regularMaterial)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75)
             )
             .contentShape(Rectangle())
         }
@@ -903,50 +932,37 @@ struct OnboardingSetupScreen: View {
 
                     BloodyBrainLogoView(size: 84, animated: true)
 
-                    VStack(spacing: 6) {
-                        Text("ArtikelMeister")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundColor(.primary)
-
-                        Text("Almanca Artikel & Hafıza Çalışma Sistemi")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                    }
+                    Text("ArtikelMeister")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
 
                     // Card with 3 features
                     VStack(alignment: .leading, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Kurulum ve Bulut Senkronizasyonu")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundColor(.primary)
-
-                            Text("Google hesabınızla bağlanarak kelimelerinizi ve çalışma serinizi tüm cihazlarınızla eşitleyebilir veya uygulamayı doğrudan çevrimdışı modda kullanabilirsiniz.")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                                .lineSpacing(2)
-                        }
+                        Text(L10n.text("Kurulum ve Bulut Senkronizasyonu", en: "Setup & Cloud Sync", de: "Einrichtung & Cloud-Synchronisierung"))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.primary)
 
                         Divider()
 
                         OnboardingFeatureRow(
                             icon: "arrow.triangle.2.circlepath.icloud.fill",
                             iconColor: .blue,
-                            title: "Bulut Senkronizasyonu",
-                            desc: "Kelimeleriniz, seriniz (streak) ve öğrenme geçmişiniz tüm cihazlarınız arasında otomatik eşitlenir."
+                            title: L10n.text("Bulut Senkronizasyonu", en: "Cloud Sync", de: "Cloud-Synchronisierung"),
+                            desc: L10n.text("Kelimeleriniz, seriniz (streak) ve öğrenme geçmişiniz tüm cihazlarınız arasında otomatik eşitlenir.", en: "Your words, streak, and study history sync automatically across all your devices.", de: "Deine Wörter, deine Serie und dein Lernverlauf werden automatisch auf allen Geräten synchronisiert.")
                         )
 
                         OnboardingFeatureRow(
                             icon: "checkmark.circle.fill",
                             iconColor: .green,
-                            title: "Kelimeleri Otomatik Birleştirme",
-                            desc: "Farklı cihazlardan eklenen kelimeler mükerrer kaydedilmeden birleştirilir ve güncel öğrenme ilerlemeniz korunur."
+                            title: L10n.text("Kelimeleri Otomatik Birleştirme", en: "Automatic Word Merging", de: "Automatisches Zusammenführen"),
+                            desc: L10n.text("Farklı cihazlardan eklenen kelimeler mükerrer kaydedilmeden birleştirilir ve güncel öğrenme ilerlemeniz korunur.", en: "Words added from different devices are merged without duplicates while preserving your latest study progress.", de: "Wörter von verschiedenen Geräten werden ohne Duplikate zusammengeführt und dein aktueller Lernfortschritt bleibt erhalten.")
                         )
 
                         OnboardingFeatureRow(
                             icon: "sparkles",
                             iconColor: .purple,
-                            title: "Yapay Zeka ile Kelime Üretimi",
-                            desc: "Almanca seviyenize uygun yeni kelimeleri yapay zeka ile anında üretip çalışabilirsiniz."
+                            title: L10n.text("Yapay Zeka ile Kelime Üretimi", en: "AI Word Generation", de: "KI-Wortgenerierung"),
+                            desc: L10n.text("Almanca seviyenize uygun yeni kelimeleri yapay zeka ile anında üretip çalışabilirsiniz.", en: "Instantly generate and study new words tailored to your German level with AI.", de: "Generiere und lerne sofort neue Wörter passend zu deinem Deutschniveau mit KI.")
                         )
                     }
                     .padding(20)
@@ -983,8 +999,8 @@ struct OnboardingSetupScreen: View {
                                 .frame(width: 18, height: 18)
                             Text(
                                 store.isSyncingCloud
-                                    ? "Verileriniz bulut ile eşitleniyor..."
-                                    : (authManager.authStatusMessage ?? "Google ile giriş yapılıyor...")
+                                    ? L10n.text("Verileriniz bulut ile eşitleniyor...", en: "Syncing your data with the cloud...", de: "Daten werden mit der Cloud synchronisiert...")
+                                    : (authManager.authStatusMessage ?? L10n.text("Google ile giriş yapılıyor...", en: "Signing in with Google...", de: "Anmeldung bei Google läuft..."))
                             )
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
@@ -1008,7 +1024,7 @@ struct OnboardingSetupScreen: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "person.crop.circle")
                                     .font(.system(size: 16))
-                                Text("Google Hesabı ile Giriş Yap & Eşitle")
+                                Text(L10n.text("Google Hesabı ile Giriş Yap & Eşitle", en: "Sign in with Google & Sync", de: "Mit Google anmelden & synchronisieren"))
                                     .font(.system(size: 14, weight: .bold))
                             }
                             .frame(maxWidth: .infinity)
@@ -1021,7 +1037,7 @@ struct OnboardingSetupScreen: View {
                         Button {
                             onComplete()
                         } label: {
-                            Text("Çevrimdışı Modda Devam Et")
+                            Text(L10n.text("Çevrimdışı Modda Devam Et", en: "Continue Offline", de: "Offline fortfahren"))
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .frame(maxWidth: .infinity)
@@ -1042,11 +1058,185 @@ struct OnboardingSetupScreen: View {
     }
 }
 
+// MARK: - App Version Manager & Update Gate
+
+@MainActor
+final class AppVersionManager: ObservableObject {
+    static let shared = AppVersionManager()
+
+    @Published var requiredUpdate: ReleaseUpdateInfo? = nil
+    @Published var isChecking: Bool = false
+
+    let currentVersion: String
+
+    private let defaults = UserDefaults.standard
+    private let lastCheckKey = "com.artikelmeister.version.lastCheckAt"
+    private let cachedTagKey = "com.artikelmeister.version.cachedRequiredTag"
+    private let cachedUrlKey = "com.artikelmeister.version.cachedRequiredUrl"
+    private let throttleInterval: TimeInterval = 2 * 3600
+
+    init() {
+        let bundleVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let cleaned = bundleVersion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.currentVersion = cleaned.isEmpty ? "1.3.0" : cleaned
+        restoreStickyUpdateIfNeeded()
+    }
+
+    private func restoreStickyUpdateIfNeeded() {
+        guard let cachedTag = defaults.string(forKey: cachedTagKey),
+              !cachedTag.isEmpty else {
+            return
+        }
+        if VersionChecker.isUpdateRequired(currentVersion: currentVersion, latestTag: cachedTag),
+           let ver = SemVer.parse(cachedTag) {
+            let rawUrl = defaults.string(forKey: cachedUrlKey) ?? VersionChecker.fallbackReleaseUrl
+            let safeUrl = rawUrl.hasPrefix(VersionChecker.repoReleasePrefix)
+                ? rawUrl
+                : VersionChecker.fallbackReleaseUrl
+            requiredUpdate = ReleaseUpdateInfo(tagName: cachedTag, version: ver, htmlUrl: safeUrl)
+        } else {
+            clearStickyUpdate()
+        }
+    }
+
+    private func saveStickyUpdate(_ info: ReleaseUpdateInfo) {
+        defaults.set(info.tagName, forKey: cachedTagKey)
+        defaults.set(info.htmlUrl, forKey: cachedUrlKey)
+    }
+
+    private func clearStickyUpdate() {
+        defaults.removeObject(forKey: cachedTagKey)
+        defaults.removeObject(forKey: cachedUrlKey)
+    }
+
+    func checkForUpdate(force: Bool = false) async {
+        guard !isChecking else { return }
+
+        if !force {
+            let lastCheck = defaults.double(forKey: lastCheckKey)
+            if lastCheck > 0, Date().timeIntervalSince1970 - lastCheck < throttleInterval {
+                return
+            }
+        }
+
+        guard let url = URL(string: VersionChecker.latestReleaseEndpoint) else { return }
+
+        isChecking = true
+        defer { isChecking = false }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 8
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("ArtikelMeister/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                  let jsonString = String(data: data, encoding: .utf8),
+                  let info = VersionChecker.parseLatestReleaseJson(jsonString) else {
+                // Fail-open on HTTP/rate-limit/parse errors
+                return
+            }
+
+            defaults.set(Date().timeIntervalSince1970, forKey: lastCheckKey)
+
+            if VersionChecker.isUpdateRequired(currentVersion: currentVersion, latestTag: info.tagName) {
+                saveStickyUpdate(info)
+                requiredUpdate = info
+            } else {
+                clearStickyUpdate()
+                requiredUpdate = nil
+            }
+        } catch {
+            // Fail-open on offline/timeout/network errors
+        }
+    }
+}
+
+private struct UpdateRequiredGateView: View {
+    let update: ReleaseUpdateInfo
+    let currentVersion: String
+    let isChecking: Bool
+    let onUpdate: () -> Void
+    let onRecheck: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color(NSColor.windowBackgroundColor)
+                .ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                ZStack {
+                    Circle()
+                        .fill(AppPalette.accentBlue.opacity(0.14))
+                        .frame(width: 72, height: 72)
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 38))
+                        .foregroundStyle(AppPalette.accentBlue)
+                }
+
+                VStack(spacing: 8) {
+                    Text(L10n.updateRequiredTitle())
+                        .font(.title.bold())
+                    Text(L10n.updateRequiredMessage(update.tagName))
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 420)
+                }
+
+                HStack(spacing: 16) {
+                    Label(L10n.currentVersionLabel(currentVersion), systemImage: "app.badge")
+                    Label(L10n.latestVersionLabel(update.tagName), systemImage: "sparkles")
+                        .foregroundStyle(AppPalette.accentBlue)
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(
+                    Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.75)
+                )
+
+                VStack(spacing: 10) {
+                    Button(action: onUpdate) {
+                        Label(L10n.updateButton(), systemImage: "arrow.up.right.square.fill")
+                            .font(.headline)
+                            .foregroundStyle(AppPalette.onBlue)
+                            .frame(width: 240, height: 34)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppPalette.accentBlue)
+
+                    Button(action: onRecheck) {
+                        HStack(spacing: 6) {
+                            if isChecking {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            Text(isChecking ? L10n.checkingUpdate : L10n.recheckButton())
+                        }
+                        .frame(width: 240, height: 28)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isChecking)
+                }
+            }
+            .padding(32)
+        }
+    }
+}
+
 // MARK: - Root Container View
 struct RootContainerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject var store: DeckStore
     @EnvironmentObject var authManager: GeminiAuthManager
+    @EnvironmentObject var languageManager: LanguageManager
+    @StateObject private var versionManager = AppVersionManager.shared
     @State private var showSplash: Bool = true
 
     var shouldShowOnboarding: Bool {
@@ -1055,7 +1245,25 @@ struct RootContainerView: View {
 
     var body: some View {
         ZStack {
-            if showSplash {
+            if let update = versionManager.requiredUpdate, !showSplash {
+                UpdateRequiredGateView(
+                    update: update,
+                    currentVersion: versionManager.currentVersion,
+                    isChecking: versionManager.isChecking,
+                    onUpdate: {
+                        if let url = URL(string: update.htmlUrl) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    },
+                    onRecheck: {
+                        Task {
+                            await versionManager.checkForUpdate(force: true)
+                        }
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(20)
+            } else if showSplash {
                 SplashIntroView {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
                         showSplash = false
@@ -1077,6 +1285,11 @@ struct RootContainerView: View {
         }
         .frame(minWidth: 920, minHeight: 600)
         .preferredColorScheme(store.themeMode.colorScheme)
+        .environment(\.locale, languageManager.activeLocale)
+        .id(languageManager.resolvedLanguage)
         .animation(.easeInOut(duration: 0.3), value: store.themeMode)
+        .task {
+            await versionManager.checkForUpdate(force: false)
+        }
     }
 }

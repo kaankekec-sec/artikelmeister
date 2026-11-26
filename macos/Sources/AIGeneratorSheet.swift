@@ -4,7 +4,6 @@ import Accessibility
 
 struct AIGeneratorSheet: View {
     @EnvironmentObject var store: DeckStore
-    @ObservedObject var authManager = GeminiAuthManager.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -15,14 +14,9 @@ struct AIGeneratorSheet: View {
     @State private var targetDeckName = "A1 Seviyesi"
     @State private var hasCustomDeckName = false
     @State private var showTargetDeckMenu = false
-    @State private var showAuthConfig = false
-    @State private var showAdvancedApiKey = false
 
     @State private var isGenerating = false
     @State private var progressMessage = ""
-    @State private var authorizationError: String?
-    @State private var startupValidationError: String?
-    @State private var acceptsStartupValidationError = true
     @State private var generationError: String?
     @State private var didFinishGenerating = false
     @State private var newlyAddedWords: [GeneratedWordItem] = []
@@ -32,7 +26,7 @@ struct AIGeneratorSheet: View {
     }
 
     private var automaticDeckName: String {
-        "\(selectedLevel.rawValue) Seviyesi"
+        L10n.text("\(selectedLevel.rawValue) Seviyesi", en: "\(selectedLevel.rawValue) Level", de: "Niveau \(selectedLevel.rawValue)")
     }
 
     private var trimmedDeckName: String {
@@ -40,16 +34,9 @@ struct AIGeneratorSheet: View {
     }
 
     private var resultSummary: String {
-        newlyAddedWords.isEmpty ? "Yeni kelime eklenmedi" : "\(newlyAddedWords.count) kelime eklendi"
-    }
-
-    private var visibleAuthorizationError: String? {
-        authorizationError ?? (showAuthConfig && authManager.isAuthorized ? startupValidationError : nil)
-    }
-
-    private var activeCredential: String {
-        if authManager.authMode == .apiKey { return authManager.apiKey }
-        return authManager.oauthRefreshToken.isEmpty ? authManager.oauthAccessToken : authManager.oauthRefreshToken
+        newlyAddedWords.isEmpty
+            ? L10n.text("Yeni kelime eklenmedi", en: "No new words added", de: "Keine neuen Wörter hinzugefügt")
+            : L10n.text("\(newlyAddedWords.count) kelime eklendi", en: "\(newlyAddedWords.count) words added", de: "\(newlyAddedWords.count) Wörter hinzugefügt")
     }
 
     var body: some View {
@@ -62,29 +49,6 @@ struct AIGeneratorSheet: View {
         }
         .frame(minWidth: 640, idealWidth: 720, minHeight: 520, idealHeight: 640)
         .interactiveDismissDisabled(isGenerating)
-        .onChange(of: authManager.selectedModel) {
-            authManager.saveToKeychain()
-        }
-        .onAppear {
-            if authManager.isAuthorized {
-                Task {
-                    do {
-                        try await authManager.verifyCredentials()
-                    } catch {
-                        if acceptsStartupValidationError {
-                            startupValidationError = error.localizedDescription
-                        }
-                    }
-                }
-            }
-        }
-        .onChange(of: authManager.authMode) { clearAuthorizationError() }
-        .onChange(of: activeCredential) { clearAuthorizationError() }
-        .onChange(of: visibleAuthorizationError) {
-            if visibleAuthorizationError != nil {
-                AccessibilityNotification.Announcement("Gemini yetkilendirmesi doğrulanamadı").post()
-            }
-        }
     }
 
     private var header: some View {
@@ -93,14 +57,9 @@ struct AIGeneratorSheet: View {
                 .font(.title2)
                 .foregroundStyle(AppPalette.accentPurple)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Gemini AI ile Seviyeye Göre Kelime Üret")
-                    .font(.title3.bold())
-                    .accessibilityAddTraits(.isHeader)
-                Text("Kendi Gemini kullanım hakkınızla A1–C1 seviyesinde, listenizde olmayan yeni kelimeler üretin")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(L10n.aiSheetTitle())
+                .font(.title3.bold())
+                .accessibilityAddTraits(.isHeader)
             Spacer()
 
             Button {
@@ -112,20 +71,17 @@ struct AIGeneratorSheet: View {
             }
             .buttonStyle(.plain)
             .disabled(isGenerating)
-            .accessibilityLabel("Kapat")
-            .help("Kapat")
+            .accessibilityLabel(L10n.close)
+            .help(L10n.close)
         }
         .padding(20)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(.ultraThinMaterial)
     }
 
     private var scrollableForm: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    authorizationSection
-                        .disabled(isGenerating)
-
                     generationParametersSection
                         .disabled(isGenerating)
 
@@ -143,7 +99,7 @@ struct AIGeneratorSheet: View {
             }
             .onChange(of: isGenerating) {
                 if isGenerating {
-                    AccessibilityNotification.Announcement("Gemini bağlantısı kuruluyor...").post()
+                    AccessibilityNotification.Announcement(L10n.text("Kelime üretimi başlatıldı...", en: "Word generation started...", de: "Wortgenerierung gestartet...")).post()
                 } else if let generationError {
                     withAnimation(reduceMotion ? nil : .default) {
                         proxy.scrollTo(ScrollTarget.generationError, anchor: .top)
@@ -173,7 +129,7 @@ struct AIGeneratorSheet: View {
                 }
                 .font(.caption)
             } else if generationError != nil {
-                Label("Kelime üretilirken bir hata oluştu.", systemImage: "exclamationmark.triangle.fill")
+                Label(L10n.text("Kelime üretilirken bir hata oluştu.", en: "An error occurred while generating words.", de: "Beim Generieren der Wörter ist ein Fehler aufgetreten."), systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(AppPalette.error)
             } else if didFinishGenerating {
@@ -184,16 +140,24 @@ struct AIGeneratorSheet: View {
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(selectedLevel.rawValue) • \(wordCount) kelime • \(trimmedDeckName.isEmpty ? automaticDeckName : trimmedDeckName)")
+                    Text(L10n.text(
+                        "\(selectedLevel.rawValue) • \(wordCount) kelime • \(trimmedDeckName.isEmpty ? automaticDeckName : trimmedDeckName)",
+                        en: "\(selectedLevel.rawValue) • \(wordCount) words • \(trimmedDeckName.isEmpty ? automaticDeckName : trimmedDeckName)",
+                        de: "\(selectedLevel.rawValue) • \(wordCount) Wörter • \(trimmedDeckName.isEmpty ? automaticDeckName : trimmedDeckName)"
+                    ))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Mevcut \(store.cards.count) kelime hariç tutulacak")
+                    Text(L10n.text(
+                        "Mevcut \(store.cards.count) kelime hariç tutulacak",
+                        en: "Existing \(store.cards.count) words will be excluded",
+                        de: "Vorhandene \(store.cards.count) Wörter werden ausgeschlossen"
+                    ))
                         .foregroundStyle(.secondary)
                 }
                 .font(.caption)
                 Spacer(minLength: 0)
 
-                Button("Kapat") {
+                Button(L10n.close) {
                     dismiss()
                 }
                 .buttonStyle(.bordered)
@@ -205,187 +169,15 @@ struct AIGeneratorSheet: View {
                         await generateAndAddWords()
                     }
                 } label: {
-                    Label("Üret ve ekle", systemImage: "sparkles")
+                    Label(L10n.text("Üret ve ekle", en: "Generate & Add", de: "Generieren & hinzufügen"), systemImage: "sparkles")
                 }
                 .buttonStyle(FilledActionStyle(fill: AppPalette.accentPurple, ink: AppPalette.onPurple))
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(isGenerating || !authManager.isAuthorized)
+                .disabled(isGenerating)
             }
         }
         .padding(16)
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
-
-    // MARK: - Gemini Authorization
-
-    private var authorizationSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                if authManager.isAuthorized {
-                    DisclosureGroup(isExpanded: $showAuthConfig) {
-                        authorizationControls
-                            .padding(.top, 8)
-                    } label: {
-                        authorizationStatus
-                    }
-                    .transaction { transaction in
-                        if reduceMotion {
-                            transaction.animation = nil
-                            transaction.disablesAnimations = true
-                        }
-                    }
-                } else {
-                    authorizationStatus
-                    authorizationControls
-                }
-
-                if let visibleAuthorizationError {
-                    errorNotice(visibleAuthorizationError)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-        }
-    }
-
-    private var authorizationStatus: some View {
-        HStack(spacing: 8) {
-            Image(systemName: authManager.isAuthorized ? "checkmark.shield.fill" : "lock.shield")
-                .font(.title3)
-                .foregroundStyle(authManager.isAuthorized ? AppPalette.success : AppPalette.accentOrange)
-                .accessibilityHidden(true)
-            Text(authManager.isAuthorized ? "Gemini Yetkilendirmesi Aktif" : "Gemini Yetkilendirmesi Gerekli")
-                .font(.headline)
-            if authManager.isAuthorized {
-                Text("• \(authManager.authMode.title) • \(authManager.selectedModel)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityHint(authManager.isAuthorized ? "Yetkilendirme Ayarları" : "")
-    }
-
-    private var authorizationControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Picker("Model", selection: $authManager.selectedModel) {
-                ForEach(authManager.availableModels, id: \.self) { model in
-                    Text(model).tag(model)
-                }
-            }
-            .pickerStyle(.menu)
-            .id(isGenerating)
-
-            Button {
-                Task {
-                    do {
-                        clearAuthorizationError()
-                        try await authManager.startBrowserOAuthFlow()
-                        showAuthConfig = false
-                        await store.syncWithGoogleDrive(authManager: authManager, isSilentAutoSync: true)
-                    } catch {
-                        authorizationError = error.localizedDescription
-                    }
-                }
-            } label: {
-                Label(
-                    authManager.isAuthorized && authManager.authMode == .googleOAuth
-                        ? "Google Hesabını Yeniden Bağla" : "Google Hesabı ile Giriş Yap (Tek Tık)",
-                    systemImage: "person.crop.circle"
-                )
-            }
-            .buttonStyle(FilledActionStyle(fill: AppPalette.accentBlue, ink: AppPalette.onBlue))
-            .disabled(authManager.isAuthenticating)
-
-            if authManager.isAuthenticating {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityHidden(true)
-                    Text("Yetkilendiriliyor...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            DisclosureGroup(isExpanded: $showAdvancedApiKey) {
-                apiKeyControls
-                    .padding(.top, 8)
-            } label: {
-                Label("Gelişmiş: API Anahtarı ile Doğrula", systemImage: "slider.horizontal.3")
-                    .font(.caption)
-            }
-            .transaction { transaction in
-                if reduceMotion {
-                    transaction.animation = nil
-                    transaction.disablesAnimations = true
-                }
-            }
-
-            if let statusMessage = authManager.authStatusMessage {
-                HStack {
-                    Text(statusMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if authManager.isAuthorized {
-                        Button("Yetkiyi Kaldır", role: .destructive) {
-                            authManager.clearAuthorization()
-                            clearAuthorizationError()
-                        }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                    }
-                }
-            }
-        }
-    }
-
-    private var apiKeyControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Google AI Studio API Anahtarı:")
-                .font(.caption.weight(.semibold))
-            Text("Google hesabınızla Google AI Studio üzerinden ücretsiz Gemini API anahtarınızı alıp aşağıya yapıştırabilirsiniz.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            SecureField("Gemini API Anahtarı", text: $authManager.apiKey, prompt: Text("AIza..."))
-                .textFieldStyle(.roundedBorder)
-
-            HStack(spacing: 10) {
-                Button {
-                    authManager.openGoogleAIStudioInBrowser()
-                } label: {
-                    Label("Google AI Studio'dan Al", systemImage: "arrow.up.right.square")
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    Task {
-                        do {
-                            clearAuthorizationError()
-                            authManager.authMode = .apiKey
-                            try await authManager.verifyCredentials()
-                            showAuthConfig = false
-                        } catch {
-                            authorizationError = error.localizedDescription
-                        }
-                    }
-                } label: {
-                    Label("Doğrula & Kaydet", systemImage: "checkmark.circle")
-                }
-                .buttonStyle(FilledActionStyle(fill: AppPalette.accentBlue, ink: AppPalette.onBlue))
-                .disabled(authManager.apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func clearAuthorizationError() {
-        authorizationError = nil
-        startupValidationError = nil
-        acceptsStartupValidationError = false
+        .background(.ultraThinMaterial)
     }
 
     private func errorNotice(_ message: String) -> some View {
@@ -418,13 +210,13 @@ struct AIGeneratorSheet: View {
             }
             .padding(10)
         } label: {
-            Label("Seviye (A1 – C1) ve Kelime Sayısı (1 – 100)", systemImage: "graduationcap.fill")
+            Label(L10n.text("Seviye (A1 – C1) ve Kelime Sayısı (1 – 100)", en: "Level (A1 – C1) & Word Count (1 – 100)", de: "Niveau (A1 – C1) & Wortanzahl (1 – 100)"), systemImage: "graduationcap.fill")
         }
     }
 
     private var levelSelector: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Almanca Dil Seviyesi (CEFR):")
+            Text(L10n.text("Almanca Dil Seviyesi (CEFR):", en: "German Language Level (CEFR):", de: "Deutsches Sprachniveau (GER):"))
                 .font(.subheadline.weight(.semibold))
 
             HStack(spacing: 10) {
@@ -460,7 +252,7 @@ struct AIGeneratorSheet: View {
                 }
             }
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Almanca Dil Seviyesi")
+            .accessibilityLabel(L10n.text("Almanca Dil Seviyesi", en: "German Language Level", de: "Deutsches Sprachniveau"))
 
             Text(selectedLevel.description)
                 .font(.caption)
@@ -471,11 +263,11 @@ struct AIGeneratorSheet: View {
     private var countSelector: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Üretilecek Kelime Sayısı (1 – 100):")
+                Text(L10n.text("Üretilecek Kelime Sayısı (1 – 100):", en: "Number of Words to Generate (1 – 100):", de: "Anzahl der Wörter (1 – 100):"))
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Stepper(value: $wordCount, in: 1...100, step: 1) {
-                    Text("\(wordCount) kelime")
+                    Text(L10n.text("\(wordCount) kelime", en: "\(wordCount) words", de: "\(wordCount) Wörter"))
                         .font(.headline.monospacedDigit())
                         .foregroundStyle(AppPalette.accentPurple)
                 }
@@ -492,13 +284,13 @@ struct AIGeneratorSheet: View {
                     step: 1
                 )
                 .tint(AppPalette.accentPurple)
-                .accessibilityLabel("Kelime sayısı")
-                .accessibilityValue("\(wordCount) kelime")
+                .accessibilityLabel(L10n.text("Kelime sayısı", en: "Word count", de: "Wortanzahl"))
+                .accessibilityValue(L10n.text("\(wordCount) kelime", en: "\(wordCount) words", de: "\(wordCount) Wörter"))
                 Text("100").font(.caption).foregroundStyle(.secondary)
             }
 
             HStack(spacing: 8) {
-                Text("Hızlı Seçim:")
+                Text(L10n.text("Hızlı Seçim:", en: "Quick Select:", de: "Schnellauswahl:"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 ForEach([5, 10, 20, 30, 50, 75, 100], id: \.self) { preset in
@@ -511,16 +303,16 @@ struct AIGeneratorSheet: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(wordCount == preset ? AppPalette.accentPurple : nil)
-                    .accessibilityLabel("\(preset) kelime")
+                    .accessibilityLabel(L10n.text("\(preset) kelime", en: "\(preset) words", de: "\(preset) Wörter"))
                     .accessibilityAddTraits(wordCount == preset ? .isSelected : [])
                 }
             }
 
             Toggle(isOn: $includeArticleless) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Artikelsiz kelimeleri de üret")
+                    Text(L10n.text("Artikelsiz kelimeleri de üret", en: "Also generate article-less words", de: "Auch artikellose Wörter generieren"))
                         .font(.subheadline.weight(.semibold))
-                    Text("Fiiller, sıfatlar ve kalıp ifadeler '-' olarak eklenir; çalışırken Türkçe anlam yazılır.")
+                    Text(L10n.text("Fiil, sıfat ve kalıp ifadeler ('-')", en: "Verbs, adjectives, and phrases ('-')", de: "Verben, Adjektive und Ausdrücke ('-')"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -535,24 +327,24 @@ struct AIGeneratorSheet: View {
     private var topicAndDeckFields: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Konu / Tema (İsteğe bağlı):")
+                Text(L10n.text("Konu / Tema (İsteğe bağlı):", en: "Topic / Theme (Optional):", de: "Thema (Optional):"))
                     .font(.subheadline.weight(.medium))
                     .accessibilityHidden(true)
                 TextField(
-                    "Konu / Tema (İsteğe bağlı)",
+                    L10n.text("Konu / Tema (İsteğe bağlı)", en: "Topic / Theme (Optional)", de: "Thema (Optional)"),
                     text: $topicHint,
-                    prompt: Text("Örn: Seyahat, İş Hayatı, Mutfak, Akademik")
+                    prompt: Text(L10n.text("Örn: Seyahat, İş Hayatı, Mutfak, Akademik", en: "e.g. Travel, Business, Kitchen, Academic", de: "z. B. Reisen, Beruf, Küche, Studium"))
                 )
                 .textFieldStyle(.roundedBorder)
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Eklenecek Deste / Kategori:")
+                Text(L10n.text("Eklenecek Deste / Kategori:", en: "Target Deck / Category:", de: "Zielstapel / Kategorie:"))
                     .font(.subheadline.weight(.medium))
                     .accessibilityHidden(true)
                 HStack(spacing: 10) {
                     TextField(
-                        "Eklenecek Deste / Kategori",
+                        L10n.text("Eklenecek Deste / Kategori", en: "Target Deck / Category", de: "Zielstapel / Kategorie"),
                         text: Binding(
                             get: { targetDeckName },
                             set: {
@@ -560,7 +352,7 @@ struct AIGeneratorSheet: View {
                                 hasCustomDeckName = true
                             }
                         ),
-                        prompt: Text("Deste adı (örn: A1 Seviyesi)")
+                        prompt: Text(L10n.text("Deste adı (örn: A1 Seviyesi)", en: "Deck name (e.g. A1 Level)", de: "Stapelname (z. B. Niveau A1)"))
                     )
                     .textFieldStyle(.roundedBorder)
 
@@ -568,7 +360,7 @@ struct AIGeneratorSheet: View {
                         showTargetDeckMenu.toggle()
                     } label: {
                         let usesExistingDeck = hasCustomDeckName && store.allDeckNames.contains(trimmedDeckName)
-                        Label("Mevcut Desteler", systemImage: usesExistingDeck ? "folder.fill" : "folder")
+                        Label(L10n.text("Mevcut Desteler", en: "Existing Decks", de: "Vorhandene Stapel"), systemImage: usesExistingDeck ? "folder.fill" : "folder")
                     }
                     .buttonStyle(.bordered)
                     .popover(isPresented: $showTargetDeckMenu, arrowEdge: .bottom) {
@@ -587,7 +379,7 @@ struct AIGeneratorSheet: View {
                     hasCustomDeckName = false
                     showTargetDeckMenu = false
                 } label: {
-                    Label("\(automaticDeckName) (Otomatik)", systemImage: hasCustomDeckName ? "folder" : "folder.fill")
+                    Label(L10n.text("\(automaticDeckName) (Otomatik)", en: "\(automaticDeckName) (Auto)", de: "\(automaticDeckName) (Auto)"), systemImage: hasCustomDeckName ? "folder" : "folder.fill")
                 }
                 .accessibilityAddTraits(hasCustomDeckName ? [] : .isSelected)
 
@@ -644,7 +436,11 @@ struct AIGeneratorSheet: View {
             }
             .padding(8)
         } label: {
-            Label("Kelime Havuzuna Eklenen Yeni Kelimeler (\(newlyAddedWords.count) adet)", systemImage: "checkmark.circle.fill")
+            Label(L10n.text(
+                "Kelime Havuzuna Eklenen Yeni Kelimeler (\(newlyAddedWords.count) adet)",
+                en: "New Words Added to Word Pool (\(newlyAddedWords.count))",
+                de: "Neue Wörter im Wortschatz (\(newlyAddedWords.count))"
+            ), systemImage: "checkmark.circle.fill")
                 .foregroundStyle(AppPalette.success)
         }
     }
@@ -673,14 +469,13 @@ struct AIGeneratorSheet: View {
 
     @MainActor
     private func generateAndAddWords() async {
-        guard !isGenerating, authManager.isAuthorized else { return }
-        clearAuthorizationError()
+        guard !isGenerating else { return }
         showTargetDeckMenu = false
         isGenerating = true
         didFinishGenerating = false
         generationError = nil
         newlyAddedWords = []
-        progressMessage = "Gemini bağlantısı kuruluyor..."
+        progressMessage = L10n.text("Kelimeler üretiliyor...", en: "Generating words...", de: "Wörter werden generiert...")
 
         defer {
             isGenerating = false
@@ -688,13 +483,12 @@ struct AIGeneratorSheet: View {
         }
 
         do {
-            let generated = try await GeminiVocabularyGenerator.generateWords(
+            let generated = try await MistralVocabularyGenerator.generateWords(
                 level: selectedLevel,
                 targetCount: wordCount,
                 topicHint: topicHint,
                 includeArticleless: includeArticleless,
-                existingCards: store.cards,
-                authManager: authManager
+                existingCards: store.cards
             ) { status in
                 Task { @MainActor in
                     self.progressMessage = status
@@ -714,7 +508,7 @@ struct AIGeneratorSheet: View {
                         addedItems.append(item)
                     }
                 } else if includeArticleless &&
-                            GeminiVocabularyGenerator.isArticlelessMarker(item.artikel) &&
+                            MistralVocabularyGenerator.isArticlelessMarker(item.artikel) &&
                             !item.meaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     // "-" = article-less (verb/adjective/phrase). Its meaning is the typed
                     // answer during study, so only non-blank meanings are accepted.
@@ -725,9 +519,9 @@ struct AIGeneratorSheet: View {
             }
             newlyAddedWords = addedItems
             didFinishGenerating = true
-            if !addedItems.isEmpty {
+            if !addedItems.isEmpty && GeminiAuthManager.shared.isGoogleAccountConnected {
                 Task {
-                    await store.syncWithGoogleDrive(authManager: authManager, isSilentAutoSync: true)
+                    await store.syncWithGoogleDrive(authManager: GeminiAuthManager.shared, isSilentAutoSync: true)
                 }
             }
         } catch {

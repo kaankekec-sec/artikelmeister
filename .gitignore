@@ -48,3 +48,11 @@ android/app/keystore/
 # Claude Code files and folders (any case)
 *[Cc][Ll][Aa][Uu][Dd][Ee]*
 AGENT_HANDOFF.md
+
+# Cloudflare Worker
+.wrangler/
+cloudflare-worker/.wrangler/
+.dev.vars
+cloudflare-worker/.dev.vars
+node_modules/
+

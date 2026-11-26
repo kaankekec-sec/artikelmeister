@@ -1,5 +1,6 @@
 package com.artikelmeister.android
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
@@ -15,6 +16,10 @@ import com.artikelmeister.android.ui.UiPreferences
 import com.artikelmeister.android.ui.resolveDarkTheme
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(UiPreferences.wrapContext(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // The Android 12+ system splash (values-v31/themes.xml) covers cold start; on older
         // versions the dark brand windowBackground does. Edge-to-edge is set up before content.

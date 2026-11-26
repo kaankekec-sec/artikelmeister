@@ -1,10 +1,14 @@
 package com.artikelmeister.android.ui
 
+import android.app.Activity
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -15,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -31,6 +36,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,16 +75,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -94,7 +96,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -151,16 +160,15 @@ fun StatsView(
     val activeStudyDaysCount = store.studyHistory.values.count { it.totalAnswersCount > 0 } +
         (if (!todayIsInHistory && today.totalAnswersCount > 0) 1 else 0)
 
-    StatsSettingsScreen(title = "Çalışma İstatistikleri", onOpenDrawer = onOpenDrawer) {
+    StatsSettingsScreen(title = stringResource(R.string.stats_title), onOpenDrawer = onOpenDrawer) {
         if (activeStudyDaysCount == 0) {
             StateMessageView(
                 icon = Icons.Default.CalendarMonth,
-                title = "Henüz çalışma kaydı yok",
-                message = if (onSelectTab != null) {
-                    "Çalışmaya başladığınızda yanıtlarınız burada görünür."
-                } else {
-                    "İlk yanıtınızı vermek için Çalış sekmesine geçin."
-                },
+                title = stringResource(R.string.stats_no_records_title),
+                message = stringResource(
+                    if (onSelectTab != null) R.string.stats_no_records_msg_tab
+                    else R.string.stats_no_records_msg_switch
+                ),
                 modifier = Modifier.fillMaxWidth(),
                 primaryActionLabel = stringResource(R.string.tab_study),
                 onPrimaryAction = onSelectTab?.let { select -> { select(AppTab.STUDY) } }
@@ -168,7 +176,7 @@ fun StatsView(
         } else {
             // Today's Activity
             GroupBoxCard(
-                title = "Bugünkü çalışma (${store.dailyProgress.dateString})",
+                title = stringResource(R.string.stats_today_activity, store.dailyProgress.dateString),
                 icon = Icons.Default.CalendarMonth,
                 iconTint = colors.accentBlue
             ) {
@@ -180,7 +188,7 @@ fun StatsView(
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = buildAnnotatedString {
-                                append("Yeni Öğrenilen: ")
+                                append(stringResource(R.string.stats_new_learned_prefix))
                                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
                                     append("${store.dailyProgress.newCardsStudied}")
                                 }
@@ -191,7 +199,7 @@ fun StatsView(
                         )
                         Text(
                             text = buildAnnotatedString {
-                                append("Tamamlanan Tekrar: ")
+                                append(stringResource(R.string.stats_reviews_done_prefix))
                                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
                                     append("${store.dailyProgress.reviewsCompleted}")
                                 }
@@ -203,22 +211,22 @@ fun StatsView(
                     }
 
                     FeedbackBadge(
-                        title = "Tekrar",
+                        title = stringResource(ReviewRating.AGAIN.titleRes()),
                         count = store.dailyProgress.againCount,
                         rating = ReviewRating.AGAIN
                     )
                     FeedbackBadge(
-                        title = "Zor",
+                        title = stringResource(ReviewRating.HARD.titleRes()),
                         count = store.dailyProgress.hardCount,
                         rating = ReviewRating.HARD
                     )
                     FeedbackBadge(
-                        title = "İyi",
+                        title = stringResource(ReviewRating.GOOD.titleRes()),
                         count = store.dailyProgress.goodCount,
                         rating = ReviewRating.GOOD
                     )
                     FeedbackBadge(
-                        title = "Kolay",
+                        title = stringResource(ReviewRating.EASY.titleRes()),
                         count = store.dailyProgress.easyCount,
                         rating = ReviewRating.EASY
                     )
@@ -227,7 +235,7 @@ fun StatsView(
 
             // Streak & 35-Day Activity Heatmap
             GroupBoxCard(
-                title = "Günlük Seri (Streak) ve 35 Günlük Çalışma Isı Haritası",
+                title = stringResource(R.string.stats_heatmap_title),
                 icon = Icons.Default.LocalFireDepartment,
                 iconTint = colors.accentOrange
             ) {
@@ -247,13 +255,13 @@ fun StatsView(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "${store.currentStreakDays} Gün",
+                                    text = stringResource(R.string.stats_days_value, store.currentStreakDays),
                                     fontSize = MaterialTheme.typography.titleLarge.fontSize,
                                     fontWeight = FontWeight.Bold,
                                     color = colors.primaryText
                                 )
                                 Text(
-                                    text = "Kesintisiz Günlük Seri",
+                                    text = stringResource(R.string.stats_current_streak_label),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = colors.secondaryText
                                 )
@@ -270,13 +278,13 @@ fun StatsView(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "${store.longestStreakDays} Gün",
+                                    text = stringResource(R.string.stats_days_value, store.longestStreakDays),
                                     fontSize = MaterialTheme.typography.titleMedium.fontSize,
                                     fontWeight = FontWeight.Bold,
                                     color = colors.primaryText
                                 )
                                 Text(
-                                    text = "En Uzun Seri Rekoru",
+                                    text = stringResource(R.string.stats_longest_streak),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = colors.secondaryText
                                 )
@@ -293,13 +301,13 @@ fun StatsView(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "$activeStudyDaysCount Gün",
+                                    text = stringResource(R.string.stats_days_value, activeStudyDaysCount),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = colors.primaryText
                                 )
                                 Text(
-                                    text = "Toplam Aktif Çalışılan Gün",
+                                    text = stringResource(R.string.stats_active_days_label),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = colors.secondaryText
                                 )
@@ -317,12 +325,10 @@ fun StatsView(
         if (totalCards == 0) {
             StateMessageView(
                 icon = Icons.Default.Folder,
-                title = "Henüz kelime yok",
-                message = if (onSelectTab != null) {
-                    "İstatistiklerinizi görmek için kelime havuzuna kelime ekleyin."
-                } else {
-                    "İstatistiklerinizi görmek için Kelimeler sekmesinden kelime ekleyin."
-                },
+                title = stringResource(R.string.stats_empty_title),
+                message = stringResource(
+                    if (onSelectTab != null) R.string.stats_empty_msg_wide else R.string.stats_empty_msg_compact
+                ),
                 modifier = Modifier.fillMaxWidth(),
                 primaryActionLabel = stringResource(R.string.tab_words),
                 onPrimaryAction = onSelectTab?.let { select -> { select(AppTab.WORDS) } }
@@ -334,16 +340,16 @@ fun StatsView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 StatCard(
-                    title = "Yeni (Çalışılmamış)",
+                    title = stringResource(R.string.stats_stage_new_title),
                     value = "$newCount",
-                    subtitle = "Sırada bekleyen",
+                    subtitle = stringResource(R.string.stats_stage_new_sub),
                     color = colors.accentBlue,
                     modifier = Modifier.weight(1f)
                 )
                 StatCard(
-                    title = "Öğreniliyor",
+                    title = stringResource(R.string.stats_stage_learning_title),
                     value = "$learningCount",
-                    subtitle = "Kısa aralıklı",
+                    subtitle = stringResource(R.string.stats_stage_learning_sub),
                     color = colors.accentOrange,
                     modifier = Modifier.weight(1f)
                 )
@@ -353,16 +359,16 @@ fun StatsView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 StatCard(
-                    title = "Genç Kartlar",
+                    title = stringResource(R.string.stats_stage_young_title),
                     value = "$reviewCount",
-                    subtitle = "Aralık < 21 gün",
+                    subtitle = stringResource(R.string.stats_stage_young_sub),
                     color = colors.vividGreen,
                     modifier = Modifier.weight(1f)
                 )
                 StatCard(
-                    title = "Olgun kartlar",
+                    title = stringResource(R.string.stats_stage_mature),
                     value = "$matureCount",
-                    subtitle = "Aralık ≥ 21 gün",
+                    subtitle = stringResource(R.string.stats_stage_mature_sub),
                     color = colors.accentPurple,
                     modifier = Modifier.weight(1f)
                 )
@@ -370,32 +376,32 @@ fun StatsView(
 
             // Artikel Distribution
             GroupBoxCard(
-                title = "Artikel Dağılımı (Toplam $totalCards Kelime)",
+                title = stringResource(R.string.stats_artikel_dist_title, totalCards),
                 icon = Icons.Default.BarChart,
                 iconTint = colors.accentBlue
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     DistributionRow(
-                        label = "der (Eril)",
+                        label = stringResource(R.string.stats_artikel_der_label),
                         count = derCount,
                         total = totalCards,
                         color = Artikel.DER.themeColor()
                     )
                     DistributionRow(
-                        label = "die (Dişil)",
+                        label = stringResource(R.string.stats_artikel_die_label),
                         count = dieCount,
                         total = totalCards,
                         color = Artikel.DIE.themeColor()
                     )
                     DistributionRow(
-                        label = "das (Nötr)",
+                        label = stringResource(R.string.stats_artikel_das_label),
                         count = dasCount,
                         total = totalCards,
                         color = Artikel.DAS.themeColor()
                     )
                     if (articlelessCount > 0) {
                         DistributionRow(
-                            label = "Artikelsiz",
+                            label = stringResource(R.string.stats_artikel_none),
                             count = articlelessCount,
                             total = totalCards,
                             color = colors.artikelNone
@@ -406,7 +412,7 @@ fun StatsView(
 
             // Deck Distribution (#5)
             GroupBoxCard(
-                title = "Deste / Kategori Dağılımı (${store.allDeckNames.size} Deste)",
+                title = stringResource(R.string.stats_deck_dist_title, store.allDeckNames.size),
                 icon = Icons.Default.Folder,
                 iconTint = colors.accentBlue
             ) {
@@ -430,35 +436,34 @@ fun StatsView(
 @Composable
 private fun ActivityHeatmap(days: List<HeatmapDayItem>) {
     val colors = LocalAppColors.current
-    val outline = MaterialTheme.colorScheme.outline
     val ranges = listOf(0 to "0", 1 to "1–4", 5 to "5–14", 15 to "15–34", 35 to "35+")
-    val locale = Locale.forLanguageTag("tr-TR")
-    val fullDateFormat = remember { DateTimeFormatter.ofPattern("d MMMM uuuu", locale) }
+    val locale = Locale.getDefault()
+    val fullDateFormat = remember(locale) { DateTimeFormatter.ofPattern("d MMMM uuuu", locale) }
     val cellMinWidth = with(LocalDensity.current) { 36.sp.toDp() }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-            text = "Son 35 Günlük Aktivite Yoğunluğu",
+            text = stringResource(R.string.stats_heatmap_heading),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
             color = colors.secondaryText,
             modifier = Modifier.semantics { heading() }
         )
         FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             ranges.forEach { (count, label) ->
                 val palette = colors.heatmapColors(count)
-                val shape = RoundedCornerShape(4.dp)
+                val shape = RoundedCornerShape(6.dp)
                 Text(
-                    text = "$label yanıt",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = stringResource(R.string.stats_heatmap_answers, label),
+                    style = MaterialTheme.typography.labelSmall.tabular(),
                     color = palette.foreground,
                     modifier = Modifier
                         .background(palette.background, shape)
-                        .border(1.dp, outline, shape)
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                        .border(0.75.dp, colors.cardBorderSubtle, shape)
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
                 )
             }
         }
@@ -493,25 +498,27 @@ private fun ActivityHeatmap(days: List<HeatmapDayItem>) {
 
 @Composable
 private fun HeatmapCell(label: String, fullDate: String, count: Int, modifier: Modifier = Modifier) {
-    val palette = LocalAppColors.current.heatmapColors(count)
-    val shape = RoundedCornerShape(7.dp)
+    val colors = LocalAppColors.current
+    val palette = colors.heatmapColors(count)
+    val shape = RoundedCornerShape(8.dp)
+    val cellA11y = stringResource(R.string.stats_heatmap_cell_a11y, fullDate, count)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
-            .clearAndSetSemantics { contentDescription = "$fullDate, $count yanıt" }
+            .clearAndSetSemantics { contentDescription = cellA11y }
             .background(palette.background, shape)
-            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+            .border(0.75.dp, colors.cardBorderSubtle, shape)
             .padding(horizontal = 3.dp, vertical = 5.dp)
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.tabular(),
             fontWeight = FontWeight.Medium,
             color = palette.foreground
         )
         Text(
             text = "$count",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.tabular(),
             fontWeight = FontWeight.Bold,
             color = palette.foreground
         )
@@ -554,15 +561,14 @@ fun SettingsView(
                 }
                 backupStatusIsError = false
                 backupStatusDetail = null
-                backupStatusMessage = if (pendingExportIncludeProgress) {
-                    "Tam yedek dışa aktarıldı."
-                } else {
-                    "Deste paketi dışa aktarıldı."
-                }
+                backupStatusMessage = context.getString(
+                    if (pendingExportIncludeProgress) R.string.settings_backup_exported_full
+                    else R.string.settings_backup_exported_deck
+                )
             }.onFailure { error ->
                 backupStatusIsError = true
                 backupStatusDetail = error.localizedMessage
-                backupStatusMessage = "Dosya kaydedilemedi. Başka bir konum seçip tekrar deneyin."
+                backupStatusMessage = context.getString(R.string.settings_backup_save_error)
             }
         }
     }
@@ -571,20 +577,20 @@ fun SettingsView(
         runCatching {
             val jsonStr = context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use {
                 it.readText()
-            } ?: throw IllegalArgumentException("Dosya okunamadı.")
+            } ?: throw IllegalArgumentException(context.getString(R.string.settings_file_read_error))
 
             val (added, updated) = store.importBackupJSONString(jsonStr, mergeWithExisting = merge)
             backupStatusIsError = false
             backupStatusDetail = null
             backupStatusMessage = if (merge) {
-                "Paket birleştirildi: $added yeni kelime eklendi, $updated mevcut kelime kontrol edildi."
+                context.getString(R.string.settings_backup_merged, added, updated)
             } else {
-                "Yedek geri yüklendi: Toplam $added kelime aktif."
+                context.getString(R.string.settings_backup_restored, added)
             }
         }.onFailure { error ->
             backupStatusIsError = true
             backupStatusDetail = error.localizedMessage
-            backupStatusMessage = "Dosya içe aktarılamadı. Bir ArtikelMeister .json yedeği veya deste paketi seçip tekrar deneyin."
+            backupStatusMessage = context.getString(R.string.settings_backup_import_error)
         }
     }
 
@@ -614,169 +620,91 @@ fun SettingsView(
         store.completeGoogleSignIn(result.data, authManager)
     }
 
-    StatsSettingsScreen(title = "Ayarlar", onOpenDrawer = onOpenDrawer) {
-        // Appearance: System / Light / Dark
+    StatsSettingsScreen(title = stringResource(R.string.settings_title), onOpenDrawer = onOpenDrawer) {
+        // Appearance: System / Light / Dark + Language
         GroupBoxCard(
             title = stringResource(R.string.theme_section_title),
             icon = Icons.Default.Palette,
             iconTint = colors.accentPurple
         ) {
-            ThemeModeSelector(store = store)
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                ThemeModeSelector(store = store)
+                HorizontalDivider(color = colors.cardBorderSubtle)
+                LanguageSelector()
+            }
         }
 
         // Daily Limits
         GroupBoxCard(
-            title = "Günlük Çalışma Limitleri",
+            title = stringResource(R.string.settings_daily_limits_title),
             icon = Icons.Default.Tune,
             iconTint = colors.accentBlue
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                // Daily New Card Limit
-                // Label stacked above the stepper so it never gets squeezed on 360dp phones.
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Günlük Yeni Kelime Sayısı",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.primaryText
-                        )
-                        Text(
-                            text = "Her gün çalışma sırasına eklenecek maksimum yeni kelime adedi.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.secondaryText
-                        )
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
-                        IconButton(
-                            onClick = {
-                                store.updateSettings {
-                                    it.copy(dailyNewCardLimit = (it.dailyNewCardLimit - 5).coerceIn(1, 500))
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.Remove, contentDescription = "Günlük yeni kelime limitini azalt", tint = colors.primaryText)
-                        }
-                        Text(
-                            text = "${store.settings.dailyNewCardLimit} kelime / gün",
-                            fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = colors.primaryText,
-                            modifier = Modifier.padding(horizontal = 6.dp)
-                        )
-                        IconButton(
-                            onClick = {
-                                store.updateSettings {
-                                    it.copy(dailyNewCardLimit = (it.dailyNewCardLimit + 5).coerceIn(1, 500))
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Günlük yeni kelime limitini artır", tint = colors.primaryText)
-                        }
-                    }
-                }
-
-                Slider(
+                val newLimitA11y = stringResource(R.string.settings_daily_new_a11y)
+                val newLimitValue = stringResource(R.string.settings_daily_new_value, store.settings.dailyNewCardLimit)
+                DailyLimitControl(
+                    label = stringResource(R.string.settings_daily_new_label),
+                    valueText = newLimitValue,
                     value = store.settings.dailyNewCardLimit.coerceIn(1, 500).toFloat(),
-                    modifier = Modifier.semantics {
-                        contentDescription = "Günlük yeni kelime limiti"
-                        stateDescription = "${store.settings.dailyNewCardLimit} kelime / gün"
-                    },
-                    onValueChange = { v ->
-                        store.updateSettings { it.copy(dailyNewCardLimit = v.roundToInt().coerceIn(1, 500)) }
-                    },
                     valueRange = 1f..500f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = colors.accentBlue,
-                        activeTrackColor = colors.accentBlue
-                    )
+                    sliderA11y = newLimitA11y,
+                    decA11y = stringResource(R.string.settings_daily_new_dec_a11y),
+                    incA11y = stringResource(R.string.settings_daily_new_inc_a11y),
+                    onDecrease = {
+                        store.updateSettings {
+                            it.copy(dailyNewCardLimit = (it.dailyNewCardLimit - 5).coerceIn(1, 500))
+                        }
+                    },
+                    onIncrease = {
+                        store.updateSettings {
+                            it.copy(dailyNewCardLimit = (it.dailyNewCardLimit + 5).coerceIn(1, 500))
+                        }
+                    },
+                    onSlide = { v ->
+                        store.updateSettings { it.copy(dailyNewCardLimit = v.roundToInt().coerceIn(1, 500)) }
+                    }
                 )
 
                 HorizontalDivider(color = colors.cardBorderSubtle)
 
-                // Daily Review Limit
-                // Label stacked above the stepper so it never gets squeezed on 360dp phones.
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Günlük Maksimum Tekrar Sayısı",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.primaryText
-                        )
-                        Text(
-                            text = "Daha önce öğrenilmiş kelimelerden bir günde sorulacak maksimum tekrar kartı sayısı.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.secondaryText
-                        )
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
-                        IconButton(
-                            onClick = {
-                                store.updateSettings {
-                                    it.copy(dailyReviewLimit = (it.dailyReviewLimit - 10).coerceIn(10, 1000))
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.Remove, contentDescription = "Günlük tekrar limitini azalt", tint = colors.primaryText)
-                        }
-                        Text(
-                            text = "${store.settings.dailyReviewLimit} tekrar / gün",
-                            fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = colors.primaryText,
-                            modifier = Modifier.padding(horizontal = 6.dp)
-                        )
-                        IconButton(
-                            onClick = {
-                                store.updateSettings {
-                                    it.copy(dailyReviewLimit = (it.dailyReviewLimit + 10).coerceIn(10, 1000))
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Günlük tekrar limitini artır", tint = colors.primaryText)
-                        }
-                    }
-                }
-
-                Slider(
+                val reviewLimitA11y = stringResource(R.string.settings_daily_review_a11y)
+                val reviewLimitValue = stringResource(R.string.settings_daily_review_value, store.settings.dailyReviewLimit)
+                DailyLimitControl(
+                    label = stringResource(R.string.settings_daily_review_label),
+                    valueText = reviewLimitValue,
                     value = store.settings.dailyReviewLimit.coerceIn(10, 1000).toFloat(),
-                    modifier = Modifier.semantics {
-                        contentDescription = "Günlük tekrar limiti"
-                        stateDescription = "${store.settings.dailyReviewLimit} tekrar / gün"
+                    valueRange = 10f..1000f,
+                    sliderA11y = reviewLimitA11y,
+                    decA11y = stringResource(R.string.settings_daily_review_dec_a11y),
+                    incA11y = stringResource(R.string.settings_daily_review_inc_a11y),
+                    onDecrease = {
+                        store.updateSettings {
+                            it.copy(dailyReviewLimit = (it.dailyReviewLimit - 10).coerceIn(10, 1000))
+                        }
                     },
-                    onValueChange = { v ->
+                    onIncrease = {
+                        store.updateSettings {
+                            it.copy(dailyReviewLimit = (it.dailyReviewLimit + 10).coerceIn(10, 1000))
+                        }
+                    },
+                    onSlide = { v ->
                         val stepped = ((v / 10f).roundToInt() * 10).coerceIn(10, 1000)
                         store.updateSettings { it.copy(dailyReviewLimit = stepped) }
-                    },
-                    valueRange = 10f..1000f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = colors.accentBlue,
-                        activeTrackColor = colors.accentBlue
-                    )
+                    }
                 )
             }
         }
 
         // Card Presentation Preferences
         GroupBoxCard(
-            title = "Kart Sunum Tercihleri",
+            title = stringResource(R.string.settings_card_prefs),
             icon = Icons.Default.Style,
             iconTint = colors.accentBlue
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingToggleRow(
-                    label = "Kart çevrildiğinde Almanca kelimeyi otomatik seslendir",
+                    label = stringResource(R.string.settings_auto_pronounce),
                     checked = store.settings.autoPlayPronunciation,
                     onCheckedChange = { v ->
                         store.updateSettings { it.copy(autoPlayPronunciation = v) }
@@ -784,7 +712,7 @@ fun SettingsView(
                 )
                 HorizontalDivider(color = colors.cardBorderSubtle.copy(alpha = 0.5f))
                 SettingToggleRow(
-                    label = "Kartın ön yüzünde Türkçe anlamı (ipucu olarak) göster",
+                    label = stringResource(R.string.settings_show_meaning_front),
                     checked = store.settings.showMeaningOnFront,
                     onCheckedChange = { v ->
                         store.updateSettings { it.copy(showMeaningOnFront = v) }
@@ -792,7 +720,7 @@ fun SettingsView(
                 )
                 HorizontalDivider(color = colors.cardBorderSubtle.copy(alpha = 0.5f))
                 SettingToggleRow(
-                    label = "Yeni kelimeleri eklenme sırası yerine rastgele sırayla getir",
+                    label = stringResource(R.string.settings_random_new),
                     checked = store.settings.newCardOrderRandom,
                     onCheckedChange = { v ->
                         store.updateSettings { it.copy(newCardOrderRandom = v) }
@@ -803,7 +731,7 @@ fun SettingsView(
 
         // Universal Google Profile & Cloud Synchronization
         GroupBoxCard(
-            title = "Google Drive ile eşitleme",
+            title = stringResource(R.string.settings_drive_sync_title),
             icon = Icons.Default.AccountCircle,
             iconTint = colors.accentBlue
         ) {
@@ -814,9 +742,9 @@ fun SettingsView(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(colors.successBadgeBackground, RoundedCornerShape(10.dp))
-                            .border(1.dp, colors.success, RoundedCornerShape(10.dp))
-                            .padding(12.dp)
+                            .background(colors.successBadgeBackground, RoundedCornerShape(14.dp))
+                            .border(1.dp, colors.success.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                            .padding(14.dp)
                     ) {
                         Box(
                             contentAlignment = Alignment.Center,
@@ -832,18 +760,18 @@ fun SettingsView(
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = authManager.userName.ifBlank { "Google Hesabı Bağlı" },
+                                text = authManager.userName.ifBlank { stringResource(R.string.settings_drive_connected_fallback) },
                                 fontSize = MaterialTheme.typography.bodyMedium.fontSize,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.primaryText
                             )
                             Text(
-                                text = authManager.userEmail.ifBlank { "Google Profil Aktif" },
+                                text = authManager.userEmail.ifBlank { stringResource(R.string.settings_drive_profile_active) },
                                 fontSize = MaterialTheme.typography.labelSmall.fontSize,
                                 color = colors.secondaryText
                             )
                             Text(
-                                text = "Bulut Eşitleme Aktif",
+                                text = stringResource(R.string.settings_drive_active),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colors.success,
                                 fontWeight = FontWeight.Medium
@@ -862,7 +790,8 @@ fun SettingsView(
                                 containerColor = colors.accentBlue,
                                 contentColor = colors.onBlue
                             ),
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             if (store.isSyncingCloud) {
                                 CircularProgressIndicator(
@@ -875,7 +804,10 @@ fun SettingsView(
                             }
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (store.isSyncingCloud) "Eşitleniyor..." else "Şimdi Bulutla Eşitle",
+                                text = stringResource(
+                                    if (store.isSyncingCloud) R.string.settings_drive_syncing_btn
+                                    else R.string.settings_drive_sync_now_btn
+                                ),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -884,24 +816,20 @@ fun SettingsView(
                         OutlinedButton(
                             onClick = {
                                 authManager.signOut(context) {
-                                    store.cloudSyncStatusMessage = "Google hesabından çıkış yapıldı (yerel veriler korundu)."
+                                    store.cloudSyncStatusMessage = context.getString(R.string.settings_drive_signed_out_msg)
                                     store.cloudSyncIsError = false
                                 }
                             },
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Hesaptan Çıkış Yap", style = MaterialTheme.typography.labelLarge)
+                            Text(stringResource(R.string.settings_drive_sign_out_btn), style = MaterialTheme.typography.labelLarge)
                         }
                     }
                 } else {
-                    Text(
-                        text = "Google hesabınızla giriş yaparak tüm kelimelerinizi, çalışma geçmişinizi, günlük serinizi (streak) ve tercihlerinizi Google Drive bulutunuzla otomatik eşitleyebilirsiniz.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondaryText
-                    )
-
                     Button(
                         onClick = {
                             googleSignInLauncher.launch(authManager.getGoogleSignInIntent(context))
@@ -911,7 +839,8 @@ fun SettingsView(
                             containerColor = colors.accentBlue,
                             contentColor = colors.onBlue
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         if (authManager.isAuthenticating || store.isSyncingCloud) {
                             CircularProgressIndicator(
@@ -925,9 +854,9 @@ fun SettingsView(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = when {
-                                authManager.isAuthenticating -> "Google ile bağlanılıyor..."
-                                store.isSyncingCloud -> "Google Drive ile eşitleniyor..."
-                                else -> "Google hesabıyla giriş yap ve eşitle"
+                                authManager.isAuthenticating -> stringResource(R.string.settings_drive_connecting)
+                                store.isSyncingCloud -> stringResource(R.string.settings_drive_syncing_status)
+                                else -> stringResource(R.string.settings_drive_signin_sync_btn)
                             },
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold
@@ -939,10 +868,10 @@ fun SettingsView(
                 val cloudIsError = store.cloudSyncIsError && !cloudIsBusy
                 val cloudStatus = store.cloudSyncStatusMessage
                 val cloudMessage = when {
-                    isDeletingAccount -> "Hesap verileri siliniyor..."
-                    authManager.isAuthenticating -> "Google ile bağlanılıyor..."
-                    store.isSyncingCloud -> "Google Drive ile eşitleniyor..."
-                    cloudIsError -> "Google Drive işlemi tamamlanamadı. Ayrıntıları kontrol edip tekrar deneyin."
+                    isDeletingAccount -> stringResource(R.string.settings_deleting_account)
+                    authManager.isAuthenticating -> stringResource(R.string.settings_drive_connecting)
+                    store.isSyncingCloud -> stringResource(R.string.settings_drive_syncing_status)
+                    cloudIsError -> stringResource(R.string.settings_drive_error_generic)
                     else -> cloudStatus
                 }
                 SettingsStatusMessage(
@@ -956,13 +885,13 @@ fun SettingsView(
 
         // Backup & Restore / Deck Sharing
         GroupBoxCard(
-            title = "Yedekleme ve Deste Paylaşımı",
+            title = stringResource(R.string.settings_backup_section_title),
             icon = Icons.Default.Archive,
             iconTint = colors.accentBlue
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
-                    text = "Yedek ve deste paketi .json dosyası olarak kaydedilir. Deste paketi kişisel ilerlemenizi içermez.",
+                    text = stringResource(R.string.settings_backup_package_note),
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.secondaryText
                 )
@@ -982,11 +911,12 @@ fun SettingsView(
                             containerColor = colors.accentBlue,
                             contentColor = colors.onBlue
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Icon(Icons.Default.Outbox, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Tam yedeği dışa aktar", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.settings_export_full_btn), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                     }
 
                     OutlinedButton(
@@ -996,33 +926,37 @@ fun SettingsView(
                             exportBackupLauncher.launch("ArtikelMeister_DestePaketi_$todayStr.json")
                         },
                         enabled = store.cards.isNotEmpty(),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Icon(Icons.Default.Outbox, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Deste paketini dışa aktar", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.settings_export_deck_btn), style = MaterialTheme.typography.labelLarge)
                     }
 
                     OutlinedButton(
                         onClick = {
                             importBackupLauncher.launch(arrayOf("application/json", "*/*"))
                         },
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Icon(Icons.Default.MoveToInbox, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Yedeği veya paketi içe aktar", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.settings_import_backup_btn), style = MaterialTheme.typography.labelLarge)
                     }
                 }
 
                 SettingToggleRow(
-                    label = "Birleştir",
+                    label = stringResource(R.string.settings_merge_toggle),
                     checked = mergeOnBackupImport,
                     onCheckedChange = { mergeOnBackupImport = it }
                 )
 
                 Text(
-                    text = "Birleştirme kapalıysa içe aktarma, onayınızdan sonra mevcut verileri değiştirir.",
+                    text = stringResource(R.string.settings_merge_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.secondaryText
                 )
@@ -1036,7 +970,7 @@ fun SettingsView(
 
         // Data Management
         GroupBoxCard(
-            title = "Veri Yönetimi",
+            title = stringResource(R.string.settings_data_mgmt_title),
             icon = Icons.Default.Storage,
             iconTint = colors.accentBlue
         ) {
@@ -1049,8 +983,9 @@ fun SettingsView(
                         onClick = { showResetConfirmation = true },
                         enabled = store.cards.isNotEmpty(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.error),
-                        border = BorderStroke(1.dp, colors.error),
-                        shape = RoundedCornerShape(8.dp)
+                        border = BorderStroke(1.dp, colors.error.copy(alpha = 0.55f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.SettingsBackupRestore,
@@ -1058,15 +993,16 @@ fun SettingsView(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Öğrenme İlerlemesini Sıfırla", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.settings_reset_progress_btn), style = MaterialTheme.typography.labelLarge)
                     }
 
                     OutlinedButton(
                         onClick = { showDeleteAllConfirmation = true },
                         enabled = store.cards.isNotEmpty(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.error),
-                        border = BorderStroke(1.dp, colors.error),
-                        shape = RoundedCornerShape(8.dp)
+                        border = BorderStroke(1.dp, colors.error.copy(alpha = 0.55f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Delete,
@@ -1074,15 +1010,16 @@ fun SettingsView(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Tüm Kelimeleri Sil", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.settings_delete_all_btn), style = MaterialTheme.typography.labelLarge)
                     }
 
                     OutlinedButton(
                         onClick = { showDeleteAccountConfirmation = true },
                         enabled = !isDeletingAccount && (authManager.isAuthorized || store.cards.isNotEmpty() || store.studyHistory.isNotEmpty()),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.error),
-                        border = BorderStroke(1.dp, colors.error),
-                        shape = RoundedCornerShape(8.dp)
+                        border = BorderStroke(1.dp, colors.error.copy(alpha = 0.55f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         if (isDeletingAccount) {
                             CircularProgressIndicator(
@@ -1099,7 +1036,10 @@ fun SettingsView(
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isDeletingAccount) "Hesap Verileri Siliniyor..." else "Hesap Verilerini Sil",
+                            text = stringResource(
+                                if (isDeletingAccount) R.string.settings_deleting_account
+                                else R.string.settings_delete_account
+                            ),
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
@@ -1111,14 +1051,14 @@ fun SettingsView(
     pendingImportUri?.let { uri ->
         AlertDialog(
             onDismissRequest = { pendingImportUri = null },
-            title = { Text("Mevcut veriler değiştirilsin mi?") },
+            title = { Text(stringResource(R.string.settings_replace_dialog_title)) },
             text = {
                 val fileName = pendingImportName
                 Text(
                     if (fileName.isNotBlank()) {
-                        "“$fileName” dosyasını içe aktarmak mevcut verilerinizi değiştirir. Bu işlem geri alınamaz."
+                        stringResource(R.string.settings_replace_dialog_named, fileName)
                     } else {
-                        "Seçilen dosyayı içe aktarmak mevcut verilerinizi değiştirir. Bu işlem geri alınamaz."
+                        stringResource(R.string.settings_replace_dialog_unnamed)
                     }
                 )
             },
@@ -1130,11 +1070,11 @@ fun SettingsView(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = colors.error, contentColor = colors.onError)
                 ) {
-                    Text("Mevcut verileri değiştir")
+                    Text(stringResource(R.string.settings_replace_confirm_btn))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingImportUri = null }) { Text("İptal") }
+                TextButton(onClick = { pendingImportUri = null }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -1144,17 +1084,14 @@ fun SettingsView(
             onDismissRequest = { if (!isDeletingAccount) showDeleteAccountConfirmation = false },
             title = {
                 Text(
-                    "Hesap Verilerini Silmek İstediğinize Emin Misiniz?",
+                    stringResource(R.string.settings_delete_acct_title),
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleSmall
                 )
             },
             text = {
                 Text(
-                    text = "Bu işlem geri alınamaz:\n" +
-                        "• Google Drive'daki \"ArtikelMeister Cloud Sync\" klasörünüz ve bulut yedeğiniz kalıcı olarak silinir.\n" +
-                        "• Bu cihazdaki tüm kelimeleriniz, desteleriniz, günlük seriniz (streak) ve tercih ayarlarınız sıfırlanır.\n" +
-                        "• Google hesabı bağlantınız sonlandırılır.",
+                    text = stringResource(R.string.settings_delete_acct_msg),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.secondaryText
                 )
@@ -1172,7 +1109,10 @@ fun SettingsView(
                     colors = ButtonDefaults.buttonColors(containerColor = colors.error, contentColor = colors.onError)
                 ) {
                     Text(
-                        if (isDeletingAccount) "Siliniyor..." else "Evet, Tüm Hesap Verilerini Sil",
+                        stringResource(
+                            if (isDeletingAccount) R.string.settings_delete_acct_deleting
+                            else R.string.settings_delete_acct_confirm
+                        ),
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -1182,7 +1122,7 @@ fun SettingsView(
                     onClick = { showDeleteAccountConfirmation = false },
                     enabled = !isDeletingAccount
                 ) {
-                    Text("İptal")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
@@ -1193,7 +1133,7 @@ fun SettingsView(
             onDismissRequest = { showResetConfirmation = false },
             title = {
                 Text(
-                    "Tüm kelimelerin öğrenme geçmişini sıfırlamak istediğinize emin misiniz?",
+                    stringResource(R.string.settings_reset_progress_confirm_msg),
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleSmall
                 )
@@ -1206,12 +1146,12 @@ fun SettingsView(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = colors.error, contentColor = colors.onError)
                 ) {
-                    Text("İlerlemeyi Sıfırla (Kelimeler Kalır)")
+                    Text(stringResource(R.string.settings_reset_progress_confirm_btn))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showResetConfirmation = false }) {
-                    Text("İptal")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
@@ -1222,7 +1162,7 @@ fun SettingsView(
             onDismissRequest = { showDeleteAllConfirmation = false },
             title = {
                 Text(
-                    "Yerel depolamadaki tüm kelimeleri silmek istediğinize emin misiniz?",
+                    stringResource(R.string.settings_delete_all_confirm_msg),
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleSmall
                 )
@@ -1235,12 +1175,12 @@ fun SettingsView(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = colors.error, contentColor = colors.onError)
                 ) {
-                    Text("Tüm Kelimeleri Sil")
+                    Text(stringResource(R.string.settings_delete_all_btn))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteAllConfirmation = false }) {
-                    Text("İptal")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
@@ -1282,7 +1222,6 @@ private fun SettingToggleRow(
 }
 
 /** System / Light / Dark theme picker backed by the [UiPreferences] adapter. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ThemeModeSelector(store: DeckStore) {
     val colors = LocalAppColors.current
@@ -1292,34 +1231,350 @@ private fun ThemeModeSelector(store: DeckStore) {
         Triple(ThemeMode.LIGHT, R.string.theme_mode_light, Icons.Default.LightMode),
         Triple(ThemeMode.DARK, R.string.theme_mode_dark, Icons.Default.DarkMode)
     )
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            options.forEachIndexed { index, (mode, labelRes, icon) ->
-                SegmentedButton(
-                    selected = selected == mode,
-                    onClick = { UiPreferences.setThemeMode(mode, store) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                    icon = {
-                        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-                    },
-                    colors = SegmentedButtonDefaults.colors(
-                        activeContainerColor = colors.blueBadgeBackground,
-                        activeContentColor = colors.accentBlue,
-                        activeBorderColor = colors.cardBorderSubtle,
-                        inactiveContainerColor = colors.textBackground,
-                        inactiveContentColor = colors.primaryText,
-                        inactiveBorderColor = colors.cardBorderSubtle
-                    )
+    Surface(
+        color = colors.textBackground,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, colors.cardBorderSubtle),
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectableGroup()
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp)
+        ) {
+            options.forEach { (mode, labelRes, icon) ->
+                val isSelected = selected == mode
+                val bg by animateColorAsState(
+                    targetValue = if (isSelected) colors.blueBadgeBackground else Color.Transparent,
+                    animationSpec = tween(160),
+                    label = "themeSegBg"
+                )
+                val borderColor by animateColorAsState(
+                    targetValue = if (isSelected) colors.accentBlue.copy(alpha = 0.4f) else Color.Transparent,
+                    animationSpec = tween(160),
+                    label = "themeSegBorder"
+                )
+                Surface(
+                    color = bg,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, borderColor),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.RadioButton,
+                            onClick = { UiPreferences.setThemeMode(mode, store) }
+                        )
                 ) {
-                    Text(stringResource(labelRes), style = MaterialTheme.typography.labelLarge)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = if (isSelected) colors.accentBlue else colors.secondaryText,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = stringResource(labelRes),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) colors.accentBlue else colors.primaryText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
-        Text(
-            text = stringResource(R.string.theme_mode_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.secondaryText
+    }
+}
+
+@Composable
+private fun LanguageFlagIcon(
+    language: AppLanguage,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalAppColors.current
+    val borderColor = if (colors.isDark) Color.White.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.14f)
+    val shape = RoundedCornerShape(4.dp)
+
+    Canvas(
+        modifier = modifier
+            .size(width = 26.dp, height = 18.dp)
+            .clip(shape)
+            .border(0.75.dp, borderColor, shape)
+    ) {
+        val w = size.width
+        val h = size.height
+
+        when (language) {
+            AppLanguage.TR -> {
+                drawRect(color = Color(0xFFE30A17))
+                // Crescent
+                val outerRadius = h * 0.27f
+                val innerRadius = h * 0.215f
+                drawCircle(
+                    color = Color.White,
+                    radius = outerRadius,
+                    center = Offset(w * 0.40f, h * 0.50f)
+                )
+                drawCircle(
+                    color = Color(0xFFE30A17),
+                    radius = innerRadius,
+                    center = Offset(w * 0.465f, h * 0.50f)
+                )
+                // 5-pointed star
+                val starCx = w * 0.65f
+                val starCy = h * 0.50f
+                val starOuter = h * 0.135f
+                val starInner = h * 0.054f
+                val starPath = Path().apply {
+                    for (i in 0 until 10) {
+                        val angleDeg = -18.0 + i * 36.0
+                        val angleRad = Math.toRadians(angleDeg)
+                        val r = if (i % 2 == 0) starOuter else starInner
+                        val x = starCx + (r * kotlin.math.cos(angleRad)).toFloat()
+                        val y = starCy + (r * kotlin.math.sin(angleRad)).toFloat()
+                        if (i == 0) moveTo(x, y) else lineTo(x, y)
+                    }
+                    close()
+                }
+                drawPath(path = starPath, color = Color.White)
+            }
+
+            AppLanguage.EN -> {
+                // Clean flat Duolingo-style UK Union Jack
+                drawRect(color = Color(0xFF012169))
+                val whiteDiag = h * 0.22f
+                val redDiag = h * 0.11f
+                drawLine(Color.White, Offset(0f, 0f), Offset(w, h), strokeWidth = whiteDiag)
+                drawLine(Color.White, Offset(w, 0f), Offset(0f, h), strokeWidth = whiteDiag)
+                drawLine(Color(0xFFC8102E), Offset(0f, 0f), Offset(w, h), strokeWidth = redDiag)
+                drawLine(Color(0xFFC8102E), Offset(w, 0f), Offset(0f, h), strokeWidth = redDiag)
+                // White cross
+                val whiteCross = h * 0.30f
+                drawRect(Color.White, topLeft = Offset((w - whiteCross) / 2f, 0f), size = Size(whiteCross, h))
+                drawRect(Color.White, topLeft = Offset(0f, (h - whiteCross) / 2f), size = Size(w, whiteCross))
+                // Red cross
+                val redCross = h * 0.17f
+                drawRect(Color(0xFFC8102E), topLeft = Offset((w - redCross) / 2f, 0f), size = Size(redCross, h))
+                drawRect(Color(0xFFC8102E), topLeft = Offset(0f, (h - redCross) / 2f), size = Size(w, redCross))
+            }
+
+            AppLanguage.DE -> {
+                val bandH = h / 3f
+                drawRect(color = Color(0xFF2B2B2B), topLeft = Offset(0f, 0f), size = Size(w, bandH))
+                drawRect(color = Color(0xFFDD0000), topLeft = Offset(0f, bandH), size = Size(w, bandH))
+                drawRect(color = Color(0xFFFFCE00), topLeft = Offset(0f, bandH * 2f), size = Size(w, bandH + 1f))
+            }
+        }
+
+        // Subtle Duolingo-style top inner highlight
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(Color.White.copy(alpha = 0.20f), Color.Transparent),
+                startY = 0f,
+                endY = h * 0.45f
+            ),
+            size = Size(w, h * 0.45f)
         )
+    }
+}
+
+@Composable
+private fun LanguageSelector() {
+    val colors = LocalAppColors.current
+    val context = LocalContext.current
+    val selected = UiPreferences.appLanguage
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = stringResource(R.string.language_label),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.primaryText
+        )
+        Surface(
+            color = colors.textBackground,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, colors.cardBorderSubtle),
+            modifier = Modifier
+                .fillMaxWidth()
+                .selectableGroup()
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(4.dp)
+            ) {
+                AppLanguage.entries.forEach { lang ->
+                    val isSelected = selected == lang
+                    val bg by animateColorAsState(
+                        targetValue = if (isSelected) colors.blueBadgeBackground else Color.Transparent,
+                        animationSpec = tween(160),
+                        label = "langSegBg"
+                    )
+                    val borderColor by animateColorAsState(
+                        targetValue = if (isSelected) colors.accentBlue.copy(alpha = 0.4f) else Color.Transparent,
+                        animationSpec = tween(160),
+                        label = "langSegBorder"
+                    )
+                    Surface(
+                        color = bg,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, borderColor),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .selectable(
+                                selected = isSelected,
+                                role = Role.RadioButton,
+                                onClick = {
+                                    if (!isSelected) {
+                                        UiPreferences.selectAppLanguage(lang)
+                                        (context as? Activity)?.recreate()
+                                    }
+                                }
+                            )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
+                        ) {
+                            LanguageFlagIcon(language = lang)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(lang.labelRes),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) colors.accentBlue else colors.primaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyLimitControl(
+    label: String,
+    valueText: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    sliderA11y: String,
+    decA11y: String,
+    incA11y: String,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit,
+    onSlide: (Float) -> Unit
+) {
+    val colors = LocalAppColors.current
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.primaryText,
+                modifier = Modifier.weight(1f)
+            )
+            Surface(
+                color = colors.blueBadgeBackground,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, colors.accentBlue.copy(alpha = 0.25f))
+            ) {
+                Text(
+                    text = valueText,
+                    style = MaterialTheme.typography.labelSmall.tabular(),
+                    fontWeight = FontWeight.Bold,
+                    color = colors.accentBlue,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Surface(
+                onClick = onDecrease,
+                shape = RoundedCornerShape(12.dp),
+                color = colors.textBackground,
+                border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                modifier = Modifier
+                    .size(48.dp)
+                    .semantics { contentDescription = decA11y }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Remove,
+                        contentDescription = null,
+                        tint = colors.primaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Slider(
+                value = value,
+                onValueChange = onSlide,
+                valueRange = valueRange,
+                colors = SliderDefaults.colors(
+                    thumbColor = colors.accentBlue,
+                    activeTrackColor = colors.accentBlue
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics {
+                        contentDescription = sliderA11y
+                        stateDescription = valueText
+                    }
+            )
+
+            Surface(
+                onClick = onIncrease,
+                shape = RoundedCornerShape(12.dp),
+                color = colors.textBackground,
+                border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                modifier = Modifier
+                    .size(48.dp)
+                    .semantics { contentDescription = incA11y }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        tint = colors.primaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1338,38 +1593,58 @@ private fun StatsSettingsScreen(
             .background(colors.windowBackground)
             .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = if (onOpenDrawer == null) 20.dp else 12.dp, end = 20.dp)
-                .padding(vertical = 12.dp)
+                .background(colors.controlBackground)
         ) {
-            if (onOpenDrawer != null) {
-                IconButton(onClick = onOpenDrawer) {
-                    Icon(
-                        imageVector = Icons.Default.Menu,
-                        contentDescription = stringResource(R.string.action_open_menu),
-                        tint = colors.primaryText
-                    )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                if (onOpenDrawer != null) {
+                    val menuDesc = stringResource(R.string.action_open_menu)
+                    Surface(
+                        onClick = onOpenDrawer,
+                        shape = RoundedCornerShape(14.dp),
+                        color = colors.textBackground,
+                        border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .semantics { contentDescription = menuDesc }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = null,
+                                tint = colors.primaryText,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                 }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.primaryText,
+                    modifier = Modifier
+                        .padding(start = if (onOpenDrawer == null) 8.dp else 0.dp)
+                        .semantics { heading() }
+                )
             }
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = colors.primaryText,
-                modifier = Modifier.semantics { heading() }
-            )
+            HorizontalDivider(color = colors.cardBorderSubtle)
         }
         Column(
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 20.dp),
+                .padding(horizontal = 16.dp, vertical = 16.dp),
             content = content
         )
     }
@@ -1431,25 +1706,31 @@ private fun StatCard(
     val colors = LocalAppColors.current
     Surface(
         color = colors.controlBackground,
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.28f)),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, colors.cardBorderSubtle),
         modifier = modifier
     ) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(14.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(16.dp)
         ) {
+            Box(
+                modifier = Modifier
+                    .size(width = 24.dp, height = 3.dp)
+                    .background(color, CircleShape)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.headlineLarge.tabular(),
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = colors.secondaryText
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                color = color
+                color = colors.primaryText
             )
             Text(
                 text = subtitle,
@@ -1467,19 +1748,20 @@ private fun FeedbackBadge(
     rating: ReviewRating
 ) {
     val colors = LocalAppColors.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(12.dp)
+    val accent = colors.ratingColor(rating)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .background(colors.ratingBadgeBackground(rating), shape)
-            .border(1.dp, colors.ratingColor(rating), shape)
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .border(1.dp, accent.copy(alpha = 0.28f), shape)
+            .padding(horizontal = 12.dp, vertical = 7.dp)
     ) {
         Text(
             text = "$count",
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleMedium.tabular(),
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
+            color = accent
         )
         Text(
             text = title,
@@ -1498,8 +1780,9 @@ private fun DistributionRow(
 ) {
     val colors = LocalAppColors.current
     val ratio = if (total > 0) count.toFloat() / total.toFloat() else 0f
+    val pct = (ratio * 100f).roundToInt()
 
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
@@ -1512,17 +1795,17 @@ private fun DistributionRow(
                 modifier = Modifier.weight(1f)
             )
             Text(
-                text = "$count kelime (${(ratio * 100f).roundToInt()}%)",
-                style = MaterialTheme.typography.labelSmall,
+                text = stringResource(R.string.stats_word_count_pct, count, pct),
+                style = MaterialTheme.typography.labelSmall.tabular(),
                 color = colors.secondaryText
             )
         }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(8.dp)
+                .height(6.dp)
                 .clip(CircleShape)
-                .background(colors.secondaryText.copy(alpha = 0.15f))
+                .background(colors.secondaryText.copy(alpha = 0.14f))
         ) {
             Box(
                 modifier = Modifier

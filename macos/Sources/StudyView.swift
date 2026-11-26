@@ -54,9 +54,9 @@ struct StudyView: View {
                 emptyDatabaseView
             } else if store.filteredPoolCards.isEmpty {
                 ContentUnavailableView(
-                    "Bu destede henüz kelime yok",
+                    L10n.studyEmptyDeckTitle,
                     systemImage: "folder",
-                    description: Text("Bu desteye kelime eklemek için CSV içe aktarabilir veya AI ile kelime üretebilirsiniz.")
+                    description: Text(L10n.studyEmptyDeckDesc)
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let card = currentCard {
@@ -110,12 +110,12 @@ struct StudyView: View {
         }
         .alert(importTitle, isPresented: $showImportAlert) {
             if offerImportUndo {
-                Button("Geri al", role: .destructive) {
+                Button(L10n.undo, role: .destructive) {
                     importUndoSucceeded = store.undoLastImport()
                     offerImportUndo = false
                 }
             }
-            Button("Tamam", role: .cancel) {
+            Button(L10n.ok, role: .cancel) {
                 offerImportUndo = false
                 store.finishImportUndoWindow()
             }
@@ -154,7 +154,9 @@ struct StudyView: View {
     private func importUndoNotice(succeeded: Bool) -> some View {
         HStack(spacing: 12) {
             Label(
-                succeeded ? "İçe aktarma geri alındı." : "İçe aktarma geri alınamadı.",
+                succeeded
+                    ? L10n.text("İçe aktarma geri alındı.", en: "Import undone.", de: "Import rückgängig gemacht.")
+                    : L10n.text("İçe aktarma geri alınamadı.", en: "Could not undo import.", de: "Import konnte nicht rückgängig gemacht werden."),
                 systemImage: succeeded ? "checkmark.circle.fill" : "xmark.circle.fill"
             )
             .foregroundStyle(succeeded ? AppPalette.success : AppPalette.error)
@@ -167,8 +169,8 @@ struct StudyView: View {
                 Image(systemName: "xmark")
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("Bildirimi kapat")
-            .help("Bildirimi kapat")
+            .accessibilityLabel(L10n.text("Bildirimi kapat", en: "Dismiss notice", de: "Hinweis schließen"))
+            .help(L10n.text("Bildirimi kapat", en: "Dismiss notice", de: "Hinweis schließen"))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -219,7 +221,7 @@ struct StudyView: View {
                 Button {
                     showStudySummary.toggle()
                 } label: {
-                    Label("Çalışma özeti", systemImage: "chart.bar")
+                    Label(L10n.studySummaryLabel, systemImage: "chart.bar")
                 }
                 .buttonStyle(.bordered)
                 .fixedSize()
@@ -227,7 +229,7 @@ struct StudyView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         queueCounters
                         streakCounter
-                        Text("En uzun seri: \(store.longestStreakDays) gün")
+                        Text(L10n.longestStreakLabel(store.longestStreakDays))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -240,24 +242,24 @@ struct StudyView: View {
                     aiButton
                     csvButton
                 } label: {
-                    Label("Diğer çalışma işlemleri", systemImage: "ellipsis.circle")
+                    Label(L10n.studyOtherActions, systemImage: "ellipsis.circle")
                         .labelStyle(.iconOnly)
                 }
                 .menuStyle(.borderedButton)
-                .accessibilityLabel("Diğer çalışma işlemleri")
-                .help("Diğer çalışma işlemleri")
+                .accessibilityLabel(L10n.studyOtherActions)
+                .help(L10n.studyOtherActions)
                 .fixedSize()
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(.ultraThinMaterial)
     }
 
     private var deckMenu: some View {
         Menu {
-            Picker("Çalışma destesi", selection: $store.selectedStudyDeck) {
-                Label("Tüm Desteler (\(store.cards.count))", systemImage: deckIcon(for: nil))
+            Picker(L10n.studyDeckLabel, selection: $store.selectedStudyDeck) {
+                Label("\(L10n.allDecks) (\(store.cards.count))", systemImage: deckIcon(for: nil))
                     .tag(nil as String?)
 
                 ForEach(store.allDeckNames, id: \.self) { deck in
@@ -272,23 +274,23 @@ struct StudyView: View {
             Button {
                 showNewDeckSheet = true
             } label: {
-                Label("Yeni Deste Ekle…", systemImage: "folder.badge.plus")
+                Label(L10n.newDeckAddEllipsis, systemImage: "folder.badge.plus")
             }
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: deckIcon(for: store.selectedStudyDeck))
                     .foregroundStyle(AppPalette.accentBlue)
                     .accessibilityHidden(true)
-                Text(store.selectedStudyDeck ?? "Tüm Desteler")
+                Text(store.selectedStudyDeck ?? L10n.allDecks)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
             }
             .frame(maxWidth: 150, alignment: .leading)
         }
         .menuStyle(.borderedButton)
-        .accessibilityLabel("Çalışma destesi")
-        .accessibilityValue(store.selectedStudyDeck ?? "Tüm Desteler")
-        .help(store.selectedStudyDeck ?? "Tüm Desteler")
+        .accessibilityLabel(L10n.studyDeckLabel)
+        .accessibilityValue(store.selectedStudyDeck ?? L10n.allDecks)
+        .help(store.selectedStudyDeck ?? L10n.allDecks)
         .fixedSize(horizontal: true, vertical: false)
     }
 
@@ -301,38 +303,38 @@ struct StudyView: View {
 
     private var queueCounters: some View {
         HStack(spacing: 6) {
-            CounterPill(title: "Yeni", count: store.availableNewCardsCount,
+            CounterPill(title: CardStage.new.title, count: store.availableNewCardsCount,
                         color: AppPalette.accentBlue, backgroundColor: AppPalette.blueBadgeBackground)
-            CounterPill(title: "Öğreniliyor", count: store.dueLearningCardsCount,
+            CounterPill(title: CardStage.learning.title, count: store.dueLearningCardsCount,
                         color: AppPalette.accentOrange, backgroundColor: AppPalette.orangeBadgeBackground)
-            CounterPill(title: "Tekrar", count: store.dueReviewCardsCount,
+            CounterPill(title: CardStage.review.title, count: store.dueReviewCardsCount,
                         color: AppPalette.success, backgroundColor: AppPalette.successBadgeBackground)
         }
         .fixedSize(horizontal: true, vertical: false)
     }
 
     private var streakCounter: some View {
-        Label("Seri: \(store.currentStreakDays) gün", systemImage: "flame.fill")
+        Label(L10n.streakLabel(store.currentStreakDays), systemImage: "flame.fill")
             .font(.caption.weight(.bold))
             .foregroundStyle(AppPalette.accentOrange)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
             .background(AppPalette.orangeBadgeBackground, in: Capsule())
             .fixedSize()
-            .help("Kesintisiz çalışma serisi: \(store.currentStreakDays) gün (En uzun rekor: \(store.longestStreakDays) gün)")
+            .help("\(L10n.streakLabel(store.currentStreakDays)) (\(L10n.longestStreakLabel(store.longestStreakDays)))")
     }
 
     private var aiButton: some View {
         Button {
             showAIGenerator = true
         } label: {
-            Label("AI ile kelime üret", systemImage: "wand.and.stars")
+            Label(L10n.aiGenerateButton, systemImage: "wand.and.stars")
         }
     }
 
     private var csvButton: some View {
         Button(action: promptAndImportCSV) {
-            Label("CSV içe aktar…", systemImage: "square.and.arrow.down")
+            Label(L10n.csvImportEllipsis, systemImage: "square.and.arrow.down")
         }
     }
 
@@ -343,78 +345,101 @@ struct StudyView: View {
     ) -> some View {
         GeometryReader { geometry in
             ScrollView {
-                content(geometry.size.width)
-                    .padding(24)
-                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    content(geometry.size.width)
+                    Spacer(minLength: 0)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
             }
         }
     }
 
     private func activeCardSessionView(card: Flashcard) -> some View {
         centeredStudyContent { width in
-            VStack(spacing: 16) {
-                VStack(spacing: 16) {
+            let cardShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+
+            VStack(spacing: 20) {
+                VStack(spacing: 0) {
                     cardMetadata(card)
+
+                    Spacer(minLength: 16)
 
                     if isRevealed {
                         revealedCard(card)
-                            .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
+                            .transition(
+                                reduceMotion
+                                    ? .opacity
+                                    : .opacity.combined(with: .scale(scale: 0.96))
+                            )
                     } else {
                         questionCard(card)
                     }
 
-                    if !card.isArticleless {
-                        HStack(spacing: 16) {
-                            ArtikelLegendDot(artikel: .der, label: "der (Eril)")
-                            ArtikelLegendDot(artikel: .die, label: "die (Dişil)")
-                            ArtikelLegendDot(artikel: .das, label: "das (Nötr)")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
+                    Spacer(minLength: 16)
                 }
-                .padding(22)
-                .frame(maxWidth: 680, minHeight: 280)
-                .background(
-                    Color(NSColor.controlBackgroundColor),
-                    in: RoundedRectangle(cornerRadius: 22)
-                )
+                .padding(24)
+                .frame(maxWidth: 660, minHeight: 290)
+                .background(.ultraThinMaterial, in: cardShape)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 22)
-                        .strokeBorder(Color.primary.opacity(0.12))
+                    cardShape
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.28),
+                                    Color.primary.opacity(0.10),
+                                    Color.primary.opacity(0.04)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
                         .allowsHitTesting(false)
                 }
+                .shadow(color: Color.black.opacity(0.08), radius: 18, x: 0, y: 8)
 
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     if isRevealed {
                         ratingControls(for: card, availableWidth: width - 48)
+                            .transition(
+                                reduceMotion
+                                    ? .opacity
+                                    : .opacity.combined(with: .move(edge: .bottom))
+                            )
                     } else if card.isArticleless {
                         Button {
                             checkAndRevealCard(card)
                         } label: {
                             HStack(spacing: 8) {
-                                Label("Kontrol Et", systemImage: "checkmark")
+                                Label(L10n.studyCheck(), systemImage: "checkmark")
                                     .font(.headline)
                                 Text("(Enter)")
                                     .font(.subheadline)
                             }
                             .foregroundStyle(AppPalette.onBlue)
                             .padding(.horizontal, 24)
-                            .frame(minHeight: 32)
+                            .frame(minHeight: 34)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(AppPalette.accentBlue)
                         .controlSize(.large)
                         .keyboardShortcut(.defaultAction)
                         .disabled(isPresentingModal || showStudySummary)
-                        .accessibilityLabel("Kontrol Et")
+                        .accessibilityLabel(L10n.studyCheck())
                     } else {
-                        Text("Bir artikel seçin; cevap hemen açılır.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        // Article cards reveal on tap: one tap is the whole answer, no "Kontrol Et" step.
+                        HStack(spacing: 14) {
+                            ForEach(Artikel.allCases) { art in
+                                ArticleGuessButton(artikel: art) {
+                                    selectArtikelAndReveal(art, card: card)
+                                }
+                            }
+                        }
                     }
                 }
-                .frame(minHeight: 82)
+                .frame(minHeight: 84, alignment: .top)
             }
         }
     }
@@ -436,10 +461,18 @@ struct StudyView: View {
                 .help(card.deckName)
 
             if card.totalReviews > 0 {
-                Text("Kolaylık: \(Int(card.easeFactor * 100))% • Tekrar: \(card.totalReviews)")
+                Text(L10n.text(
+                    "Kolaylık: \(Int(card.easeFactor * 100))% • Tekrar: \(card.totalReviews)",
+                    en: "Ease: \(Int(card.easeFactor * 100))% • Reviews: \(card.totalReviews)",
+                    de: "Leichtigkeit: \(Int(card.easeFactor * 100))% • Wdh.: \(card.totalReviews)"
+                ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .help("Kolaylık, kartın sonraki tekrar aralığını hesaplamak için kullanılır.")
+                    .help(L10n.text(
+                        "Kolaylık, kartın sonraki tekrar aralığını hesaplamak için kullanılır.",
+                        en: "Ease is used to calculate the card's next review interval.",
+                        de: "Die Leichtigkeit bestimmt das nächste Wiederholungsintervall der Karte."
+                    ))
             }
 
             Spacer(minLength: 4)
@@ -453,34 +486,11 @@ struct StudyView: View {
 
     private func questionCard(_ card: Flashcard) -> some View {
         VStack(spacing: 16) {
-            Text(card.isArticleless
-                 ? "Kelimenin Türkçe anlamını yazıp Enter'a basın:"
-                 : "Doğru artikeli seçin:")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
+            studyWord(card.word)
                 .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
 
             if card.isArticleless {
-                studyWord(card.word)
-                    .multilineTextAlignment(.center)
                 answerField(card)
-            } else {
-                // Article cards reveal on tap: one tap is the whole answer, no "Kontrol Et" step.
-                HStack(spacing: 12) {
-                    ForEach(Artikel.allCases) { art in
-                        Button {
-                            selectArtikelAndReveal(art, card: card)
-                        } label: {
-                            Text(art.rawValue)
-                        }
-                        .buttonStyle(ArticleGuessButtonStyle(color: art.color))
-                        .accessibilityLabel(art.rawValue)
-                        .accessibilityHint("Artikel olarak seç ve cevabı göster")
-                    }
-                }
-                studyWord(card.word)
-                    .multilineTextAlignment(.center)
             }
 
             if store.settings.showMeaningOnFront && !card.meaning.isEmpty && !card.isArticleless {
@@ -494,22 +504,25 @@ struct StudyView: View {
     }
 
     private func answerField(_ card: Flashcard) -> some View {
-        TextField("anlam...", text: $typedArtikel)
+        TextField(L10n.meaningPlaceholder, text: $typedArtikel)
             .textFieldStyle(.plain)
-            .font(.system(size: 28, weight: .bold, design: .rounded))
+            .font(.system(size: 26, weight: .bold, design: .rounded))
             .multilineTextAlignment(.center)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: 240, minHeight: 54)
-            .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 12)
+            .frame(maxWidth: 260, minHeight: 52)
+            .background(
+                Color(NSColor.textBackgroundColor).opacity(0.85),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(
-                        isInputFocused ? AppPalette.accentBlue : AppPalette.controlOutline,
+                        isInputFocused ? AppPalette.accentBlue : AppPalette.controlOutline.opacity(0.6),
                         lineWidth: isInputFocused ? 2.5 : 1
                     )
                     .allowsHitTesting(false)
             }
-            .accessibilityLabel("Türkçe anlam")
+            .accessibilityLabel(L10n.meaningLabel)
             .focused($isInputFocused)
             .onSubmit {
                 checkAndRevealCard(card)
@@ -558,12 +571,12 @@ struct StudyView: View {
         let answer = typedArtikel.trimmingCharacters(in: .whitespacesAndNewlines)
         let status: String
         if isCorrect {
-            status = card.artikel.map { "DOĞRU! (\($0.grammaticalLabel))" } ?? "DOĞRU!"
+            status = card.artikel.map { "\(L10n.correctBanner) (\($0.grammaticalLabel))" } ?? L10n.correctBanner
         } else {
-            status = answer.isEmpty ? "BOŞ BIRAKILDI" : "YANLIŞ (\(answer))"
+            status = answer.isEmpty ? L10n.blankBanner : L10n.wrongBanner(answer)
         }
         let expectedAnswer = AnswerChecker.expectedLabel(card: card)
-        let answerLabel = card.isArticleless ? "Doğru Anlam: \(expectedAnswer)" : "Doğru Artikel: \(expectedAnswer)"
+        let answerLabel = card.isArticleless ? L10n.expectedMeaning(expectedAnswer) : L10n.expectedArtikel(expectedAnswer)
 
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: isCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -601,11 +614,8 @@ struct StudyView: View {
 
         return VStack(spacing: 8) {
             if guessResult == .wrong {
-                Text("Yanlış cevaplandığı için sadece ‘Tekrar (1)’ veya ‘Zor (2)’ seçilebilir:")
+                Text(L10n.wrongRatingHint)
                     .foregroundStyle(AppPalette.feedbackIncorrect)
-            } else {
-                Text("Hatırlama zorluğunu seçin (Klavye: 1–4):")
-                    .foregroundStyle(.secondary)
             }
 
             LazyVGrid(columns: columns, spacing: 8) {
@@ -634,39 +644,22 @@ struct StudyView: View {
                     .foregroundStyle(AppPalette.accentOrange)
                     .accessibilityHidden(true)
 
-                Text("Öğrenme Kartı Zamanlayıcısı")
+                Text(L10n.waitingTimerTitle)
                     .font(.title2.bold())
 
-                Text("Sıradaki tekrar kelimesi vaat edilen süre dolduğunda otomatik olarak ekrana gelecektir:")
+                Text(L10n.waitingTimerDesc)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 460)
 
                 LearningCountdown(dueDate: pendingCard.dueDate, currentTime: store.currentTime)
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { waitingActions }
-                    VStack(spacing: 12) { waitingActions }
+                if store.filteredPoolCards.contains(where: { $0.stage == .new }) && store.remainingNewToday == 0 {
+                    increaseLimitButton()
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
                 }
-                .controlSize(.large)
             }
             .multilineTextAlignment(.center)
-        }
-    }
-
-    @ViewBuilder
-    private var waitingActions: some View {
-        Button {
-            store.forcePullNextLearningCard()
-        } label: {
-            Label("Süreyi Beklemeden Şimdi Çalış", systemImage: "bolt.fill")
-                .foregroundStyle(AppPalette.onOrange)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(AppPalette.accentOrange)
-
-        if store.filteredPoolCards.contains(where: { $0.stage == .new }) && store.remainingNewToday == 0 {
-            increaseLimitButton()
-                .buttonStyle(.bordered)
         }
     }
 
@@ -675,7 +668,7 @@ struct StudyView: View {
             store.settings.dailyNewCardLimit += 10
             store.saveSettings()
         } label: {
-            Label("Günlük yeni kart sınırını 10 artır", systemImage: "plus.circle")
+            Label(L10n.increaseLimitButton, systemImage: "plus.circle")
                 .foregroundStyle(prominent ? AppPalette.onBlue : Color.primary)
         }
     }
@@ -688,22 +681,22 @@ struct StudyView: View {
                 BloodyBrainLogoView(size: 100, animated: false)
                     .accessibilityHidden(true)
 
-                Text("Henüz Kelime Eklenmedi")
+                Text(L10n.emptyDbTitle)
                     .font(.title2.bold())
 
-                Text("Örnek kelimelerle başlayabilir, CSV içe aktarabilir veya AI ile kelime üretebilirsiniz.")
+                Text(L10n.emptyDbDesc)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 480)
 
                 Button {
                     let result = store.loadStarterGermanPack()
                     showImportResult(
-                        title: "Örnek kelimeler eklendi",
-                        message: "Yeni eklenen kelime: \(result.addedCount)",
+                        title: L10n.text("Örnek kelimeler eklendi", en: "Sample words added", de: "Beispielwörter hinzugefügt"),
+                        message: L10n.text("Yeni eklenen kelime: \(result.addedCount)", en: "New words added: \(result.addedCount)", de: "Neue Wörter hinzugefügt: \(result.addedCount)"),
                         canUndo: store.canUndoImport
                     )
                 } label: {
-                    Label("Örnek 30 Kelime", systemImage: "books.vertical")
+                    Label(L10n.starterPackButton, systemImage: "books.vertical")
                         .foregroundStyle(AppPalette.onBlue)
                 }
                 .buttonStyle(.borderedProminent)
@@ -715,7 +708,7 @@ struct StudyView: View {
                 Button {
                     store.openStorageDirectoryInFinder()
                 } label: {
-                    Label("Yerel Depolama Klasörünü Finder'da Göster", systemImage: "folder")
+                    Label(L10n.showStorageInFinder, systemImage: "folder")
                         .font(.caption)
                 }
                 .buttonStyle(.link)
@@ -743,25 +736,25 @@ struct StudyView: View {
                     .foregroundStyle(AppPalette.success)
                     .accessibilityHidden(true)
 
-                Text(store.selectedStudyDeck.map { "'\($0)' Destesi Tamamlandı!" } ?? "Bugünkü Çalışma Tamamlandı!")
+                Text(L10n.deckCompletedTitle(store.selectedStudyDeck))
                     .font(.title2.bold())
 
-                Text("Günlük hedeflerinizi ve bekleyen tekrarlarınızı tamamladınız. Kartlarınız hatırlama durumunuza göre sonraki günlere planlandı.")
+                Text(L10n.completedDesc)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 480)
 
                 HStack(spacing: 12) {
-                    StatMiniBox(title: "Bugün öğrenilen (tüm desteler)", value: "\(store.dailyProgress.newCardsStudied)",
+                    StatMiniBox(title: L10n.text("Bugün öğrenilen (tüm desteler)", en: "Learned today (all decks)", de: "Heute gelernt (alle Stapel)"), value: "\(store.dailyProgress.newCardsStudied)",
                                 color: AppPalette.accentBlue, backgroundColor: AppPalette.blueBadgeBackground)
-                    StatMiniBox(title: "Bugün tekrar edilen (tüm desteler)", value: "\(store.dailyProgress.reviewsCompleted)",
+                    StatMiniBox(title: L10n.text("Bugün tekrar edilen (tüm desteler)", en: "Reviewed today (all decks)", de: "Heute wiederholt (alle Stapel)"), value: "\(store.dailyProgress.reviewsCompleted)",
                                 color: AppPalette.success, backgroundColor: AppPalette.successBadgeBackground)
-                    StatMiniBox(title: store.selectedStudyDeck == nil ? "Toplam kelime" : "Destedeki kelime",
+                    StatMiniBox(title: store.selectedStudyDeck == nil ? L10n.text("Toplam kelime", en: "Total words", de: "Wörter gesamt") : L10n.text("Destedeki kelime", en: "Words in deck", de: "Wörter im Stapel"),
                                 value: "\(store.filteredPoolCards.count)", color: AppPalette.accentPurple,
                                 backgroundColor: AppPalette.purpleBadgeBackground)
                 }
                 .frame(maxWidth: 500)
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel("Çalışma özeti")
+                .accessibilityLabel(L10n.studySummaryLabel)
 
                 if hasNewCards {
                     increaseLimitButton(prominent: true)
@@ -798,7 +791,7 @@ struct StudyView: View {
             guessResult = .wrong
         }
 
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.82)) {
             isRevealed = true
         }
         if let window = keyboardWindow.view?.window,
@@ -824,8 +817,12 @@ struct StudyView: View {
         defer { isChoosingCSV = false }
 
         let panel = NSOpenPanel()
-        panel.title = "Almanca Kelime CSV Dosyası Seçin"
-        panel.message = "1. Sütun: Artikel (der/die/das), 2. Sütun: Kelime, 3. Sütun: Anlam, 4. Sütun (İsteğe Bağlı): Deste"
+        panel.title = L10n.text("Almanca Kelime CSV Dosyası Seçin", en: "Select German Vocabulary CSV File", de: "Deutsche Vokabel-CSV-Datei auswählen")
+        panel.message = L10n.text(
+            "1. Sütun: Artikel (der/die/das), 2. Sütun: Kelime, 3. Sütun: Anlam, 4. Sütun (İsteğe Bağlı): Deste",
+            en: "Column 1: Article (der/die/das), Column 2: Word, Column 3: Meaning, Column 4 (Optional): Deck",
+            de: "Spalte 1: Artikel (der/die/das), Spalte 2: Wort, Spalte 3: Bedeutung, Spalte 4 (Optional): Stapel"
+        )
         panel.allowedContentTypes = [.commaSeparatedText, .plainText, .tabSeparatedText]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -834,17 +831,35 @@ struct StudyView: View {
             do {
                 let targetDeck = store.selectedStudyDeck ?? "Genel"
                 let res = try store.importCSV(from: url, defaultDeckName: targetDeck)
-                let message = """
-                Yeni eklenen kelime: \(res.addedCount)
-                Güncellenen kelime: \(res.updatedCount)
-                Zaten mevcut (atlanan): \(res.skippedCount)
-                Geçersiz/Atlanan satır: \(res.invalidLines)
-                """
-                showImportResult(title: "CSV içe aktarıldı", message: message, canUndo: store.canUndoImport)
+                let message = L10n.text(
+                    """
+                    Yeni eklenen kelime: \(res.addedCount)
+                    Güncellenen kelime: \(res.updatedCount)
+                    Zaten mevcut (atlanan): \(res.skippedCount)
+                    Geçersiz/Atlanan satır: \(res.invalidLines)
+                    """,
+                    en: """
+                    New words added: \(res.addedCount)
+                    Words updated: \(res.updatedCount)
+                    Already existing (skipped): \(res.skippedCount)
+                    Invalid/skipped rows: \(res.invalidLines)
+                    """,
+                    de: """
+                    Neu hinzugefügte Wörter: \(res.addedCount)
+                    Aktualisierte Wörter: \(res.updatedCount)
+                    Bereits vorhanden (übersprungen): \(res.skippedCount)
+                    Ungültige/übersprungene Zeilen: \(res.invalidLines)
+                    """
+                )
+                showImportResult(title: L10n.text("CSV içe aktarıldı", en: "CSV imported", de: "CSV importiert"), message: message, canUndo: store.canUndoImport)
             } catch {
                 showImportResult(
-                    title: "CSV okunamadı",
-                    message: "Dosyanın CSV biçiminde olduğunu ve okunabildiğini kontrol edip tekrar deneyin.\n\nAyrıntı: \(error.localizedDescription)"
+                    title: L10n.text("CSV okunamadı", en: "Could not read CSV", de: "CSV konnte nicht gelesen werden"),
+                    message: L10n.text(
+                        "Dosyanın CSV biçiminde olduğunu ve okunabildiğini kontrol edip tekrar deneyin.\n\nAyrıntı: \(error.localizedDescription)",
+                        en: "Check that the file is in CSV format and readable, then try again.\n\nDetails: \(error.localizedDescription)",
+                        de: "Prüfe, ob die Datei im CSV-Format vorliegt und lesbar ist, und versuche es erneut.\n\nDetails: \(error.localizedDescription)"
+                    )
                 )
             }
         }
@@ -902,28 +917,90 @@ struct StudyView: View {
 
 // MARK: - Subcomponents
 
-/// Article answer button: tinted outline at rest, solid on press with a restrained 3% scale
-/// (the reveal itself is the main animation).
+private struct ArticleGuessButton: View {
+    let artikel: Artikel
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(artikel.rawValue)
+        }
+        .buttonStyle(
+            ArticleGuessButtonStyle(
+                color: artikel.color,
+                badgeBackground: artikel.badgeBackground,
+                isHovered: isHovered
+            )
+        )
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(artikel.rawValue)
+        .accessibilityHint(L10n.text("Artikel olarak seç ve cevabı göster", en: "Select as article and reveal answer", de: "Als Artikel wählen und Antwort zeigen"))
+    }
+}
+
+/// Article answer button: translucent tinted glass at rest, solid on press with a subtle
+/// spring scale on hover/press.
 private struct ArticleGuessButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let color: Color
+    let badgeBackground: Color
+    let isHovered: Bool
 
     func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let isPressed = configuration.isPressed
+
         configuration.label
             .font(.system(size: 21, weight: .bold, design: .rounded))
-            .foregroundStyle(configuration.isPressed ? Color.white : color)
-            .frame(width: 104, height: 46)
-            .background(configuration.isPressed ? color : color.opacity(0.12))
+            .foregroundStyle(isPressed ? AppPalette.onAccent : color)
+            .frame(minWidth: 116, minHeight: 50)
+            .background {
+                if isPressed {
+                    shape.fill(color)
+                } else {
+                    shape
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            shape.fill(badgeBackground.opacity(isHovered ? 0.85 : 0.55))
+                        }
+                }
+            }
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(color.opacity(0.55), lineWidth: 1.5)
+                shape
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                color.opacity(isPressed ? 0.9 : (isHovered ? 0.75 : 0.45)),
+                                color.opacity(isPressed ? 0.7 : (isHovered ? 0.35 : 0.18))
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: isHovered || isPressed ? 1.5 : 1
+                    )
                     .allowsHitTesting(false)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(
+                color: color.opacity(isHovered && !isPressed ? 0.18 : 0.05),
+                radius: isHovered ? 10 : 4,
+                x: 0,
+                y: isHovered ? 4 : 2
+            )
+            .scaleEffect(
+                reduceMotion ? 1 : (isPressed ? 0.96 : (isHovered ? 1.02 : 1))
+            )
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.75),
+                value: isPressed
+            )
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.15),
+                value: isHovered
+            )
+            .contentShape(shape)
     }
 }
 
@@ -958,7 +1035,11 @@ private struct LearningCountdown: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 10)
             .background(AppPalette.orangeBadgeBackground, in: RoundedRectangle(cornerRadius: 16))
-            .accessibilityLabel("Kalan süre: \(minutes) dakika \(seconds) saniye")
+            .accessibilityLabel(L10n.text(
+                "Kalan süre: \(minutes) dakika \(seconds) saniye",
+                en: "Time remaining: \(minutes) minutes \(seconds) seconds",
+                de: "Verbleibende Zeit: \(minutes) Minuten \(seconds) Sekunden"
+            ))
     }
 }
 
@@ -970,7 +1051,7 @@ private struct ListenButton: View {
     var body: some View {
         Button(action: action) {
             Label {
-                Text("Dinle")
+                Text(L10n.listenLabel)
                     .font(.caption.weight(.medium))
             } icon: {
                 Image(systemName: "speaker.wave.2")
@@ -992,8 +1073,8 @@ private struct ListenButton: View {
         .buttonStyle(.plain)
         .focused($isFocused)
         .onHover { isHovered = $0 }
-        .accessibilityLabel("Almanca telaffuzu dinle")
-        .help("Almanca telaffuzu dinle")
+        .accessibilityLabel(L10n.listenHelp)
+        .help(L10n.listenHelp)
     }
 }
 
@@ -1027,23 +1108,8 @@ private struct CounterPill: View {
     }
 }
 
-private struct ArtikelLegendDot: View {
-    let artikel: Artikel
-    let label: String
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(artikel.color)
-                .frame(width: 8, height: 8)
-                .accessibilityHidden(true)
-            Text(label)
-                .lineLimit(1)
-        }
-    }
-}
-
 private struct RatingButton: View {
+    @Environment(\.colorScheme) private var colorScheme
     let rating: ReviewRating
     let intervalText: String
     let action: () -> Void
@@ -1060,11 +1126,28 @@ private struct RatingButton: View {
 
                 Text("\(rating.title) (\(rating.shortcutKey))")
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(AppPalette.onRating(rating))
+                    .foregroundStyle(colorScheme == .light ? rating.color : AppPalette.onRating(rating))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
-                    .background(rating.color, in: RoundedRectangle(cornerRadius: 9))
+                    .background {
+                        if colorScheme == .light {
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color.white.opacity(0.86))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(rating.color.opacity(isHovered ? 0.18 : 0.12))
+                                }
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .strokeBorder(rating.color.opacity(isHovered ? 0.42 : 0.25), lineWidth: 1)
+                                }
+                                .shadow(color: rating.color.opacity(isHovered ? 0.10 : 0.04), radius: isHovered ? 5 : 2, x: 0, y: 1)
+                        } else {
+                            RoundedRectangle(cornerRadius: 9)
+                                .fill(rating.color)
+                        }
+                    }
             }
             .padding(4)
             .background {

@@ -41,6 +41,12 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 <dict>
     <key>CFBundleDevelopmentRegion</key>
     <string>tr</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>tr</string>
+        <string>en</string>
+        <string>de</string>
+    </array>
     <key>CFBundleExecutable</key>
     <string>${APP_NAME}</string>
     <key>CFBundleIconFile</key>
@@ -56,7 +62,7 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.3.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
@@ -76,10 +82,12 @@ fi
 echo "[3/4] Compiling Universal macOS binary (arm64 + x86_64) using ${SDK_PATH}..."
 SOURCES=(
     Sources/Models.swift
+    Sources/Localization.swift
     Sources/CardLogic.swift
     Sources/SpeechManager.swift
     Sources/StorageManager.swift
     Sources/GeminiService.swift
+    Sources/MistralService.swift
     Sources/AIGeneratorSheet.swift
     Sources/SplashView.swift
     Sources/StudyView.swift

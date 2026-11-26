@@ -1,6 +1,7 @@
 package com.artikelmeister.android
 
 import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
@@ -221,16 +222,55 @@ object CsvCards {
         "application/octet-stream"
     )
 
-    private fun message(reason: Rejection, valid: Int = 0, invalid: Int = 0): String = when (reason) {
-        Rejection.BAD_EXTENSION -> "Lütfen .csv uzantılı bir dosya seçin. Seçilen dosya CSV değil; hiçbir veri değiştirilmedi."
-        Rejection.EMPTY -> "Dosya boş; içe aktarılacak kelime bulunamadı. Hiçbir veri değiştirilmedi."
-        Rejection.TOO_LARGE -> "Dosya çok büyük (en fazla 10 MB). Hiçbir veri değiştirilmedi."
-        Rejection.BINARY -> "Bu dosya bir metin/CSV dosyası değil (resim, PDF gibi ikili içerik algılandı). Hiçbir veri değiştirilmedi."
-        Rejection.BAD_ENCODING -> "Dosyanın karakter kodlaması okunamadı. Dosyayı UTF-8 olarak kaydedip tekrar deneyin. Hiçbir veri değiştirilmedi."
-        Rejection.NOT_CSV_FORMAT -> "Bu dosya CSV değil (JSON/XML/HTML benzeri içerik). JSON yedekleri için Ayarlar'daki yedek içe aktarmayı kullanın. Hiçbir veri değiştirilmedi."
-        Rejection.NO_COLUMNS -> "Dosyada sütun yapısı bulunamadı. Satırlar virgül, noktalı virgül veya sekme ile ayrılmış olmalı: artikel,kelime,anlam,deste. Hiçbir veri değiştirilmedi."
-        Rejection.NO_VALID_ROWS -> "Dosyada geçerli kelime satırı bulunamadı. Beklenen biçim: artikel,kelime,anlam,deste. Hiçbir veri değiştirilmedi."
-        Rejection.TOO_MANY_INVALID -> "Dosyadaki satırların çoğu geçersiz ($invalid / ${valid + invalid} satır). Doğru bir CSV dosyası seçtiğinizden emin olun. Hiçbir veri değiştirilmedi."
+    private fun message(reason: Rejection, valid: Int = 0, invalid: Int = 0): String {
+        val lang = Locale.getDefault().language.lowercase(Locale.ROOT)
+        return when (reason) {
+            Rejection.BAD_EXTENSION -> when (lang) {
+                "en" -> "Please select a .csv file. The selected file is not a CSV; no data was modified."
+                "de" -> "Bitte wählen Sie eine .csv-Datei aus. Die ausgewählte Datei ist keine CSV; keine Daten wurden geändert."
+                else -> "Lütfen .csv uzantılı bir dosya seçin. Seçilen dosya CSV değil; hiçbir veri değiştirilmedi."
+            }
+            Rejection.EMPTY -> when (lang) {
+                "en" -> "The file is empty; no words to import. No data was modified."
+                "de" -> "Die Datei ist leer; keine Wörter zum Importieren gefunden. Keine Daten wurden geändert."
+                else -> "Dosya boş; içe aktarılacak kelime bulunamadı. Hiçbir veri değiştirilmedi."
+            }
+            Rejection.TOO_LARGE -> when (lang) {
+                "en" -> "File is too large (max 10 MB). No data was modified."
+                "de" -> "Die Datei ist zu groß (max. 10 MB). Keine Daten wurden geändert."
+                else -> "Dosya çok büyük (en fazla 10 MB). Hiçbir veri değiştirilmedi."
+            }
+            Rejection.BINARY -> when (lang) {
+                "en" -> "This file is not a text/CSV file (binary content such as image or PDF detected). No data was modified."
+                "de" -> "Diese Datei ist keine Text-/CSV-Datei (Binärinhalt wie Bild oder PDF erkannt). Keine Daten wurden geändert."
+                else -> "Bu dosya bir metin/CSV dosyası değil (resim, PDF gibi ikili içerik algılandı). Hiçbir veri değiştirilmedi."
+            }
+            Rejection.BAD_ENCODING -> when (lang) {
+                "en" -> "Could not read file character encoding. Save the file as UTF-8 and try again. No data was modified."
+                "de" -> "Zeichenkodierung der Datei konnte nicht gelesen werden. Speichern Sie sie als UTF-8 und versuchen Sie es erneut. Keine Daten wurden geändert."
+                else -> "Dosyanın karakter kodlaması okunamadı. Dosyayı UTF-8 olarak kaydedip tekrar deneyin. Hiçbir veri değiştirilmedi."
+            }
+            Rejection.NOT_CSV_FORMAT -> when (lang) {
+                "en" -> "This file is not a CSV (JSON/XML/HTML-like content). Use backup import in Settings for JSON backups. No data was modified."
+                "de" -> "Diese Datei ist keine CSV (JSON-/XML-/HTML-ähnlicher Inhalt). Nutzen Sie den Backup-Import in den Einstellungen für JSON-Backups. Keine Daten wurden geändert."
+                else -> "Bu dosya CSV değil (JSON/XML/HTML benzeri içerik). JSON yedekleri için Ayarlar'daki yedek içe aktarmayı kullanın. Hiçbir veri değiştirilmedi."
+            }
+            Rejection.NO_COLUMNS -> when (lang) {
+                "en" -> "No column structure found in file. Rows must be separated by comma, semicolon, or tab: artikel,word,meaning,deck. No data was modified."
+                "de" -> "Keine Spaltenstruktur gefunden. Zeilen müssen durch Komma, Semikolon oder Tab getrennt sein: artikel,wort,bedeutung,stapel. Keine Daten wurden geändert."
+                else -> "Dosyada sütun yapısı bulunamadı. Satırlar virgül, noktalı virgül veya sekme ile ayrılmış olmalı: artikel,kelime,anlam,deste. Hiçbir veri değiştirilmedi."
+            }
+            Rejection.NO_VALID_ROWS -> when (lang) {
+                "en" -> "No valid word rows found in file. Expected format: artikel,word,meaning,deck. No data was modified."
+                "de" -> "Keine gültigen Wortzeilen gefunden. Erwartetes Format: artikel,wort,bedeutung,stapel. Keine Daten wurden geändert."
+                else -> "Dosyada geçerli kelime satırı bulunamadı. Beklenen biçim: artikel,kelime,anlam,deste. Hiçbir veri değiştirilmedi."
+            }
+            Rejection.TOO_MANY_INVALID -> when (lang) {
+                "en" -> "Most rows in the file are invalid ($invalid / ${valid + invalid} rows). Make sure you selected a valid CSV file. No data was modified."
+                "de" -> "Die meisten Zeilen der Datei sind ungültig ($invalid / ${valid + invalid} Zeilen). Stellen Sie sicher, dass es eine gültige CSV-Datei ist. Keine Daten wurden geändert."
+                else -> "Dosyadaki satırların çoğu geçersiz ($invalid / ${valid + invalid} satır). Doğru bir CSV dosyası seçtiğinizden emin olun. Hiçbir veri değiştirilmedi."
+            }
+        }
     }
 
     private fun reject(reason: Rejection): Nothing = throw RejectedException(reason, message(reason))
@@ -579,5 +619,71 @@ object CsvCards {
         }
         fields.add(current.toString().trim())
         return fields
+    }
+}
+
+/**
+ * Pure semantic version parser & GitHub release comparator for forced update checks.
+ */
+data class SemVer(val major: Int, val minor: Int, val patch: Int) : Comparable<SemVer> {
+    override fun compareTo(other: SemVer): Int {
+        if (major != other.major) return major.compareTo(other.major)
+        if (minor != other.minor) return minor.compareTo(other.minor)
+        return patch.compareTo(other.patch)
+    }
+
+    override fun toString(): String = "$major.$minor.$patch"
+
+    companion object {
+        fun parse(raw: String): SemVer? {
+            val cleaned = raw.trim()
+                .removePrefix("v")
+                .removePrefix("V")
+                .substringBefore('-')
+                .substringBefore('+')
+                .trim()
+            if (cleaned.isEmpty()) return null
+            val parts = cleaned.split('.')
+            if (parts.size !in 2..3) return null
+            val major = parts[0].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            val minor = parts[1].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            val patch = if (parts.size == 3) {
+                parts[2].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            } else {
+                0
+            }
+            return SemVer(major, minor, patch)
+        }
+    }
+}
+
+data class ReleaseUpdateInfo(
+    val tagName: String,
+    val version: SemVer,
+    val htmlUrl: String
+)
+
+object VersionChecker {
+    const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/kaankekec-sec/artikelmeister/releases/latest"
+    const val RELEASES_FALLBACK_URL = "https://github.com/kaankekec-sec/artikelmeister/releases/latest"
+    const val ALLOWED_RELEASE_URL_PREFIX = "https://github.com/kaankekec-sec/artikelmeister/"
+
+    fun isUpdateRequired(currentVersion: String, latestTag: String): Boolean {
+        val current = SemVer.parse(currentVersion) ?: return false
+        val latest = SemVer.parse(latestTag) ?: return false
+        return latest > current
+    }
+
+    fun sanitizeReleaseUrl(rawUrl: String?): String {
+        val trimmed = rawUrl?.trim().orEmpty()
+        return if (trimmed.startsWith(ALLOWED_RELEASE_URL_PREFIX)) trimmed else RELEASES_FALLBACK_URL
+    }
+
+    fun parseLatestReleaseJson(jsonString: String): ReleaseUpdateInfo? {
+        val obj = runCatching { JSONObject(jsonString) }.getOrNull() ?: return null
+        val tagName = obj.optString("tag_name", "").trim()
+        val version = SemVer.parse(tagName) ?: return null
+        val htmlUrl = sanitizeReleaseUrl(obj.optString("html_url", ""))
+        return ReleaseUpdateInfo(tagName = tagName, version = version, htmlUrl = htmlUrl)
     }
 }

@@ -33,6 +33,7 @@ struct WordListView: View {
     @State private var showDeleteConfirmation = false
     @State private var showingCSVPanel = false
     @State private var feedback: InlineFeedback?
+    @State private var deckScrollAnchorIndex: Int = 0
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
@@ -90,7 +91,7 @@ struct WordListView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(.regularMaterial)
 
             Divider()
 
@@ -178,26 +179,31 @@ struct WordListView: View {
         } message: {
             Text(alertMessage ?? "")
         }
-        .alert("Kelimeyi Sil", isPresented: $showDeleteConfirmation, presenting: cardToDelete) { card in
-            Button("İptal", role: .cancel) { cardToDelete = nil }
-            Button("Kelimeyi Sil", role: .destructive) {
+        .alert(L10n.text("Kelimeyi Sil", en: "Delete Word", de: "Wort löschen"), isPresented: $showDeleteConfirmation, presenting: cardToDelete) { card in
+            Button(L10n.cancel, role: .cancel) { cardToDelete = nil }
+            Button(L10n.text("Kelimeyi Sil", en: "Delete Word", de: "Wort löschen"), role: .destructive) {
                 store.deleteCard(id: card.id)
                 cardToDelete = nil
             }
         } message: { card in
-            Text("„\(card.fullGermanTerm)“ kelimesini silmek istediğinize emin misiniz?")
+            Text(L10n.text(
+                "„\(card.fullGermanTerm)“ kelimesini silmek istediğinize emin misiniz?",
+                en: "Are you sure you want to delete “\(card.fullGermanTerm)”?",
+                de: "Möchtest du „\(card.fullGermanTerm)“ wirklich löschen?"
+            ))
         }
     }
 
     private func header(resultCount: Int) -> some View {
+        let wordUnit = L10n.text("kelime", en: "words", de: "Wörter")
         let title = HStack(spacing: 8) {
-            Text("Kelime Havuzu")
+            Text(L10n.wordsTitle())
                 .font(.title3.bold())
                 .accessibilityAddTraits(.isHeader)
 
             Text(hasContentFilters || selectedDeckFilter != nil
-                 ? "\(resultCount) / \(store.cards.count) kelime"
-                 : "\(store.cards.count) kelime")
+                 ? "\(resultCount) / \(store.cards.count) \(wordUnit)"
+                 : "\(store.cards.count) \(wordUnit)")
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 3)
@@ -225,29 +231,29 @@ struct WordListView: View {
             Button {
                 showAIGenerator = true
             } label: {
-                Label("AI ile Kelime Üret", systemImage: "sparkles")
+                Label(L10n.text("AI ile Kelime Üret", en: "Generate with AI", de: "Mit KI generieren"), systemImage: "sparkles")
                     .foregroundStyle(AppPalette.accentPurple)
             }
             .tint(AppPalette.accentPurple)
 
             Button(action: importCSVFromDialog) {
-                Label("CSV İçe Aktar", systemImage: "square.and.arrow.down")
+                Label(L10n.text("CSV İçe Aktar", en: "Import CSV", de: "CSV importieren"), systemImage: "square.and.arrow.down")
             }
 
             Button(action: exportCSVToDialog) {
-                Label("CSV Dışa Aktar", systemImage: "square.and.arrow.up")
+                Label(L10n.text("CSV Dışa Aktar", en: "Export CSV", de: "CSV exportieren"), systemImage: "square.and.arrow.up")
             }
             .keyboardShortcut("e", modifiers: [.command, .shift])
-            .help("CSV Dışa Aktar (⇧⌘E)")
+            .help(L10n.text("CSV Dışa Aktar (⇧⌘E)", en: "Export CSV (⇧⌘E)", de: "CSV exportieren (⇧⌘E)"))
             .disabled(store.cards.isEmpty || isPresentingModal)
 
             Button {
                 store.openStorageDirectoryInFinder()
             } label: {
-                Label("Klasör", systemImage: "folder")
+                Label(L10n.text("Klasör", en: "Folder", de: "Ordner"), systemImage: "folder")
             }
-            .accessibilityLabel("Yerel Depolama Klasörünü Finder’da Aç")
-            .help("Yerel Depolama Klasörünü Finder'da Aç")
+            .accessibilityLabel(L10n.showStorageInFinder)
+            .help(L10n.showStorageInFinder)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
@@ -261,12 +267,12 @@ struct WordListView: View {
                     ArtikelSegmentedControl(selection: $newArtikel)
                         .frame(width: 190)
 
-                    TextField("Almanca kelime (örn. Tisch)", text: $newWord)
+                    TextField(L10n.text("Almanca kelime (örn. Tisch)", en: "German word (e.g. Tisch)", de: "Deutsches Wort (z. B. Tisch)"), text: $newWord)
                         .textFieldStyle(.roundedBorder)
                         .focused($focusedField, equals: .newWord)
                         .frame(minWidth: 140, maxWidth: 200)
 
-                    TextField("Türkçe anlamı / açıklama", text: $newMeaning)
+                    TextField(L10n.text("Anlamı / açıklama", en: "Meaning / note", de: "Bedeutung / Notiz"), text: $newMeaning)
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 140)
                 }
@@ -274,7 +280,7 @@ struct WordListView: View {
                 HStack(spacing: 8) {
                     entryDeckMenu
                     Button(action: submitQuickAdd) {
-                        Label("Ekle", systemImage: "plus")
+                        Label(L10n.addButton, systemImage: "plus")
                             .foregroundStyle(AppPalette.onBlue)
                     }
                     .accessibilityLabel("Kelime Ekle")
@@ -293,7 +299,7 @@ struct WordListView: View {
             if newArtikel == nil {
                 let meaningMissing = newMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 Label(
-                    "Artikelsiz kelimelerde Türkçe anlam zorunludur; çalışırken bu anlamı yazacaksın.",
+                    L10n.articlelessMeaningRequired,
                     systemImage: meaningMissing ? "exclamationmark.circle.fill" : "info.circle"
                 )
                 .font(.caption2)
@@ -338,50 +344,111 @@ struct WordListView: View {
             .frame(width: 115, alignment: .leading)
         }
         .menuStyle(.borderedButton)
-        .accessibilityLabel("Eklenecek Kelimenin Destesi")
+        .accessibilityLabel(L10n.text("Eklenecek Kelimenin Destesi", en: "Target Deck for New Word", de: "Zielstapel für neues Wort"))
         .accessibilityValue(newDeckName)
-        .help("Eklenecek kelimenin destesini seçin")
+        .help(L10n.text("Eklenecek kelimenin destesini seçin", en: "Select the deck for the new word", de: "Wähle den Stapel für das neue Wort"))
     }
 
     private var deckFilters: some View {
-        HStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    DeckFilterChip(
-                        title: "Tüm Desteler",
-                        count: store.cards.count,
-                        isSelected: selectedDeckFilter == nil
-                    ) {
-                        selectedDeckFilter = nil
-                    }
+        let deckNames = store.allDeckNames
+        let scrollItemIDs = ["__all__"] + deckNames + ["__new_deck__"]
 
-                    ForEach(store.allDeckNames, id: \.self) { deck in
-                        DeckFilterChip(
-                            title: deck,
-                            count: store.cardCount(forDeck: deck),
-                            isSelected: selectedDeckFilter == deck
-                        ) {
-                            selectedDeckFilter = deck
-                            newDeckName = deck
-                        }
-                        .contextMenu { deckActions(for: deck) }
-                    }
-
-                    Button {
-                        showNewDeckSheet = true
-                    } label: {
-                        Label("Yeni Deste Ekle", systemImage: "folder.badge.plus")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .foregroundStyle(AppPalette.accentBlue)
-                            .background(AppPalette.blueBadgeBackground, in: Capsule())
-                            .overlay {
-                                Capsule().strokeBorder(AppPalette.accentBlue, lineWidth: 1)
+        return HStack(spacing: 8) {
+            ScrollViewReader { proxy in
+                HStack(spacing: 4) {
+                    if deckNames.count > 1 {
+                        Button {
+                            let nextIndex = max(0, deckScrollAnchorIndex - 2)
+                            deckScrollAnchorIndex = nextIndex
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(scrollItemIDs[nextIndex], anchor: .leading)
                             }
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 22, height: 22)
+                                .background(.quaternary.opacity(0.6), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(L10n.text("Desteleri sola kaydır", en: "Scroll decks left", de: "Stapel nach links scrollen"))
+                        .help(L10n.text("Desteleri sola kaydır", en: "Scroll decks left", de: "Stapel nach links scrollen"))
                     }
-                    .buttonStyle(.plain)
-                    .fixedSize()
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            DeckFilterChip(
+                                title: L10n.allDecks,
+                                count: store.cards.count,
+                                isSelected: selectedDeckFilter == nil
+                            ) {
+                                selectedDeckFilter = nil
+                                deckScrollAnchorIndex = 0
+                            }
+                            .id("__all__")
+
+                            ForEach(Array(deckNames.enumerated()), id: \.element) { idx, deck in
+                                DeckFilterChip(
+                                    title: deck,
+                                    count: store.cardCount(forDeck: deck),
+                                    isSelected: selectedDeckFilter == deck
+                                ) {
+                                    selectedDeckFilter = deck
+                                    newDeckName = deck
+                                    deckScrollAnchorIndex = idx + 1
+                                }
+                                .id(deck)
+                                .contextMenu { deckActions(for: deck) }
+                            }
+
+                            Button {
+                                showNewDeckSheet = true
+                            } label: {
+                                Label(L10n.newDeckAdd, systemImage: "folder.badge.plus")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .foregroundStyle(AppPalette.accentBlue)
+                                    .background(AppPalette.blueBadgeBackground, in: Capsule())
+                                    .overlay {
+                                        Capsule().strokeBorder(AppPalette.accentBlue, lineWidth: 1)
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                            .fixedSize()
+                            .id("__new_deck__")
+                        }
+                        .background(HorizontalWheelScrollBridge())
+                    }
+                    .onChange(of: selectedDeckFilter) { _, newValue in
+                        let targetID = newValue ?? "__all__"
+                        if let idx = scrollItemIDs.firstIndex(of: targetID) {
+                            deckScrollAnchorIndex = idx
+                        }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            proxy.scrollTo(targetID, anchor: .center)
+                        }
+                    }
+
+                    if deckNames.count > 1 {
+                        Button {
+                            let maxIndex = max(0, scrollItemIDs.count - 1)
+                            let nextIndex = min(maxIndex, deckScrollAnchorIndex + 2)
+                            deckScrollAnchorIndex = nextIndex
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(scrollItemIDs[nextIndex], anchor: .trailing)
+                            }
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 22, height: 22)
+                                .background(.quaternary.opacity(0.6), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(L10n.text("Desteleri sağa kaydır", en: "Scroll decks right", de: "Stapel nach rechts scrollen"))
+                        .help(L10n.text("Desteleri sağa kaydır", en: "Scroll decks right", de: "Stapel nach rechts scrollen"))
+                    }
                 }
             }
 
@@ -389,14 +456,14 @@ struct WordListView: View {
                 Menu {
                     deckActions(for: deck)
                 } label: {
-                    Label("Deste Seçenekleri", systemImage: "ellipsis.circle")
+                    Label(L10n.text("Deste Seçenekleri", en: "Deck Options", de: "Stapel-Optionen"), systemImage: "ellipsis.circle")
                         .labelStyle(.iconOnly)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .accessibilityLabel("‘\(deck)’ Destesi Seçenekleri")
-                .help("Deste Seçenekleri")
+                .accessibilityLabel(L10n.text("‘\(deck)’ Destesi Seçenekleri", en: "‘\(deck)’ Deck Options", de: "Optionen für Stapel ‚\(deck)‘"))
+                .help(L10n.text("Deste Seçenekleri", en: "Deck Options", de: "Stapel-Optionen"))
             }
         }
     }
@@ -406,7 +473,7 @@ struct WordListView: View {
         Button {
             deckToRename = deck
         } label: {
-            Label("Deste Adını Değiştir…", systemImage: "pencil")
+            Label(L10n.text("Deste Adını Değiştir…", en: "Rename Deck…", de: "Stapel umbenennen…"), systemImage: "pencil")
         }
         if deck != "Genel" {
             Divider()
@@ -416,7 +483,7 @@ struct WordListView: View {
                     selectedDeckFilter = nil
                 }
             } label: {
-                Label("Desteyi Sil (Kelimeleri 'Genel'e Taşı)", systemImage: "folder.badge.minus")
+                Label(L10n.text("Desteyi Sil (Kelimeleri 'Genel'e Taşı)", en: "Delete Deck (Move Words to 'Genel')", de: "Stapel löschen (Wörter nach ‚Genel‘ verschieben)"), systemImage: "folder.badge.minus")
             }
         }
     }
@@ -427,7 +494,7 @@ struct WordListView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                TextField("Kelime, anlam veya deste ara…", text: $searchText)
+                TextField(L10n.searchPlaceholder, text: $searchText)
                     .textFieldStyle(.plain)
                     .focused($focusedField, equals: .search)
                 if !searchText.isEmpty {
@@ -439,24 +506,24 @@ struct WordListView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Aramayı temizle")
+                    .accessibilityLabel(L10n.text("Aramayı temizle", en: "Clear search", de: "Suche leeren"))
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
 
-            Picker("Artikel filtresi", selection: $selectedArtikelFilter) {
-                Text("Tüm Artikeller").tag(String?.none)
+            Picker(L10n.text("Artikel filtresi", en: "Article filter", de: "Artikelfilter"), selection: $selectedArtikelFilter) {
+                Text(L10n.allArticles).tag(String?.none)
                 ForEach(Artikel.allCases) { artikel in
                     Text(artikel.rawValue).tag(String?.some(artikel.rawValue))
                 }
-                Text("Artikelsiz").tag(String?.some(ArtikelFilter.none))
+                Text(L10n.articleless).tag(String?.some(ArtikelFilter.none))
             }
             .labelsHidden()
 
-            Picker("Durum filtresi", selection: $selectedStageFilter) {
-                Text("Tüm Durumlar").tag(CardStage?.none)
+            Picker(L10n.text("Durum filtresi", en: "Stage filter", de: "Phasenfilter"), selection: $selectedStageFilter) {
+                Text(L10n.allStages).tag(CardStage?.none)
                 ForEach(CardStage.allCases, id: \.rawValue) { stage in
                     Text(stage.title).tag(CardStage?.some(stage))
                 }
@@ -469,27 +536,35 @@ struct WordListView: View {
     private var emptyState: some View {
         if store.cards.isEmpty {
             ContentUnavailableView {
-                Label("Henüz kayıtlı kelime yok", systemImage: "tray")
+                Label(L10n.text("Henüz kayıtlı kelime yok", en: "No saved words yet", de: "Noch keine Wörter gespeichert"), systemImage: "tray")
             } description: {
-                Text("İlk kelimeni ekle, bir CSV dosyası içe aktar ya da Gemini AI ile kelime üret.")
+                Text(L10n.text(
+                    "İlk kelimeni ekle, bir CSV dosyası içe aktar ya da AI ile kelime üret.",
+                    en: "Add your first word, import a CSV file, or generate words with AI.",
+                    de: "Füge dein erstes Wort hinzu, importiere eine CSV-Datei oder generiere Wörter mit KI."
+                ))
             } actions: {
                 emptyAddActions
             }
         } else if let deck = selectedDeckFilter, !hasContentFilters {
             ContentUnavailableView {
-                Label("'\(deck)' destesinde henüz kelime yok", systemImage: "folder")
+                Label(L10n.text("'\(deck)' destesinde henüz kelime yok", en: "No words in '\(deck)' deck yet", de: "Noch keine Wörter im Stapel ‚\(deck)‘"), systemImage: "folder")
             } description: {
-                Text("Bu desteye kelime ekleyebilir veya Gemini AI ile yeni kelimeler üretebilirsin.")
+                Text(L10n.text(
+                    "Bu desteye kelime ekleyebilir veya AI ile yeni kelimeler üretebilirsin.",
+                    en: "Add words to this deck or generate new ones with AI.",
+                    de: "Füge diesem Stapel Wörter hinzu oder generiere neue mit KI."
+                ))
             } actions: {
                 emptyAddActions
             }
         } else {
             ContentUnavailableView {
-                Label("Sonuç bulunamadı", systemImage: "magnifyingglass")
+                Label(L10n.text("Sonuç bulunamadı", en: "No results found", de: "Keine Ergebnisse gefunden"), systemImage: "magnifyingglass")
             } description: {
-                Text("Arama veya filtre kriterlerine uygun kelime yok.")
+                Text(L10n.text("Arama veya filtre kriterlerine uygun kelime yok.", en: "No words match your search or filter criteria.", de: "Keine Wörter entsprechen deinen Such- oder Filterkriterien."))
             } actions: {
-                Button("Filtreleri temizle") {
+                Button(L10n.text("Filtreleri temizle", en: "Clear filters", de: "Filter zurücksetzen")) {
                     searchText = ""
                     selectedArtikelFilter = nil
                     selectedStageFilter = nil
@@ -505,13 +580,13 @@ struct WordListView: View {
             Button {
                 focusedField = .newWord
             } label: {
-                Label("Kelime Ekle", systemImage: "plus")
+                Label(L10n.text("Kelime Ekle", en: "Add Word", de: "Wort hinzufügen"), systemImage: "plus")
             }
 
             Button {
                 showAIGenerator = true
             } label: {
-                Label("AI ile Kelime Üret", systemImage: "sparkles")
+                Label(L10n.text("AI ile Kelime Üret", en: "Generate with AI", de: "Mit KI generieren"), systemImage: "sparkles")
                     .foregroundStyle(AppPalette.accentPurple)
             }
             .tint(AppPalette.accentPurple)
@@ -529,7 +604,12 @@ struct WordListView: View {
             newWord = ""
             newMeaning = ""
         }
-        showFeedback(added ? "„\(word)“ eklendi" : "„\(word)“ zaten havuzda", isDuplicate: !added)
+        showFeedback(
+            added
+                ? L10n.text("„\(word)“ eklendi", en: "Added “\(word)”", de: "„\(word)“ hinzugefügt")
+                : L10n.text("„\(word)“ zaten havuzda", en: "“\(word)” is already in the pool", de: "„\(word)“ ist bereits im Wortschatz"),
+            isDuplicate: !added
+        )
     }
 
     private func showFeedback(_ message: String, isDuplicate: Bool = false) {
@@ -539,25 +619,25 @@ struct WordListView: View {
 
     private func dueDescription(for card: Flashcard) -> String {
         if card.stage == .new {
-            return "Sırada (Yeni)"
+            return L10n.text("Sırada (Yeni)", en: "Queued (New)", de: "In Warteschlange (Neu)")
         }
         let now = store.currentTime
         if card.dueDate <= now {
-            return "Şimdi"
+            return L10n.text("Şimdi", en: "Now", de: "Jetzt")
         }
         let diff = card.dueDate.timeIntervalSince(now)
         if diff < 60 {
             let secs = max(1, Int(ceil(diff)))
-            return "\(secs) sn sonra"
+            return L10n.text("\(secs) sn sonra", en: "in \(secs)s", de: "in \(secs) Sek.")
         } else if diff < 3600 {
             let mins = max(1, Int(round(diff / 60)))
-            return "\(mins) dk sonra"
+            return L10n.text("\(mins) dk sonra", en: "in \(mins)m", de: "in \(mins) Min.")
         } else if diff < 86_400 {
             let hours = max(1, Int(round(diff / 3600)))
-            return "\(hours) sa sonra"
+            return L10n.text("\(hours) sa sonra", en: "in \(hours)h", de: "in \(hours) Std.")
         } else {
             let days = max(1, Int(round(diff / 86_400)))
-            return "\(days) gün sonra"
+            return L10n.text("\(days) gün sonra", en: "in \(days)d", de: days == 1 ? "in 1 Tag" : "in \(days) Tagen")
         }
     }
 
@@ -568,28 +648,52 @@ struct WordListView: View {
 
         let targetDeck = selectedDeckFilter ?? newDeckName
         let panel = NSOpenPanel()
-        panel.title = "CSV Dosyası İçe Aktar"
-        panel.message = """
-        Sütun sırası: Artikel, Kelime, Anlam, Deste (isteğe bağlı).
-        Deste belirtilmeyen kelimeler „\(targetDeck)“ destesine aktarılır.
-        """
+        panel.title = L10n.text("CSV Dosyası İçe Aktar", en: "Import CSV File", de: "CSV-Datei importieren")
+        panel.message = L10n.text(
+            """
+            Sütun sırası: Artikel, Kelime, Anlam, Deste (isteğe bağlı).
+            Deste belirtilmeyen kelimeler „\(targetDeck)“ destesine aktarılır.
+            """,
+            en: """
+            Columns: Article, Word, Meaning, Deck (optional).
+            Words without a deck are imported into “\(targetDeck)”.
+            """,
+            de: """
+            Spalten: Artikel, Wort, Bedeutung, Stapel (optional).
+            Wörter ohne Stapel werden in „\(targetDeck)“ importiert.
+            """
+        )
         panel.allowedContentTypes = [.commaSeparatedText, .plainText, .tabSeparatedText]
         panel.allowsMultipleSelection = false
 
         if panel.runModal() == .OK, let url = panel.url {
             do {
                 let res = try store.importCSV(from: url, defaultDeckName: targetDeck)
-                alertTitle = "CSV içe aktarıldı"
-                alertMessage = """
-                Yeni eklenen: \(res.addedCount)
-                Güncellenen: \(res.updatedCount)
-                Atlanan (mevcut): \(res.skippedCount)
-                Geçersiz satır: \(res.invalidLines)
-                """
+                alertTitle = L10n.text("CSV içe aktarıldı", en: "CSV imported", de: "CSV importiert")
+                alertMessage = L10n.text(
+                    """
+                    Yeni eklenen: \(res.addedCount)
+                    Güncellenen: \(res.updatedCount)
+                    Atlanan (mevcut): \(res.skippedCount)
+                    Geçersiz satır: \(res.invalidLines)
+                    """,
+                    en: """
+                    Added: \(res.addedCount)
+                    Updated: \(res.updatedCount)
+                    Skipped (existing): \(res.skippedCount)
+                    Invalid rows: \(res.invalidLines)
+                    """,
+                    de: """
+                    Hinzugefügt: \(res.addedCount)
+                    Aktualisiert: \(res.updatedCount)
+                    Übersprungen (vorhanden): \(res.skippedCount)
+                    Ungültige Zeilen: \(res.invalidLines)
+                    """
+                )
                 offerImportUndo = store.canUndoImport
                 showAlert = true
             } catch {
-                alertTitle = "CSV içe aktarılamadı"
+                alertTitle = L10n.text("CSV içe aktarılamadı", en: "Could not import CSV", de: "CSV-Import fehlgeschlagen")
                 offerImportUndo = false
                 alertMessage = error.localizedDescription
                 showAlert = true
@@ -603,7 +707,7 @@ struct WordListView: View {
         defer { showingCSVPanel = false }
 
         let panel = NSSavePanel()
-        panel.title = "Kelimeleri CSV Olarak Dışa Aktar"
+        panel.title = L10n.text("Kelimeleri CSV Olarak Dışa Aktar", en: "Export Words as CSV", de: "Wörter als CSV exportieren")
         panel.nameFieldStringValue = "almanca_kelimeler.csv"
         panel.allowedContentTypes = [.commaSeparatedText]
 
@@ -611,11 +715,11 @@ struct WordListView: View {
             let content = store.exportCSVString()
             do {
                 try content.write(to: url, atomically: true, encoding: .utf8)
-                showFeedback("Kelimeler CSV olarak dışa aktarıldı.")
+                showFeedback(L10n.text("Kelimeler CSV olarak dışa aktarıldı.", en: "Words exported as CSV.", de: "Wörter als CSV exportiert."))
             } catch {
-                alertTitle = "CSV dışa aktarılamadı"
+                alertTitle = L10n.text("CSV dışa aktarılamadı", en: "Could not export CSV", de: "CSV-Export fehlgeschlagen")
                 offerImportUndo = false
-                alertMessage = "Dışa aktarma hatası: \(error.localizedDescription)"
+                alertMessage = L10n.text("Dışa aktarma hatası: \(error.localizedDescription)", en: "Export error: \(error.localizedDescription)", de: "Exportfehler: \(error.localizedDescription)")
                 showAlert = true
             }
         }
@@ -795,22 +899,22 @@ private struct WordListRow: View {
             } label: {
                 Image(systemName: "speaker.wave.2")
             }
-            .accessibilityLabel("\(card.fullGermanTerm) kelimesini seslendir")
-            .help("Seslendir")
+            .accessibilityLabel(L10n.text("\(card.fullGermanTerm) kelimesini seslendir", en: "Pronounce \(card.fullGermanTerm)", de: "\(card.fullGermanTerm) vorlesen"))
+            .help(L10n.text("Seslendir", en: "Pronounce", de: "Vorlesen"))
 
             Button(action: onEdit) {
                 Image(systemName: "pencil")
                     .foregroundStyle(AppPalette.accentBlue)
             }
-            .accessibilityLabel("\(card.fullGermanTerm) kelimesini düzenle")
-            .help("Kelimeyi Düzenle")
+            .accessibilityLabel(L10n.text("\(card.fullGermanTerm) kelimesini düzenle", en: "Edit \(card.fullGermanTerm)", de: "\(card.fullGermanTerm) bearbeiten"))
+            .help(L10n.editWordTitle)
 
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
                     .foregroundStyle(AppPalette.error)
             }
-            .accessibilityLabel("\(card.fullGermanTerm) kelimesini sil")
-            .help("Kelimeyi Sil")
+            .accessibilityLabel(L10n.text("\(card.fullGermanTerm) kelimesini sil", en: "Delete \(card.fullGermanTerm)", de: "\(card.fullGermanTerm) löschen"))
+            .help(L10n.text("Kelimeyi Sil", en: "Delete Word", de: "Wort löschen"))
         }
         .buttonStyle(.borderless)
         .fixedSize()
@@ -858,6 +962,80 @@ private struct DeckFilterChip: View {
         .fixedSize()
         .accessibilityLabel("\(title), \(count) kelime")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// Converts vertical mouse scroll-wheel events over a horizontal `ScrollView` into smooth horizontal scrolling.
+private struct HorizontalWheelScrollBridge: NSViewRepresentable {
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.targetView = view
+        context.coordinator.installMonitor()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.targetView = nsView
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.removeMonitor()
+    }
+
+    final class Coordinator {
+        weak var targetView: NSView?
+        private var monitor: Any?
+
+        deinit {
+            removeMonitor()
+        }
+
+        func installMonitor() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self,
+                      let view = self.targetView,
+                      let window = view.window,
+                      event.window === window,
+                      let scrollView = view.enclosingScrollView else {
+                    return event
+                }
+                let clipView = scrollView.contentView
+                let locationInClip = clipView.convert(event.locationInWindow, from: nil)
+                guard clipView.bounds.contains(locationInClip) else {
+                    return event
+                }
+                guard abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
+                      abs(event.scrollingDeltaY) > 0.01,
+                      let documentView = scrollView.documentView else {
+                    return event
+                }
+                let maxX = max(0, documentView.bounds.width - clipView.bounds.width)
+                guard maxX > 0.5 else {
+                    return event
+                }
+                let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 1.0 : 18.0
+                let delta = event.scrollingDeltaY * multiplier
+                let currentX = clipView.bounds.origin.x
+                let newX = min(maxX, max(0, currentX - delta))
+                if abs(newX - currentX) > 0.01 {
+                    clipView.scroll(to: NSPoint(x: newX, y: clipView.bounds.origin.y))
+                    scrollView.reflectScrolledClipView(clipView)
+                }
+                return nil
+            }
+        }
+
+        func removeMonitor() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
+        }
     }
 }
 
@@ -921,16 +1099,24 @@ struct NewDeckSheet: View {
     @FocusState private var isFocused: Bool
     var onCreated: ((String) -> Void)? = nil
 
-    private let suggestedDecks = [
-        "A1 Kelimeler", "A2 Kelimeler", "B1 Kelimeler",
-        "B2 Kelimeler", "C1 Kelimeler", "Günlük Konuşma",
-        "İş Almancası", "Yiyecek & İçecek", "Seyahat"
-    ]
+    private var suggestedDecks: [String] {
+        [
+            L10n.text("A1 Kelimeler", en: "A1 Words", de: "A1 Wörter"),
+            L10n.text("A2 Kelimeler", en: "A2 Words", de: "A2 Wörter"),
+            L10n.text("B1 Kelimeler", en: "B1 Words", de: "B1 Wörter"),
+            L10n.text("B2 Kelimeler", en: "B2 Words", de: "B2 Wörter"),
+            L10n.text("C1 Kelimeler", en: "C1 Words", de: "C1 Wörter"),
+            L10n.text("Günlük Konuşma", en: "Daily Conversation", de: "Alltagsgespräche"),
+            L10n.text("İş Almancası", en: "Business German", de: "Wirtschaftsdeutsch"),
+            L10n.text("Yiyecek & İçecek", en: "Food & Drink", de: "Essen & Trinken"),
+            L10n.text("Seyahat", en: "Travel", de: "Reisen")
+        ]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Label("Yeni Deste Oluştur", systemImage: "folder.badge.plus")
+                Label(L10n.text("Yeni Deste Oluştur", en: "Create New Deck", de: "Neuen Stapel erstellen"), systemImage: "folder.badge.plus")
                     .font(.title3.bold())
                 Spacer()
                 Button {
@@ -941,19 +1127,15 @@ struct NewDeckSheet: View {
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Kapat")
+                .accessibilityLabel(L10n.close)
             }
 
-            Text("Kelime haznenizi konulara veya seviyelere göre ayırmak için yeni bir deste adı girin:")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            TextField("Deste adı (örn: B1 Sınav, Mutfak, Akademik)", text: $deckName)
+            TextField(L10n.text("Deste adı (örn: B1 Sınav, Mutfak, Akademik)", en: "Deck name (e.g. B1 Exam, Kitchen, Academic)", de: "Stapelname (z. B. B1-Prüfung, Küche, Studium)"), text: $deckName)
                 .textFieldStyle(.roundedBorder)
                 .focused($isFocused)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Hızlı Öneriler:")
+                Text(L10n.text("Hızlı Öneriler:", en: "Quick Suggestions:", de: "Schnellvorschläge:"))
                     .font(.caption2.weight(.semibold))
                     .foregroundColor(.secondary)
 
@@ -985,7 +1167,7 @@ struct NewDeckSheet: View {
             Divider()
 
             HStack {
-                Button("İptal") {
+                Button(L10n.cancel) {
                     dismiss()
                 }
                 .buttonStyle(.bordered)
@@ -995,7 +1177,7 @@ struct NewDeckSheet: View {
                 Button {
                     saveAndDismiss()
                 } label: {
-                    Label("Deste Oluştur", systemImage: "checkmark.circle.fill")
+                    Label(L10n.text("Deste Oluştur", en: "Create Deck", de: "Stapel erstellen"), systemImage: "checkmark.circle.fill")
                         .foregroundStyle(AppPalette.onBlue)
                 }
                 .buttonStyle(.borderedProminent)
@@ -1032,21 +1214,21 @@ struct RenameDeckSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("'\(oldName)' Destesinin Adını Değiştir")
+            Text(L10n.text("'\(oldName)' Destesinin Adını Değiştir", en: "Rename '\(oldName)' Deck", de: "Stapel ‚\(oldName)‘ umbenennen"))
                 .font(.headline)
 
-            TextField("Yeni deste adı", text: $newName)
+            TextField(L10n.text("Yeni deste adı", en: "New deck name", de: "Neuer Stapelname"), text: $newName)
                 .textFieldStyle(.roundedBorder)
                 .focused($isFocused)
 
             HStack {
-                Button("İptal") {
+                Button(L10n.cancel) {
                     dismiss()
                 }
                 .buttonStyle(.bordered)
                 Spacer()
                 Button(action: commitRename) {
-                    Text("Kaydet")
+                    Text(L10n.save)
                         .foregroundStyle(AppPalette.onBlue)
                 }
                 .buttonStyle(.borderedProminent)
@@ -1091,109 +1273,175 @@ struct EditWordSheet: View {
         _editDeckName = State(initialValue: card.deckName)
     }
 
+    private var isSaveDisabled: Bool {
+        showNewDeckSheet ||
+            editWord.trimmingCharacters(in: .whitespaces).isEmpty ||
+            (editArtikel == nil && editMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    private var artikelColor: Color {
+        editArtikel?.color ?? AppPalette.articleNone
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Label("Kelimeyi Düzenle", systemImage: "pencil.circle.fill")
+        VStack(spacing: 0) {
+            // Header
+            HStack(spacing: 10) {
+                Text(editArtikel?.rawValue ?? ArtikelFilter.none)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(artikelColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        editArtikel?.badgeBackground ?? AppPalette.articleNoneBadgeBackground,
+                        in: Capsule()
+                    )
+
+                Text(L10n.editWordTitle)
                     .font(.title3.bold())
+
                 Spacer()
+
                 Button {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .font(.title3)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Kapat")
+                .accessibilityLabel(L10n.close)
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(.ultraThinMaterial)
 
             Divider()
 
-            // Fixed-height scrollable body: the old auto-sized sheet grew/shrank whenever the
-            // picker or the inline validation line changed, which made resizing feel broken.
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Artikel:")
-                            .font(.caption.weight(.semibold))
-                        Spacer()
-                        Text(editArtikel == nil ? "Artikelsiz (-)" : editArtikel!.grammaticalLabel)
-                            .font(.caption)
-                            .foregroundColor(editArtikel == nil ? AppPalette.articleNone : editArtikel!.color)
+                VStack(alignment: .leading, spacing: 14) {
+                    // Artikel Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Artikel")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(editArtikel == nil ? L10n.text("Artikelsiz (-)", en: "Article-less (-)", de: "Ohne Artikel (-)") : editArtikel!.grammaticalLabel)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(artikelColor)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(
+                                    editArtikel?.badgeBackground ?? AppPalette.articleNoneBadgeBackground,
+                                    in: Capsule()
+                                )
+                        }
+
+                        ArtikelSegmentedControl(selection: $editArtikel)
+                            .frame(maxWidth: .infinity)
                     }
-
-                    // Short labels keep the control readable in a 280pt row; long
-                    // "der (Maskulin (Eril))" segments were squeezing and clipping the sheet.
-                    ArtikelSegmentedControl(selection: $editArtikel)
-                        .frame(width: 280)
-
-                    Text("Almanca Kelime:")
-                        .font(.caption.weight(.semibold))
-                    TextField("Almanca kelime", text: $editWord)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isWordFocused)
-
-                    Text("Türkçe Anlamı / Açıklama:")
-                        .font(.caption.weight(.semibold))
-                    TextField("Türkçe anlamı", text: $editMeaning)
-                        .textFieldStyle(.roundedBorder)
-
-                    // Reserved single line: showing/hiding the warning must not resize the sheet.
-                    Text(
-                        editArtikel == nil && editMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            ? "Artikelsiz kelimede Türkçe anlam zorunludur."
-                            : " "
+                    .padding(14)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.75)
                     )
-                    .font(.caption)
-                    .foregroundStyle(AppPalette.accentOrange)
-                    .frame(height: 16, alignment: .leading)
-                    .accessibilityHidden(editArtikel != nil || !editMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                    Text("Deste / Kategori:")
-                        .font(.caption.weight(.semibold))
-                    HStack(spacing: 8) {
-                        Menu {
-                            ForEach(store.allDeckNames, id: \.self) { existingDeck in
-                                Button(existingDeck) {
-                                    editDeckName = existingDeck
+                    // Word & Meaning Section
+                    VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L10n.germanWordLabel)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField(L10n.germanWordLabel, text: $editWord)
+                                .textFieldStyle(.roundedBorder)
+                                .focused($isWordFocused)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L10n.meaningLabel)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField(L10n.meaningLabel, text: $editMeaning)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        if editArtikel == nil && editMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Label(L10n.articlelessMeaningRequired, systemImage: "exclamationmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(AppPalette.accentOrange)
+                        }
+                    }
+                    .padding(14)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.75)
+                    )
+
+                    // Deck Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.deckLabel)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 8) {
+                            Menu {
+                                ForEach(store.allDeckNames, id: \.self) { existingDeck in
+                                    Button {
+                                        editDeckName = existingDeck
+                                    } label: {
+                                        if editDeckName == existingDeck {
+                                            Label(existingDeck, systemImage: "checkmark")
+                                        } else {
+                                            Text(existingDeck)
+                                        }
+                                    }
+                                }
+                                Divider()
+                                Button {
+                                    showNewDeckSheet = true
+                                } label: {
+                                    Label(L10n.newDeckAddEllipsis, systemImage: "folder.badge.plus")
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "folder.fill")
+                                        .foregroundStyle(AppPalette.accentBlue)
+                                    Text(editDeckName)
+                                        .lineLimit(1)
+                                    Spacer()
                                 }
                             }
-                            Divider()
+                            .menuStyle(.borderedButton)
+
                             Button {
                                 showNewDeckSheet = true
                             } label: {
-                                Label("Yeni Deste Ekle...", systemImage: "folder.badge.plus")
+                                Label(L10n.newDeckShort, systemImage: "folder.badge.plus")
                             }
-                        } label: {
-                            HStack {
-                                Image(systemName: "folder.fill")
-                                    .foregroundStyle(AppPalette.accentBlue)
-                                Text(editDeckName)
-                                Spacer()
-                            }
+                            .buttonStyle(.bordered)
                         }
-                        .menuStyle(.borderedButton)
-
-                        Button {
-                            showNewDeckSheet = true
-                        } label: {
-                            Label("Yeni Deste", systemImage: "folder.badge.plus")
-                        }
-                        .buttonStyle(.bordered)
                     }
+                    .padding(14)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.75)
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(18)
             }
-            .frame(maxHeight: 370)
 
             Divider()
 
+            // Footer
             HStack {
-                Button("İptal") {
+                Button(L10n.cancel) {
                     dismiss()
                 }
                 .buttonStyle(.bordered)
+                .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
@@ -1208,20 +1456,18 @@ struct EditWordSheet: View {
                     )
                     dismiss()
                 } label: {
-                    Label("Değişiklikleri Kaydet", systemImage: "checkmark.circle.fill")
+                    Label(L10n.saveChanges, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(AppPalette.onBlue)
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(
-                    showNewDeckSheet ||
-                        editWord.trimmingCharacters(in: .whitespaces).isEmpty ||
-                        (editArtikel == nil && editMeaning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                )
+                .disabled(isSaveDisabled)
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(.ultraThinMaterial)
         }
-        .padding(22)
-        .frame(width: 520, height: 560)
+        .frame(minWidth: 440, idealWidth: 480, maxWidth: 540, minHeight: 380, idealHeight: 450, maxHeight: 540)
         .tint(AppPalette.accentBlue)
         .defaultFocus($isWordFocused, true)
         .sheet(isPresented: $showNewDeckSheet) {

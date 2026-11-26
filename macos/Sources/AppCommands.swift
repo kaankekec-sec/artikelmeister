@@ -68,25 +68,25 @@ struct AppCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            actionButton("Yeni Kelime", action: newWord)
+            actionButton(L10n.text("Yeni Kelime", en: "New Word", de: "Neues Wort"), action: newWord)
                 .keyboardShortcut("n")
-            actionButton("CSV İçe Aktar…", action: importCSV)
+            actionButton(L10n.csvImportEllipsis, action: importCSV)
                 .keyboardShortcut("i", modifiers: [.command, .shift])
-            actionButton("AI ile Kelime Üret…", action: aiGenerator)
+            actionButton(L10n.text("AI ile Kelime Üret…", en: "Generate Words with AI…", de: "Wörter mit KI generieren…"), action: aiGenerator)
                 .keyboardShortcut("g", modifiers: [.command, .shift])
             Divider()
-            Button("Yerel Depolama Klasörünü Aç", action: openStorageDirectory)
+            Button(L10n.text("Yerel Depolama Klasörünü Aç", en: "Open Local Storage Folder", de: "Lokalen Speicherordner öffnen"), action: openStorageDirectory)
                 .keyboardShortcut("o", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .textEditing) {
-            actionButton("Bul", action: findWords)
+            actionButton(L10n.text("Bul", en: "Find", de: "Suchen"), action: findWords)
                 .keyboardShortcut("f")
-            actionButton("Kelimeyi Seslendir", action: speakWord)
+            actionButton(L10n.text("Kelimeyi Seslendir", en: "Speak Word", de: "Wort vorlesen"), action: speakWord)
                 .keyboardShortcut("s", modifiers: [.command, .shift])
         }
 
-        CommandMenu("Görünüm") {
+        CommandMenu(L10n.text("Görünüm", en: "View", de: "Ansicht")) {
             tabButton(.study)
                 .keyboardShortcut("c", modifiers: [.command, .option])
             tabButton(.words)
@@ -102,13 +102,13 @@ struct AppCommands: Commands {
     }
 
     private func tabButton(_ tab: AppTab) -> some View {
-        Button(tab.rawValue) {
+        Button(tab.localizedTitle) {
             tabSelection?.wrappedValue = tab
         }
         .disabled(tabSelection == nil)
     }
 
-    private func actionButton(_ title: LocalizedStringKey, action: (() -> Void)?) -> some View {
+    private func actionButton(_ title: String, action: (() -> Void)?) -> some View {
         Button(title) {
             action?()
         }

@@ -4,6 +4,8 @@ import android.content.res.Resources
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
@@ -33,6 +35,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -108,13 +112,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -162,7 +166,6 @@ private const val WIDE_LAYOUT_MIN_WIDTH_DP = 600
 
 /** Expanded width class: CSV import/export also shown as buttons instead of in the overflow. */
 private const val EXPANDED_LAYOUT_MIN_WIDTH_DP = 840
-private const val AI_GENERATE_LABEL = "AI ile kelime üret"
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -280,10 +283,10 @@ fun WordListView(
                     R.string.words_import_result,
                     res.addedCount, res.updatedCount, res.skippedCount, res.invalidLines
                 )
-                alertTitle = "CSV içe aktarıldı"
+                alertTitle = context.getString(R.string.words_csv_imported_title)
                 offerImportUndo = store.canUndoImport
             }.onFailure { err ->
-                alertTitle = "CSV içe aktarılamadı"
+                alertTitle = context.getString(R.string.words_csv_import_error_title)
                 offerImportUndo = false
                 alertMessage = err.localizedMessage ?: context.getString(R.string.words_import_failed)
             }
@@ -348,11 +351,11 @@ fun WordListView(
         Column(modifier = Modifier.fillMaxSize()) {
             // ------------------------------------------------------------------ Header
             Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(colors.controlBackground)
-                    .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 10.dp)
+                    .padding(top = 8.dp, bottom = 10.dp)
             ) {
                 WordPoolTitleRow(
                     totalCount = visibleTotal,
@@ -368,7 +371,7 @@ fun WordListView(
                 )
 
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.padding(horizontal = 12.dp)
                 ) {
                     if (isWide) {
@@ -390,7 +393,7 @@ fun WordListView(
                     // Search + stage filter
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         SearchField(
@@ -475,7 +478,7 @@ fun WordListView(
                             ) {
                                 Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(AI_GENERATE_LABEL)
+                                Text(stringResource(R.string.action_ai_generate))
                             }
                         }
                         else -> StateMessageView(
@@ -498,16 +501,18 @@ fun WordListView(
                     contentPadding = PaddingValues(bottom = if (isWide) 16.dp else 96.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    itemsIndexed(filteredCards, key = { _, card -> card.id }) { index, card ->
+                    itemsIndexed(filteredCards, key = { _, card -> card.id }) { _, card ->
                         WordRowItem(
                             card = card,
-                            index = index,
                             dueText = dueDescription(resources, card, store.currentTime),
                             onSpeak = { SpeechManager.speak(card.fullGermanTerm) },
                             onEdit = { editingCard = card },
                             onDelete = { requestDelete(card) }
                         )
-                        HorizontalDivider(color = colors.cardBorderSubtle.copy(alpha = 0.4f))
+                        HorizontalDivider(
+                            color = colors.cardBorderSubtle.copy(alpha = 0.55f),
+                            modifier = Modifier.padding(start = 76.dp, end = 16.dp)
+                        )
                     }
                 }
             }
@@ -605,8 +610,7 @@ fun WordListView(
             title = { Text(stringResource(R.string.words_csv_import)) },
             text = {
                 Text(
-                    "Sütun sırası: Artikel, Kelime, Anlam, Deste (isteğe bağlı).\n\n" +
-                        "Deste belirtilmeyen kelimeler „$targetDeck“ destesine aktarılır."
+                    stringResource(R.string.words_csv_guide, targetDeck)
                 )
             },
             confirmButton = {
@@ -614,7 +618,7 @@ fun WordListView(
                     showImportGuide = false
                     importCsvLauncher.launch(CsvCards.ACCEPTED_MIME_TYPES)
                 }) {
-                    Text("Dosya seç")
+                    Text(stringResource(R.string.words_csv_choose_file))
                 }
             },
             dismissButton = {
@@ -642,7 +646,7 @@ fun WordListView(
                         val undone = store.undoLastImport()
                         offerImportUndo = false
                         alertTitle = null
-                        alertMessage = if (undone) "İçe aktarma geri alındı." else null
+                        alertMessage = if (undone) context.getString(R.string.words_undo_done) else null
                     }) {
                         Text(stringResource(R.string.action_undo))
                     }
@@ -671,23 +675,35 @@ private fun WordPoolTitleRow(
 ) {
     val colors = LocalAppColors.current
     var showOverflow by remember { mutableStateOf(false) }
+    val controlShape = RoundedCornerShape(14.dp)
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
+            .padding(horizontal = 12.dp)
     ) {
         if (onOpenDrawer != null) {
-            IconButton(onClick = onOpenDrawer) {
-                Icon(
-                    imageVector = Icons.Default.Menu,
-                    contentDescription = stringResource(R.string.action_open_menu),
-                    tint = colors.primaryText
-                )
+            val menuDesc = stringResource(R.string.action_open_menu)
+            Surface(
+                onClick = onOpenDrawer,
+                shape = controlShape,
+                color = colors.textBackground,
+                border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                modifier = Modifier
+                    .size(48.dp)
+                    .semantics { contentDescription = menuDesc }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = null,
+                        tint = colors.primaryText,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
-        } else {
-            Spacer(modifier = Modifier.width(12.dp))
         }
 
         Column(modifier = Modifier.weight(1f)) {
@@ -705,58 +721,91 @@ private fun WordPoolTitleRow(
                 } else {
                     stringResource(R.string.words_count, totalCount)
                 },
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.tabular(),
                 color = colors.secondaryText,
                 maxLines = 1
             )
         }
 
-        if (isWide) {
-            FilledTonalButton(
-                onClick = onAiGenerate,
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = colors.purpleBadgeBackground,
-                    contentColor = colors.accentPurple
-                ),
-                modifier = Modifier.padding(start = 8.dp)
-            ) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(AI_GENERATE_LABEL)
+        val aiLabel = stringResource(R.string.action_ai_generate)
+        Surface(
+            onClick = onAiGenerate,
+            shape = controlShape,
+            color = colors.purpleBadgeBackground,
+            border = BorderStroke(1.dp, colors.accentPurple.copy(alpha = 0.28f)),
+            modifier = if (isWide) {
+                Modifier.height(48.dp)
+            } else {
+                Modifier
+                    .size(48.dp)
+                    .semantics { contentDescription = aiLabel }
             }
-        } else {
-            FilledTonalIconButton(
-                onClick = onAiGenerate,
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = colors.purpleBadgeBackground,
-                    contentColor = colors.accentPurple
-                )
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(horizontal = if (isWide) 14.dp else 0.dp)
             ) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = AI_GENERATE_LABEL)
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = if (isWide) null else aiLabel,
+                    tint = colors.accentPurple,
+                    modifier = Modifier.size(19.dp)
+                )
+                if (isWide) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = aiLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.accentPurple
+                    )
+                }
             }
         }
 
         if (showAllActions) {
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(onClick = onImport) {
+            OutlinedButton(
+                onClick = onImport,
+                shape = controlShape,
+                border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                modifier = Modifier.height(48.dp)
+            ) {
                 Icon(Icons.Filled.MoveToInbox, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(stringResource(R.string.words_csv_import), style = MaterialTheme.typography.labelLarge)
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(onClick = onExport, enabled = canExport) {
+            OutlinedButton(
+                onClick = onExport,
+                enabled = canExport,
+                shape = controlShape,
+                border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                modifier = Modifier.height(48.dp)
+            ) {
                 Icon(Icons.Filled.Outbox, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(stringResource(R.string.words_csv_export), style = MaterialTheme.typography.labelLarge)
             }
         } else {
+            val moreDesc = stringResource(R.string.action_more_options)
             Box {
-                IconButton(onClick = { showOverflow = true }) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = stringResource(R.string.action_more_options),
-                        tint = colors.primaryText
-                    )
+                Surface(
+                    onClick = { showOverflow = true },
+                    shape = controlShape,
+                    color = colors.textBackground,
+                    border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics { contentDescription = moreDesc }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = null,
+                            tint = colors.primaryText,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
                 DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
                     DropdownMenuItem(
@@ -841,51 +890,61 @@ private fun StageFilterButton(
     val colors = LocalAppColors.current
     var expanded by remember { mutableStateOf(false) }
     val filterLabel = stringResource(R.string.words_filter_stage)
+    val allStages = stringResource(R.string.words_filter_all_stages)
+    val isActive = selected != null
+    val controlShape = RoundedCornerShape(14.dp)
 
     Box {
-        if (selected == null) {
-            val allStages = stringResource(R.string.words_filter_all_stages)
-            IconButton(
-                onClick = { expanded = true },
-                modifier = Modifier.semantics { stateDescription = allStages }
+        Surface(
+            onClick = { expanded = true },
+            shape = controlShape,
+            color = if (isActive) colors.blueBadgeBackground else colors.textBackground,
+            border = BorderStroke(
+                1.dp,
+                if (isActive) colors.accentBlue.copy(alpha = 0.45f) else colors.cardBorderSubtle
+            ),
+            modifier = Modifier
+                .height(48.dp)
+                .widthIn(min = 48.dp, max = 168.dp)
+                .semantics {
+                    contentDescription = filterLabel
+                    stateDescription = if (selected == null) allStages else selected.name
+                }
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(horizontal = if (isActive) 12.dp else 0.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.FilterList,
-                    contentDescription = filterLabel,
-                    tint = colors.primaryText
+                    contentDescription = null,
+                    tint = if (isActive) colors.accentBlue else colors.primaryText,
+                    modifier = Modifier.size(19.dp)
                 )
+                if (selected != null) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(selected.titleRes()),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.accentBlue,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
-        } else {
-            FilterChip(
-                selected = true,
-                onClick = { expanded = true },
-                label = { Text(selected.title) },
-                leadingIcon = { Icon(Icons.Default.FilterList, contentDescription = null) },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = colors.blueBadgeBackground,
-                    selectedLabelColor = colors.accentBlue,
-                    selectedLeadingIconColor = colors.accentBlue
-                ),
-                border = FilterChipDefaults.filterChipBorder(
-                    enabled = true,
-                    selected = true,
-                    selectedBorderColor = colors.accentBlue
-                ),
-                modifier = Modifier
-                    .widthIn(max = 168.dp)
-                    .semantics { contentDescription = filterLabel }
-            )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.words_filter_all_stages)) },
+                text = { Text(allStages) },
                 trailingIcon = { if (selected == null) Icon(Icons.Default.Check, contentDescription = null) },
                 onClick = { onSelect(null); expanded = false },
                 modifier = Modifier.semantics { this.selected = selected == null }
             )
             CardStage.entries.forEach { stage ->
                 DropdownMenuItem(
-                    text = { Text(stage.title) },
+                    text = { Text(stringResource(stage.titleRes())) },
                     leadingIcon = {
                         Box(
                             modifier = Modifier
@@ -903,10 +962,9 @@ private fun StageFilterButton(
 }
 
 /**
- * Segmented filter: Tümü / der / die / das, plus a reserved '-' segment for article-less words.
- * Uses equal-weight segments so 5 options still fit a 360dp phone without scrolling.
+ * Unified tonal segmented filter: Tümü / der / die / das / '-'.
+ * Fits 360dp cleanly with equal-weight segments and 48dp touch targets.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ArtikelFilterSegments(
     selectedKey: String,
@@ -928,7 +986,6 @@ private fun ArtikelFilterSegments(
                 )
             )
         }
-        // 4th article group: article-less words ('-').
         add(
             Option(
                 FILTER_NO_ARTICLE,
@@ -941,40 +998,70 @@ private fun ArtikelFilterSegments(
     }
     val groupLabel = stringResource(R.string.words_filter_artikel_a11y)
 
-    SingleChoiceSegmentedButtonRow(
-        modifier = modifier.semantics { contentDescription = groupLabel }
+    Surface(
+        color = colors.textBackground,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, colors.cardBorderSubtle),
+        modifier = modifier
+            .selectableGroup()
+            .semantics { contentDescription = groupLabel }
     ) {
-        options.forEachIndexed { index, option ->
-            SegmentedButton(
-                selected = selectedKey == option.key,
-                onClick = { onSelect(option.key) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                icon = {},
-                colors = SegmentedButtonDefaults.colors(
-                    activeContainerColor = option.background,
-                    activeContentColor = option.color,
-                    activeBorderColor = option.color,
-                    inactiveContainerColor = colors.textBackground,
-                    inactiveContentColor = colors.primaryText,
-                    inactiveBorderColor = MaterialTheme.colorScheme.outline
-                ),
-                modifier = Modifier.semantics {
-                    contentDescription = "${option.a11y}, ${counts.forFilter(option.key.ifEmpty { null })}"
-                }
-            ) {
-                // Label + count stacked: 5 equal segments still fit a 360dp phone.
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = option.label,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = "${counts.forFilter(option.key.ifEmpty { null })}",
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1
-                    )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp)
+        ) {
+            options.forEach { option ->
+                val isSelected = selectedKey == option.key
+                val bg by animateColorAsState(
+                    targetValue = if (isSelected) option.background else Color.Transparent,
+                    animationSpec = tween(160),
+                    label = "filterSegBg"
+                )
+                val borderColor by animateColorAsState(
+                    targetValue = if (isSelected) option.color.copy(alpha = 0.45f) else Color.Transparent,
+                    animationSpec = tween(160),
+                    label = "filterSegBorder"
+                )
+                val countValue = counts.forFilter(option.key.ifEmpty { null })
+
+                Surface(
+                    color = bg,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, borderColor),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.RadioButton,
+                            onClick = { onSelect(option.key) }
+                        )
+                        .semantics {
+                            contentDescription = "${option.a11y}, $countValue"
+                        }
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(horizontal = 2.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = option.label,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                            color = if (isSelected) option.color else colors.primaryText,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "$countValue",
+                            style = MaterialTheme.typography.labelSmall.tabular(),
+                            color = if (isSelected) option.color.copy(alpha = 0.85f) else colors.secondaryText,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         }
@@ -1005,18 +1092,31 @@ private fun DeckChipRow(
             modifier = Modifier.weight(1f)
         ) {
             item(key = "__new_deck") {
-                OutlinedButton(
+                Surface(
                     onClick = onNewDeck,
-                    contentPadding = PaddingValues(horizontal = 12.dp),
-                    border = BorderStroke(1.dp, colors.accentBlue)
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.blueBadgeBackground.copy(alpha = 0.65f),
+                    border = BorderStroke(1.dp, colors.accentBlue.copy(alpha = 0.35f)),
+                    modifier = Modifier.heightIn(min = 48.dp)
                 ) {
-                    Icon(
-                        Icons.Filled.CreateNewFolder,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(stringResource(R.string.words_new_deck), style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.CreateNewFolder,
+                            contentDescription = null,
+                            tint = colors.accentBlue,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.words_new_deck),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.accentBlue
+                        )
+                    }
                 }
             }
             item(key = "__all_decks") {
@@ -1068,14 +1168,37 @@ private fun DeckChip(
 ) {
     val colors = LocalAppColors.current
     val a11y = stringResource(R.string.words_deck_chip_a11y, title, count)
-    FilterChip(
-        selected = isSelected,
+    Surface(
         onClick = onClick,
-        label = {
+        shape = RoundedCornerShape(12.dp),
+        color = if (isSelected) colors.blueBadgeBackground else colors.textBackground,
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) colors.accentBlue.copy(alpha = 0.45f) else colors.cardBorderSubtle
+        ),
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .semantics {
+                contentDescription = a11y
+                selected = isSelected
+            }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Icon(
+                imageVector = if (isSelected) Icons.Filled.Folder else Icons.Outlined.Folder,
+                contentDescription = null,
+                tint = if (isSelected) colors.accentBlue else colors.secondaryText,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) colors.accentBlue else colors.primaryText,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 160.dp)
@@ -1083,40 +1206,12 @@ private fun DeckChip(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = "$count",
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.tabular(),
                 fontWeight = FontWeight.Bold,
-                color = if (isSelected) colors.accentBlue else colors.primaryText,
-                modifier = Modifier
-                    .background(
-                        if (isSelected) colors.blueBadgeBackground else colors.secondaryText.copy(alpha = 0.15f),
-                        CircleShape
-                    )
-                    .padding(horizontal = 6.dp)
+                color = if (isSelected) colors.accentBlue else colors.secondaryText
             )
-        },
-        leadingIcon = {
-            Icon(
-                if (isSelected) Icons.Filled.Folder else Icons.Outlined.Folder,
-                contentDescription = null,
-                modifier = Modifier.size(FilterChipDefaults.IconSize)
-            )
-        },
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = colors.textBackground,
-            labelColor = colors.primaryText,
-            iconColor = colors.secondaryText,
-            selectedContainerColor = colors.accentBlue,
-            selectedLabelColor = colors.onBlue,
-            selectedLeadingIconColor = colors.onBlue
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            enabled = true,
-            selected = isSelected,
-            borderColor = MaterialTheme.colorScheme.outline,
-            selectedBorderColor = colors.accentBlue
-        ),
-        modifier = Modifier.semantics { contentDescription = a11y }
-    )
+        }
+    }
 }
 
 // =====================================================================================
@@ -1181,8 +1276,8 @@ private fun DeckSelector(
     Box(modifier = modifier) {
         Surface(
             color = colors.textBackground,
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, colors.cardBorderSubtle),
             onClick = { expanded = true },
             modifier = Modifier
                 .heightIn(min = 48.dp)
@@ -1443,23 +1538,16 @@ private fun AddWordDialog(
 // Word row
 // =====================================================================================
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WordRowItem(
     card: Flashcard,
-    index: Int,
     dueText: String,
     onSpeak: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     val colors = LocalAppColors.current
-    // Opaque row background so the red swipe-to-delete layer never shows through.
-    val bg = if (index % 2 == 0) {
-        colors.windowBackground
-    } else {
-        colors.primaryText.copy(alpha = 0.035f).compositeOver(colors.windowBackground)
-    }
     var showMenu by remember { mutableStateOf(false) }
 
     val speakLabel = stringResource(R.string.words_row_speak)
@@ -1503,7 +1591,7 @@ private fun WordRowItem(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(bg)
+                .background(colors.windowBackground)
                 .clickable(onClickLabel = editLabel, onClick = onEdit)
                 .semantics {
                     customActions = listOf(
@@ -1511,14 +1599,14 @@ private fun WordRowItem(
                         CustomAccessibilityAction(deleteLabel) { onDelete(); true }
                     )
                 }
-                .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp)
+                .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp)
         ) {
             ArtikelBadge(card)
 
             Spacer(modifier = Modifier.width(12.dp))
 
             Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
@@ -1538,19 +1626,22 @@ private fun WordRowItem(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                // Metadata wraps instead of overflowing on narrow phones.
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.padding(top = 1.dp)
                 ) {
-                    MetaPill(text = card.deckName)
-                    MetaPill(text = card.stage.title, stage = card.stage)
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(colors.stageColor(card.stage), CircleShape)
+                    )
                     Text(
-                        text = dueText,
+                        text = "${stringResource(card.stage.titleRes())} · ${card.deckName} · $dueText",
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.secondaryText,
                         maxLines = 1,
-                        modifier = Modifier.align(Alignment.CenterVertically)
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1560,7 +1651,7 @@ private fun WordRowItem(
                     imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                     contentDescription = stringResource(R.string.words_row_speak_a11y, card.fullGermanTerm),
                     tint = colors.accentBlue,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(21.dp)
                 )
             }
 
@@ -1598,8 +1689,9 @@ private fun ArtikelBadge(card: Flashcard) {
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .width(48.dp)
-            .background(colors.artikelBadgeBackground(card.artikel), RoundedCornerShape(8.dp))
-            .padding(vertical = 6.dp)
+            .background(colors.artikelBadgeBackground(card.artikel), RoundedCornerShape(10.dp))
+            .border(1.dp, artColor.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+            .padding(vertical = 7.dp)
     ) {
         Text(
             text = card.displayArtikel,
@@ -1611,39 +1703,6 @@ private fun ArtikelBadge(card: Flashcard) {
             } else {
                 Modifier
             }
-        )
-    }
-}
-
-@Composable
-private fun MetaPill(text: String, stage: CardStage? = null) {
-    val colors = LocalAppColors.current
-    val background = stage?.let { colors.stageBadgeBackground(it) }
-        ?: colors.secondaryText.copy(alpha = 0.13f)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .background(background, CircleShape)
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-    ) {
-        if (stage == null) {
-            Icon(
-                imageVector = Icons.Outlined.Folder,
-                contentDescription = null,
-                tint = colors.secondaryText,
-                modifier = Modifier.size(12.dp)
-            )
-        } else {
-            Box(Modifier.size(7.dp).background(colors.stageColor(stage), CircleShape))
-        }
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (stage == null) colors.secondaryText else colors.primaryText,
-            maxLines = if (stage == null) 1 else 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 140.dp)
         )
     }
 }
@@ -1673,8 +1732,8 @@ private fun CompactTextField(
 ) {
     val colors = LocalAppColors.current
     val focusManager = LocalFocusManager.current
-    val shape = RoundedCornerShape(12.dp)
-    val outline = MaterialTheme.colorScheme.outline
+    val shape = RoundedCornerShape(14.dp)
+    val outline = colors.cardBorderSubtle
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
@@ -1828,12 +1887,6 @@ fun NewDeckDialog(
                 onClose = onDismiss
             )
 
-            Text(
-                text = stringResource(R.string.deck_new_description),
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.secondaryText
-            )
-
             OutlinedTextField(
                 value = deckName,
                 onValueChange = { deckName = it },
@@ -1867,7 +1920,7 @@ fun NewDeckDialog(
                             border = FilterChipDefaults.filterChipBorder(
                                 enabled = true,
                                 selected = deckName == suggestion,
-                                borderColor = MaterialTheme.colorScheme.outline,
+                                borderColor = colors.cardBorderSubtle,
                                 selectedBorderColor = colors.accentBlue
                             )
                         )
@@ -2117,8 +2170,8 @@ private fun WordRowPreviewDark() {
                 Flashcard(artikel = Artikel.DER, word = "Tisch", meaning = "Masa", deckName = "A1"),
                 Flashcard(artikel = Artikel.DIE, word = "Lampe", meaning = "Lamba", deckName = "A1"),
                 Flashcard(artikel = Artikel.DAS, word = "Buch", meaning = "Kitap", deckName = "A1")
-            ).forEachIndexed { i, card ->
-                WordRowItem(card, i, "Şimdi", onSpeak = {}, onEdit = {}, onDelete = {})
+            ).forEach { card ->
+                WordRowItem(card, "Şimdi", onSpeak = {}, onEdit = {}, onDelete = {})
             }
         }
     }
@@ -2131,7 +2184,7 @@ private fun WordRowPreviewLight() {
         Column(modifier = Modifier.background(LocalAppColors.current.windowBackground)) {
             WordRowItem(
                 Flashcard(artikel = Artikel.DIE, word = "Geschwindigkeitsbegrenzung", meaning = "Hız sınırı", deckName = "B2 Kelimeler"),
-                0, "3 gün sonra", onSpeak = {}, onEdit = {}, onDelete = {}
+                "3 gün sonra", onSpeak = {}, onEdit = {}, onDelete = {}
             )
         }
     }

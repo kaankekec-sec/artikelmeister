@@ -68,14 +68,13 @@ class SyncAndScopesTest {
         assertFalse(GoogleScopes.isInsufficientScopes(403, """{"error":{"message":"quota"}}"""))
     }
 
-    @Test fun nativeAndManualFlowsAskForTheSameGeminiScopes() {
-        for (s in listOf(GoogleScopes.GEMINI_RETRIEVER, GoogleScopes.CLOUD_PLATFORM, GoogleScopes.DRIVE_FILE)) {
-            assertTrue(GoogleScopes.FULL_TOKEN.contains(s))
-        }
-        // Drive-only token set must stay narrow so existing users' Drive sync is unaffected.
-        assertFalse(GoogleScopes.DRIVE_TOKEN.contains(GoogleScopes.GEMINI_RETRIEVER))
-        assertFalse(GoogleScopes.DRIVE_TOKEN.contains(GoogleScopes.CLOUD_PLATFORM))
+    @Test fun driveOnlyScopesDoNotRequestGeminiOrCloudScopes() {
+        assertTrue(GoogleScopes.DRIVE_TOKEN.contains(GoogleScopes.DRIVE_FILE))
+        assertTrue(GoogleScopes.FULL_TOKEN.contains(GoogleScopes.DRIVE_FILE))
+        assertFalse(GoogleScopes.DRIVE_TOKEN.contains("generative-language"))
+        assertFalse(GoogleScopes.DRIVE_TOKEN.contains("cloud-platform"))
+        assertFalse(GoogleScopes.FULL_TOKEN.contains("generative-language"))
+        assertFalse(GoogleScopes.FULL_TOKEN.contains("cloud-platform"))
         assertNotNull(GeminiScopeException().message)
-        assertTrue(GeminiScopeException().message!!.contains("Google Hesabını Yeniden Bağla"))
     }
 }

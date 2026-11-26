@@ -15,21 +15,21 @@ enum CEFRLevel: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .a1: return "A1 — Başlangıç"
-        case .a2: return "A2 — Temel"
-        case .b1: return "B1 — Orta"
-        case .b2: return "B2 — İleri Orta"
-        case .c1: return "C1 — İleri / Akademik"
+        case .a1: return L10n.text("A1 — Başlangıç", en: "A1 — Beginner", de: "A1 — Anfänger")
+        case .a2: return L10n.text("A2 — Temel", en: "A2 — Elementary", de: "A2 — Grundstufe")
+        case .b1: return L10n.text("B1 — Orta", en: "B1 — Intermediate", de: "B1 — Mittelstufe")
+        case .b2: return L10n.text("B2 — İleri Orta", en: "B2 — Upper Intermediate", de: "B2 — Gute Mittelstufe")
+        case .c1: return L10n.text("C1 — İleri / Akademik", en: "C1 — Advanced", de: "C1 — Fortgeschritten")
         }
     }
 
     var description: String {
         switch self {
-        case .a1: return "Günlük hayatta en sık kullanılan temel somut isimler (ev, yiyecek, aile, zaman)."
-        case .a2: return "Alışveriş, seyahat, ulaşım, sağlık ve günlük iletişimde kullanılan isimler."
-        case .b1: return "İş, eğitim, çevre, kültür ve deneyim aktarımında kullanılan orta düzey isimler."
-        case .b2: return "Tartışma, teknoloji, ekonomi, toplum ve soyut düşünce ifade eden isimler."
-        case .c1: return "Akademik, bilimsel, kurumsal ve ileri düzey edebi/soyut Almanca isimler."
+        case .a1: return L10n.text("Günlük hayatta en sık kullanılan temel somut isimler (ev, yiyecek, aile, zaman).", en: "Most common concrete everyday nouns (home, food, family, time).", de: "Häufigste konkrete Alltagsnomen (Haus, Essen, Familie, Zeit).")
+        case .a2: return L10n.text("Alışveriş, seyahat, ulaşım, sağlık ve günlük iletişimde kullanılan isimler.", en: "Nouns for shopping, travel, transport, health, and daily communication.", de: "Nomen für Einkauf, Reisen, Verkehr, Gesundheit und Alltag.")
+        case .b1: return L10n.text("İş, eğitim, çevre, kültür ve deneyim aktarımında kullanılan orta düzey isimler.", en: "Intermediate nouns for work, education, environment, and culture.", de: "Nomen der Mittelstufe für Arbeit, Bildung, Umwelt und Kultur.")
+        case .b2: return L10n.text("Tartışma, teknoloji, ekonomi, toplum ve soyut düşünce ifade eden isimler.", en: "Nouns for discussion, technology, economy, society, and abstract ideas.", de: "Nomen für Diskussion, Technologie, Wirtschaft und Gesellschaft.")
+        case .c1: return L10n.text("Akademik, bilimsel, kurumsal ve ileri düzey edebi/soyut Almanca isimler.", en: "Academic, scientific, institutional, and advanced abstract German nouns.", de: "Akademische, wissenschaftliche und anspruchsvolle abstrakte Nomen.")
         }
     }
 }
@@ -42,8 +42,8 @@ enum GeminiAuthMode: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .apiKey: return "Google AI Studio (API Anahtarı)"
-        case .googleOAuth: return "Google Hesabı (OAuth 2.0)"
+        case .apiKey: return L10n.text("Google AI Studio (API Anahtarı)", en: "Google AI Studio (API Key)", de: "Google AI Studio (API-Schlüssel)")
+        case .googleOAuth: return L10n.text("Google Hesabı (OAuth 2.0)", en: "Google Account (OAuth 2.0)", de: "Google-Konto (OAuth 2.0)")
         }
     }
 }
@@ -325,12 +325,12 @@ final class GeminiAuthManager: ObservableObject {
             throw NSError(
                 domain: "GeminiAuth",
                 code: 400,
-                userInfo: [NSLocalizedDescriptionKey: "Google OAuth 2.0 istemci bilgisi bulunamadı."]
+                userInfo: [NSLocalizedDescriptionKey: L10n.text("Google OAuth 2.0 istemci bilgisi bulunamadı.", en: "Google OAuth 2.0 client credentials not found.", de: "Google OAuth 2.0-Client-Daten nicht gefunden.")]
             )
         }
 
         isAuthenticating = true
-        authStatusMessage = "Tarayıcıda Google yetkilendirme sayfası açılıyor..."
+        authStatusMessage = L10n.text("Tarayıcıda Google yetkilendirme sayfası açılıyor...", en: "Opening Google authorization page in browser...", de: "Google-Autorisierungsseite wird im Browser geöffnet...")
         defer {
             isAuthenticating = false
             loopbackListener?.cancel()
@@ -349,7 +349,7 @@ final class GeminiAuthManager: ObservableObject {
             URLQueryItem(name: "client_id", value: clientId),
             URLQueryItem(name: "redirect_uri", value: redirectURI),
             URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "scope", value: "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/generative-language.retriever https://www.googleapis.com/auth/cloud-platform"),
+            URLQueryItem(name: "scope", value: "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/drive.file"),
             URLQueryItem(name: "access_type", value: "offline"),
             URLQueryItem(name: "prompt", value: "consent"),
             URLQueryItem(name: "code_challenge", value: codeChallenge),
@@ -361,7 +361,7 @@ final class GeminiAuthManager: ObservableObject {
         }
 
         let authCode = try await codeFuture()
-        authStatusMessage = "Yetkilendirme kodu alındı, erişim anahtarı (Access Token) alınıyor..."
+        authStatusMessage = L10n.text("Yetkilendirme kodu alındı, erişim anahtarı (Access Token) alınıyor...", en: "Authorization code received, fetching access token...", de: "Autorisierungscode erhalten, Zugriffstoken wird abgerufen...")
 
         try await exchangeCodeForToken(
             code: authCode,
@@ -377,7 +377,7 @@ final class GeminiAuthManager: ObservableObject {
         try? await fetchUserProfile()
         saveToKeychain()
         let emailSuffix = !userEmail.isEmpty ? " (\(userEmail))" : ""
-        authStatusMessage = "Google Hesabı\(emailSuffix), Drive Senkronizasyonu ve Gemini AI başarıyla bağlandı!"
+        authStatusMessage = L10n.text("Google Hesabı\(emailSuffix) ve Drive Senkronizasyonu başarıyla bağlandı!", en: "Google Account\(emailSuffix) and Drive Sync connected!", de: "Google-Konto\(emailSuffix) und Drive-Sync verbunden!")
     }
 
     private func startLoopbackServer() throws -> (UInt16, @Sendable () async throws -> String) {
@@ -410,19 +410,25 @@ final class GeminiAuthManager: ObservableObject {
 
                 let htmlBody: String
                 if extractedCode != nil {
+                    let htmlTitle = L10n.text("ArtikelMeister Bulut Senkronizasyonu", en: "ArtikelMeister Cloud Sync", de: "ArtikelMeister Cloud-Sync")
+                    let htmlHeading = L10n.text("✓ Google Hesabı ve Bulut Senkronizasyonu Bağlandı!", en: "✓ Google Account & Cloud Sync Connected!", de: "✓ Google-Konto & Cloud-Sync verbunden!")
+                    let htmlDesc = L10n.text("Bu tarayıcı sekmesini kapatıp <b>ArtikelMeister</b> uygulamasına dönebilirsiniz.", en: "You can close this browser tab and return to <b>ArtikelMeister</b>.", de: "Du kannst diesen Browser-Tab schließen und zu <b>ArtikelMeister</b> zurückkehren.")
                     htmlBody = """
-                    <html><head><meta charset="utf-8"><title>ArtikelMeister Evrensel Profil &amp; AI</title></head>
+                    <html><head><meta charset="utf-8"><title>\(htmlTitle)</title></head>
                     <body style="font-family: -apple-system, Roboto, sans-serif; text-align: center; padding: 60px; background: #121214; color: #fff;">
-                    <h2 style="color: #28a745;">✓ Google Hesabı, Bulut Senkronizasyonu ve Gemini AI Bağlandı!</h2>
-                    <p>Bu tarayıcı sekmesini kapatıp <b>ArtikelMeister</b> uygulamasına dönebilirsiniz.</p>
+                    <h2 style="color: #28a745;">\(htmlHeading)</h2>
+                    <p>\(htmlDesc)</p>
                     </body></html>
                     """
                 } else {
+                    let errTitle = L10n.text("ArtikelMeister Yetkilendirme Hatası", en: "ArtikelMeister Authorization Error", de: "ArtikelMeister Autorisierungsfehler")
+                    let errHeading = L10n.text("Yetkilendirme Tamamlanamadı", en: "Authorization Failed", de: "Autorisierung fehlgeschlagen")
+                    let errFallback = L10n.text("Kod alınamadı.", en: "Could not obtain code.", de: "Code konnte nicht abgerufen werden.")
                     htmlBody = """
-                    <html><head><meta charset="utf-8"><title>ArtikelMeister Yetkilendirme Hatası</title></head>
+                    <html><head><meta charset="utf-8"><title>\(errTitle)</title></head>
                     <body style="font-family: -apple-system, Roboto, sans-serif; text-align: center; padding: 60px; background: #121214; color: #fff;">
-                    <h2 style="color: #dc3545;">Yetkilendirme Tamamlanamadı</h2>
-                    <p>\(extractedError ?? "Kod alınamadı.")</p>
+                    <h2 style="color: #dc3545;">\(errHeading)</h2>
+                    <p>\(extractedError ?? errFallback)</p>
                     </body></html>
                     """
                 }
@@ -436,10 +442,11 @@ final class GeminiAuthManager: ObservableObject {
                     continuationBox?.resume(returning: code)
                     continuationBox = nil
                 } else {
+                    let unknownErr = L10n.text("Bilinmeyen hata", en: "Unknown error", de: "Unbekannter Fehler")
                     continuationBox?.resume(throwing: NSError(
                         domain: "GeminiAuth",
                         code: 401,
-                        userInfo: [NSLocalizedDescriptionKey: "Google OAuth hatası: \(extractedError ?? "Bilinmeyen hata")"]
+                        userInfo: [NSLocalizedDescriptionKey: L10n.text("Google OAuth hatası: \(extractedError ?? unknownErr)", en: "Google OAuth error: \(extractedError ?? unknownErr)", de: "Google OAuth-Fehler: \(extractedError ?? unknownErr)")]
                     ))
                     continuationBox = nil
                 }
@@ -459,7 +466,7 @@ final class GeminiAuthManager: ObservableObject {
         _ = portSemaphore.wait(timeout: .now() + 5)
 
         guard let assignedPort = listener.port?.rawValue else {
-            throw NSError(domain: "GeminiAuth", code: 500, userInfo: [NSLocalizedDescriptionKey: "Yerel yetkilendirme portu açılamadı."])
+            throw NSError(domain: "GeminiAuth", code: 500, userInfo: [NSLocalizedDescriptionKey: L10n.text("Yerel yetkilendirme portu açılamadı.", en: "Could not open local authorization port.", de: "Lokaler Autorisierungsport konnte nicht geöffnet werden.")])
         }
 
         let waitForCode: @Sendable () async throws -> String = {
@@ -503,8 +510,8 @@ final class GeminiAuthManager: ObservableObject {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResp = response as? HTTPURLResponse, (200..<300).contains(httpResp.statusCode) else {
-            let errText = String(data: data, encoding: .utf8) ?? "Token değişimi başarısız."
-            throw NSError(domain: "GeminiAuth", code: 401, userInfo: [NSLocalizedDescriptionKey: "OAuth Token Hatası: \(errText)"])
+            let errText = String(data: data, encoding: .utf8) ?? L10n.text("Token değişimi başarısız.", en: "Token exchange failed.", de: "Token-Austausch fehlgeschlagen.")
+            throw NSError(domain: "GeminiAuth", code: 401, userInfo: [NSLocalizedDescriptionKey: L10n.text("OAuth Token Hatası: \(errText)", en: "OAuth Token Error: \(errText)", de: "OAuth-Token-Fehler: \(errText)")])
         }
 
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -526,7 +533,7 @@ final class GeminiAuthManager: ObservableObject {
         }
         let token = oauthAccessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
-            throw NSError(domain: "GeminiAuth", code: 401, userInfo: [NSLocalizedDescriptionKey: "Geçerli bir OAuth erişim anahtarı bulunamadı. Lütfen yeniden giriş yapın."])
+            throw NSError(domain: "GeminiAuth", code: 401, userInfo: [NSLocalizedDescriptionKey: L10n.text("Geçerli bir OAuth erişim anahtarı bulunamadı. Lütfen yeniden giriş yapın.", en: "No valid OAuth access token found. Please sign in again.", de: "Kein gültiges OAuth-Zugriffstoken gefunden. Bitte melde dich erneut an.")])
         }
         return token
     }
@@ -556,7 +563,7 @@ final class GeminiAuthManager: ObservableObject {
         guard let httpResp = response as? HTTPURLResponse, (200..<300).contains(httpResp.statusCode),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let access = json["access_token"] as? String else {
-            throw NSError(domain: "GeminiAuth", code: 401, userInfo: [NSLocalizedDescriptionKey: "OAuth oturumu yenilenemedi. Lütfen tekrar giriş yapın."])
+            throw NSError(domain: "GeminiAuth", code: 401, userInfo: [NSLocalizedDescriptionKey: L10n.text("OAuth oturumu yenilenemedi. Lütfen tekrar giriş yapın.", en: "Could not refresh OAuth session. Please sign in again.", de: "OAuth-Sitzung konnte nicht aktualisiert werden. Bitte melde dich erneut an.")])
         }
         self.oauthAccessToken = access
         if let expiresIn = json["expires_in"] as? Double {
@@ -573,7 +580,7 @@ final class GeminiAuthManager: ObservableObject {
         case .apiKey:
             let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanKey.isEmpty else {
-                throw NSError(domain: "GeminiAuth", code: 400, userInfo: [NSLocalizedDescriptionKey: "Lütfen API anahtarınızı girin."])
+                throw NSError(domain: "GeminiAuth", code: 400, userInfo: [NSLocalizedDescriptionKey: L10n.text("Lütfen API anahtarınızı girin.", en: "Please enter your API key.", de: "Bitte gib deinen API-Schlüssel ein.")])
             }
             var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models")!
             comps.queryItems = [URLQueryItem(name: "key", value: cleanKey)]
@@ -591,20 +598,20 @@ final class GeminiAuthManager: ObservableObject {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResp = response as? HTTPURLResponse else {
-            throw NSError(domain: "GeminiAuth", code: 500, userInfo: [NSLocalizedDescriptionKey: "Sunucudan yanıt alınamadı."])
+            throw NSError(domain: "GeminiAuth", code: 500, userInfo: [NSLocalizedDescriptionKey: L10n.text("Sunucudan yanıt alınamadı.", en: "No response from server.", de: "Keine Antwort vom Server.")])
         }
         guard (200..<300).contains(httpResp.statusCode) else {
             let bodyText = String(data: data, encoding: .utf8) ?? ""
             throw NSError(
                 domain: "GeminiAuth",
                 code: httpResp.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: "Yetkilendirme doğrulanamadı (HTTP \(httpResp.statusCode)). Bilgilerinizi kontrol edin.\n\(bodyText)"]
+                userInfo: [NSLocalizedDescriptionKey: L10n.text("Yetkilendirme doğrulanamadı (HTTP \(httpResp.statusCode)). Bilgilerinizi kontrol edin.\n\(bodyText)", en: "Could not verify authorization (HTTP \(httpResp.statusCode)). Check your credentials.\n\(bodyText)", de: "Autorisierung konnte nicht überprüft werden (HTTP \(httpResp.statusCode)). Prüfe deine Zugangsdaten.\n\(bodyText)")]
             )
         }
 
         updateDiscoveredModels(from: data)
         saveToKeychain()
-        authStatusMessage = "Yetkilendirme doğrulandı! Aktif model: \(selectedModel)"
+        authStatusMessage = L10n.text("Yetkilendirme doğrulandı! Aktif model: \(selectedModel)", en: "Authorization verified! Active model: \(selectedModel)", de: "Autorisierung bestätigt! Aktives Modell: \(selectedModel)")
     }
 
     private func updateDiscoveredModels(from data: Data) {
@@ -716,9 +723,9 @@ enum GeminiVocabularyGenerator {
 
             let progressPct = Int((Double(collected.count) / Double(clampedCount)) * 100)
             if collected.isEmpty {
-                onProgress("Gemini (\(authManager.selectedModel)) ile \(level.rawValue) kelimeleri üretiliyor (%0)...")
+                onProgress(L10n.text("Gemini (\(authManager.selectedModel)) ile \(level.rawValue) kelimeleri üretiliyor (%0)...", en: "Generating \(level.rawValue) words with Gemini (\(authManager.selectedModel)) (0%)...", de: "\(level.rawValue)-Wörter werden mit Gemini (\(authManager.selectedModel)) generiert (0 %)…"))
             } else {
-                onProgress("\(collected.count)/\(clampedCount) kelime üretildi (%\(progressPct))...")
+                onProgress(L10n.text("\(collected.count)/\(clampedCount) kelime üretildi (%\(progressPct))...", en: "Generated \(collected.count)/\(clampedCount) words (\(progressPct)%)...", de: "\(collected.count)/\(clampedCount) Wörter generiert (\(progressPct) %)…"))
             }
 
             do {
@@ -787,11 +794,11 @@ enum GeminiVocabularyGenerator {
             throw NSError(
                 domain: "GeminiGenerator",
                 code: 422,
-                userInfo: [NSLocalizedDescriptionKey: "Kelime üretilemedi. Lütfen internet bağlantınızı veya API yetkilendirmenizi kontrol edin."]
+                userInfo: [NSLocalizedDescriptionKey: L10n.text("Kelime üretilemedi. Lütfen internet bağlantınızı veya API yetkilendirmenizi kontrol edin.", en: "Could not generate words. Please check your internet connection or API authorization.", de: "Wörter konnten nicht generiert werden. Bitte prüfe deine Internetverbindung oder API-Autorisierung.")]
             )
         }
 
-        onProgress("\(collected.count)/\(clampedCount) kelime başarıyla tamamlandı!")
+        onProgress(L10n.text("\(collected.count)/\(clampedCount) kelime başarıyla tamamlandı!", en: "\(collected.count)/\(clampedCount) words completed!", de: "\(collected.count)/\(clampedCount) Wörter fertiggestellt!"))
         return collected
     }
 
@@ -828,7 +835,7 @@ enum GeminiVocabularyGenerator {
         case .apiKey:
             let cleanKey = authManager.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanKey.isEmpty else {
-                throw NSError(domain: "GeminiGenerator", code: 401, userInfo: [NSLocalizedDescriptionKey: "Gemini API Anahtarı girilmedi. Lütfen önce yetkilendirme yapın."])
+                throw NSError(domain: "GeminiGenerator", code: 401, userInfo: [NSLocalizedDescriptionKey: L10n.text("Gemini API Anahtarı girilmedi. Lütfen önce yetkilendirme yapın.", en: "Gemini API key not entered. Please authorize first.", de: "Gemini-API-Schlüssel fehlt. Bitte zuerst autorisieren.")])
             }
             var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/\(modelName):generateContent")!
             comps.queryItems = [URLQueryItem(name: "key", value: cleanKey)]
@@ -945,12 +952,12 @@ enum GeminiVocabularyGenerator {
             throw NSError(
                 domain: "GeminiGenerator",
                 code: NSURLErrorTimedOut,
-                userInfo: [NSLocalizedDescriptionKey: "İstek zaman aşımına uğradı. Ağ bağlantınızı kontrol edip tekrar deneyin."]
+                userInfo: [NSLocalizedDescriptionKey: L10n.text("İstek zaman aşımına uğradı. Ağ bağlantınızı kontrol edip tekrar deneyin.", en: "Request timed out. Check your network connection and try again.", de: "Zeitüberschreitung der Anfrage. Prüfe deine Netzwerkverbindung und versuche es erneut.")]
             )
         }
 
         guard let httpResp = response as? HTTPURLResponse else {
-            throw NSError(domain: "GeminiGenerator", code: 500, userInfo: [NSLocalizedDescriptionKey: "Gemini API yanıt vermedi."])
+            throw NSError(domain: "GeminiGenerator", code: 500, userInfo: [NSLocalizedDescriptionKey: L10n.text("Gemini API yanıt vermedi.", en: "Gemini API did not respond.", de: "Gemini API hat nicht geantwortet.")])
         }
 
         // If thinkingConfig is not supported by this model (HTTP 400), retry without thinkingConfig
@@ -985,7 +992,7 @@ enum GeminiVocabularyGenerator {
         }
 
         guard (200..<300).contains(httpResp.statusCode) else {
-            var errorMessage = "Gemini API Hatası (HTTP \(httpResp.statusCode) - Model: \(modelName))."
+            var errorMessage = L10n.text("Gemini API Hatası (HTTP \(httpResp.statusCode) - Model: \(modelName)).", en: "Gemini API Error (HTTP \(httpResp.statusCode) - Model: \(modelName)).", de: "Gemini API-Fehler (HTTP \(httpResp.statusCode) - Modell: \(modelName)).")
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let errObj = json["error"] as? [String: Any],
                let msg = errObj["message"] as? String {
@@ -1005,7 +1012,7 @@ enum GeminiVocabularyGenerator {
               let parts = content["parts"] as? [[String: Any]],
               let text = parts.first?["text"] as? String,
               let jsonData = text.data(using: .utf8) else {
-            throw NSError(domain: "GeminiGenerator", code: 500, userInfo: [NSLocalizedDescriptionKey: "Gemini yanıtı beklenmeyen bir formatta döndü."])
+            throw NSError(domain: "GeminiGenerator", code: 500, userInfo: [NSLocalizedDescriptionKey: L10n.text("Gemini yanıtı beklenmeyen bir formatta döndü.", en: "Gemini returned an unexpected response format.", de: "Gemini hat ein unerwartetes Antwortformat zurückgegeben.")])
         }
 
         let decoded = try JSONDecoder().decode([GeneratedWordItem].self, from: jsonData)
@@ -1047,21 +1054,33 @@ enum GoogleDriveSyncService {
         if rawMsg.localizedCaseInsensitiveContains("Google Drive API has not been used in project") ||
            rawMsg.localizedCaseInsensitiveContains("is disabled") ||
            reason == "accessNotConfigured" || reason == "SERVICE_DISABLED" {
-            return "Google Cloud projenizde 'Google Drive API' etkinleştirilmemiş.\nLütfen Google Cloud Console'dan Google Drive API'yi etkinleştirin (Enable):\nhttps://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=414393134856"
+            return L10n.text(
+                "Google Cloud projenizde 'Google Drive API' etkinleştirilmemiş.\nLütfen Google Cloud Console'dan Google Drive API'yi etkinleştirin (Enable):\nhttps://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=414393134856",
+                en: "'Google Drive API' is not enabled in your Google Cloud project.\nPlease enable Google Drive API in Google Cloud Console:\nhttps://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=414393134856",
+                de: "Die ‚Google Drive API‘ ist in deinem Google Cloud-Projekt nicht aktiviert.\nBitte aktiviere sie in der Google Cloud Console:\nhttps://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=414393134856"
+            )
         }
 
         if httpCode == 401 {
-            return "Google oturumunun süresi dolmuş. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın."
+            return L10n.text(
+                "Google oturumunun süresi dolmuş. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın.",
+                en: "Google session expired. Please sign out and sign in again.",
+                de: "Google-Sitzung abgelaufen. Bitte melde dich ab und erneut an."
+            )
         }
 
         if httpCode == 403 {
             if rawMsg.localizedCaseInsensitiveContains("insufficient") {
-                return "Google Drive izinleri eksik. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın ve Drive izin kutucuğunu işaretleyin."
+                return L10n.text(
+                    "Google Drive izinleri eksik. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın ve Drive izin kutucuğunu işaretleyin.",
+                    en: "Missing Google Drive permissions. Please sign out, sign in again, and check the Drive permission box.",
+                    de: "Fehlende Google Drive-Berechtigungen. Bitte melde dich ab, erneut an und aktiviere die Drive-Berechtigung."
+                )
             }
-            return "Google Drive erişim reddedildi (HTTP 403):\n\(rawMsg)"
+            return L10n.text("Google Drive erişim reddedildi (HTTP 403):\n\(rawMsg)", en: "Google Drive access denied (HTTP 403):\n\(rawMsg)", de: "Google Drive-Zugriff verweigert (HTTP 403):\n\(rawMsg)")
         }
 
-        return "Google Drive hatası (HTTP \(httpCode)):\n\(rawMsg)"
+        return L10n.text("Google Drive hatası (HTTP \(httpCode)):\n\(rawMsg)", en: "Google Drive error (HTTP \(httpCode)):\n\(rawMsg)", de: "Google Drive-Fehler (HTTP \(httpCode)):\n\(rawMsg)")
     }
 
     private static func sendAuthorizedRequest(
@@ -1075,7 +1094,7 @@ enum GoogleDriveSyncService {
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Sunucudan geçerli bir yanıt alınamadı."])
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: L10n.text("Sunucudan geçerli bir yanıt alınamadı.", en: "No valid response from server.", de: "Keine gültige Antwort vom Server.")])
         }
 
         if httpResponse.statusCode == 401 && retryOn401 && !authManager.oauthRefreshToken.isEmpty {
@@ -1111,7 +1130,7 @@ enum GoogleDriveSyncService {
         let query = "mimeType = 'application/vnd.google-apps.folder' and name = '\(SYNC_FOLDER_NAME)' and trashed = false"
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let listUrl = URL(string: "https://www.googleapis.com/drive/v3/files?q=\(encodedQuery)&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc") else {
-            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Geçersiz arama sorgusu."])
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: L10n.text("Geçersiz arama sorgusu.", en: "Invalid search query.", de: "Ungültige Suchanfrage.")])
         }
 
         var listReq = URLRequest(url: listUrl)
@@ -1143,7 +1162,7 @@ enum GoogleDriveSyncService {
 
         // 3. Create 'ArtikelMeister Cloud Sync' folder if it doesn't exist yet
         guard let createUrl = URL(string: "https://www.googleapis.com/drive/v3/files?fields=id") else {
-            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Klasör oluşturma URL'i geçersiz."])
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: L10n.text("Klasör oluşturma URL'i geçersiz.", en: "Invalid folder creation URL.", de: "Ungültige URL zur Ordnererstellung.")])
         }
 
         var createReq = URLRequest(url: createUrl)
@@ -1169,7 +1188,7 @@ enum GoogleDriveSyncService {
 
         guard let json = try? JSONSerialization.jsonObject(with: createData) as? [String: Any],
               let newFolderId = json["id"] as? String, !newFolderId.isEmpty else {
-            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Google Drive klasör kimliği alınamadı."])
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: L10n.text("Google Drive klasör kimliği alınamadı.", en: "Could not obtain Google Drive folder ID.", de: "Google Drive-Ordner-ID konnte nicht abgerufen werden.")])
         }
 
         await MainActor.run {
@@ -1186,7 +1205,7 @@ enum GoogleDriveSyncService {
         let query = "name = '\(SYNC_FILE_NAME)' and '\(folderId)' in parents and trashed = false"
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let listUrl = URL(string: "https://www.googleapis.com/drive/v3/files?q=\(encodedQuery)&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc") else {
-            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Geçersiz dosya sorgusu."])
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: L10n.text("Geçersiz dosya sorgusu.", en: "Invalid file query.", de: "Ungültige Dateianfrage.")])
         }
 
         var listReq = URLRequest(url: listUrl)
@@ -1248,7 +1267,7 @@ enum GoogleDriveSyncService {
             throw NSError(
                 domain: "GoogleDrive",
                 code: -2,
-                userInfo: [NSLocalizedDescriptionKey: "Buluttaki yedek dosyası okunamadı; üzerine yazılmadı. (\(error.localizedDescription))"]
+                userInfo: [NSLocalizedDescriptionKey: L10n.text("Buluttaki yedek dosyası okunamadı; üzerine yazılmadı. (\(error.localizedDescription))", en: "Could not read cloud backup file; not overwritten. (\(error.localizedDescription))", de: "Cloud-Backup-Datei konnte nicht gelesen werden; nicht überschrieben. (\(error.localizedDescription))")]
             )
         }
     }
@@ -1264,7 +1283,7 @@ enum GoogleDriveSyncService {
         // Step 1: If no file exists yet in the folder, create the empty file metadata first
         if targetFileId.isEmpty {
             guard let createUrl = URL(string: "https://www.googleapis.com/drive/v3/files?fields=id") else {
-                throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Dosya oluşturma URL'i geçersiz."])
+                throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: L10n.text("Dosya oluşturma URL'i geçersiz.", en: "Invalid file creation URL.", de: "Ungültige URL zur Dateierstellung.")])
             }
 
             var createReq = URLRequest(url: createUrl)
@@ -1296,12 +1315,12 @@ enum GoogleDriveSyncService {
         }
 
         guard !targetFileId.isEmpty else {
-            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Google Drive dosya kimliği oluşturulamadı."])
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: L10n.text("Google Drive dosya kimliği oluşturulamadı.", en: "Could not create Google Drive file ID.", de: "Google Drive-Datei-ID konnte nicht erstellt werden.")])
         }
 
         // Step 2: Upload the JSON content via media upload PATCH
         guard let uploadUrl = URL(string: "https://www.googleapis.com/upload/drive/v3/files/\(targetFileId)?uploadType=media") else {
-            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: "Yükleme URL'i geçersiz."])
+            throw NSError(domain: "GoogleDrive", code: -1, userInfo: [NSLocalizedDescriptionKey: L10n.text("Yükleme URL'i geçersiz.", en: "Invalid upload URL.", de: "Ungültige Upload-URL.")])
         }
 
         var uploadReq = URLRequest(url: uploadUrl)

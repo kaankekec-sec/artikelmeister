@@ -1,6 +1,8 @@
 package com.artikelmeister.android.ui
 
 import android.animation.ValueAnimator
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.material3.MaterialTheme
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -44,8 +46,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -58,6 +58,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -94,9 +97,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -407,7 +407,6 @@ fun SplashIntroView(onFinished: () -> Unit) {
         latestOnFinished()
     }
 
-    val skipLabel = stringResource(R.string.splash_skip_a11y)
     val title = "ARTIKELMEISTER"
     val titleStyle = MaterialTheme.typography.displaySmall.copy(
         fontWeight = FontWeight.Black,
@@ -440,7 +439,6 @@ fun SplashIntroView(onFinished: () -> Unit) {
                     )
                 )
             )
-            .clickable(onClickLabel = skipLabel, role = Role.Button) { latestOnFinished() }
             .safeDrawingPadding()
     ) {
         val density = LocalDensity.current
@@ -526,14 +524,6 @@ fun SplashIntroView(onFinished: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.weight(1f))
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = stringResource(R.string.splash_tap_to_skip),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.labelSmall,
-                color = SplashPalette.label
-            )
         }
     }
 }
@@ -558,14 +548,36 @@ fun RootContainerView(
     store: DeckStore,
     authManager: GeminiAuthManager
 ) {
+    val context = LocalContext.current
+    val currentVersion = remember(context) { UiPreferences.resolveAppVersion(context) }
+
+    LaunchedEffect(currentVersion) {
+        UiPreferences.checkForRequiredUpdate(currentVersion)
+    }
+
     // Full animated intro only on the very first launch. Later cold starts are covered by the
     // Android 12+ system splash (values-v31/themes.xml) / brand windowBackground on older APIs.
     var showSplash by rememberSaveable { mutableStateOf(!UiPreferences.hasSeenIntro) }
 
     val shouldShowOnboarding = !authManager.hasCompletedOnboarding && !authManager.isGoogleAccountConnected
+    val requiredTag = UiPreferences.requiredUpdateTag
+    val isUpdateBlocked = requiredTag != null &&
+        com.artikelmeister.android.VersionChecker.isUpdateRequired(currentVersion, requiredTag)
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
+            isUpdateBlocked -> {
+                ForceUpdateGateView(
+                    currentVersion = currentVersion,
+                    latestTag = requiredTag!!,
+                    releaseUrl = UiPreferences.requiredUpdateUrl
+                        ?: com.artikelmeister.android.VersionChecker.RELEASES_FALLBACK_URL,
+                    isChecking = UiPreferences.isCheckingForUpdate,
+                    onRetryCheck = {
+                        UiPreferences.checkForRequiredUpdate(currentVersion, force = true)
+                    }
+                )
+            }
             showSplash -> {
                 SplashIntroView(onFinished = {
                     UiPreferences.markIntroSeen()
@@ -586,6 +598,140 @@ fun RootContainerView(
                     store = store,
                     authManager = authManager
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ForceUpdateGateView(
+    currentVersion: String,
+    latestTag: String,
+    releaseUrl: String,
+    isChecking: Boolean,
+    onRetryCheck: suspend () -> Unit
+) {
+    val colors = LocalAppColors.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Non-dismissible: consume system Back so the user cannot bypass the required update.
+    BackHandler(enabled = true) {}
+
+    Surface(
+        color = colors.windowBackground,
+        modifier = Modifier
+            .fillMaxSize()
+            .systemBarsPadding()
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(28.dp)
+        ) {
+            BloodyBrainLogoView(size = 96.dp, animated = false)
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            Text(
+                text = stringResource(R.string.update_required_title),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = colors.primaryText,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { heading() }
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = stringResource(R.string.update_required_message, latestTag),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.secondaryText,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 420.dp)
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(colors.blueBadgeBackground, CircleShape)
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.update_current_version, currentVersion),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.secondaryText
+                )
+                Text(
+                    text = "→",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.accentBlue
+                )
+                Text(
+                    text = latestTag,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.accentBlue
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = {
+                    runCatching {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colors.accentBlue,
+                    contentColor = colors.onBlue
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .widthIn(min = 220.dp, max = 320.dp)
+                    .fillMaxWidth()
+                    .heightIn(min = 50.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.update_now_button),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            OutlinedButton(
+                onClick = { scope.launch { onRetryCheck() } },
+                enabled = !isChecking,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .widthIn(min = 220.dp, max = 320.dp)
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+            ) {
+                if (isChecking) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                } else {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text(stringResource(R.string.update_retry_button))
             }
         }
     }
@@ -706,52 +852,93 @@ fun MainContentView(
                         )
                     },
                     bottomBar = {
-                        Column(modifier = Modifier.background(colors.controlBackground)) {
-                            HorizontalDivider(color = colors.cardBorderSubtle)
-                            NavigationBar(
-                                containerColor = colors.controlBackground,
-                                tonalElevation = 0.dp
-                            ) {
-                                AppTab.entries.forEach { tab ->
-                                    val isSelected = selectedTab == tab
-                                    NavigationBarItem(
-                                        selected = isSelected,
-                                        onClick = { selectedTab = tab },
-                                        icon = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(
-                                                    imageVector = tab.icon,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(22.dp)
+                        Surface(
+                            color = colors.controlBackground,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column {
+                                HorizontalDivider(color = colors.cardBorderSubtle)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .navigationBarsPadding()
+                                        .selectableGroup()
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    AppTab.entries.forEach { tab ->
+                                        val isSelected = selectedTab == tab
+                                        val pillColor by animateColorAsState(
+                                            targetValue = if (isSelected) colors.blueBadgeBackground else Color.Transparent,
+                                            animationSpec = tween(180),
+                                            label = "bottomNavPill"
+                                        )
+                                        val pillBorder by animateColorAsState(
+                                            targetValue = if (isSelected) colors.accentBlue.copy(alpha = 0.28f) else Color.Transparent,
+                                            animationSpec = tween(180),
+                                            label = "bottomNavBorder"
+                                        )
+                                        val contentColor by animateColorAsState(
+                                            targetValue = if (isSelected) colors.accentBlue else colors.secondaryText,
+                                            animationSpec = tween(180),
+                                            label = "bottomNavContent"
+                                        )
+
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 56.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .selectable(
+                                                    selected = isSelected,
+                                                    role = Role.Tab,
+                                                    onClick = { selectedTab = tab }
                                                 )
-                                                if (tab == AppTab.STUDY && store.studyQueue.isNotEmpty()) {
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text(
-                                                        text = "${store.studyQueue.size}",
-                                                        fontSize = MaterialTheme.typography.labelSmall.fontSize,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = if (isSelected) colors.accentBlue else colors.secondaryText
+                                                .padding(vertical = 4.dp)
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier
+                                                    .height(30.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(pillColor)
+                                                    .border(1.dp, pillBorder, RoundedCornerShape(10.dp))
+                                                    .padding(horizontal = 12.dp)
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = tab.icon,
+                                                        contentDescription = null,
+                                                        tint = contentColor,
+                                                        modifier = Modifier.size(20.dp)
                                                     )
+                                                    if (tab == AppTab.STUDY && store.studyQueue.isNotEmpty()) {
+                                                        Text(
+                                                            text = "${store.studyQueue.size}",
+                                                            style = MaterialTheme.typography.labelSmall.tabular(),
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = contentColor,
+                                                            maxLines = 1
+                                                        )
+                                                    }
                                                 }
                                             }
-                                        },
-                                        label = {
+                                            Spacer(modifier = Modifier.height(3.dp))
                                             Text(
                                                 text = stringResource(tab.labelRes),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = contentColor,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
-                                        },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = colors.accentBlue,
-                                            selectedTextColor = colors.accentBlue,
-                                            indicatorColor = colors.accentBlue.copy(alpha = 0.15f),
-                                            unselectedIconColor = colors.secondaryText,
-                                            unselectedTextColor = colors.secondaryText
-                                        )
-                                    )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -868,7 +1055,7 @@ fun SidebarContent(
                     maxLines = 1
                 )
                 Text(
-                    text = "Nöro-Hafıza",
+                    text = stringResource(R.string.splash_brand_subtitle),
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.secondaryText,
                     maxLines = 1
@@ -889,7 +1076,7 @@ fun SidebarContent(
             // Section 1: Main Navigation Tabs
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "MENÜ",
+                    text = stringResource(R.string.sidebar_menu),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = colors.secondaryText,
@@ -966,7 +1153,7 @@ fun SidebarContent(
                         .padding(horizontal = 10.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = "DESTELER",
+                        text = stringResource(R.string.sidebar_decks),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = colors.secondaryText
@@ -974,7 +1161,7 @@ fun SidebarContent(
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
                         text = "${store.allDeckNames.size}",
-                        fontSize = MaterialTheme.typography.labelSmall.fontSize,
+                        style = MaterialTheme.typography.labelSmall.tabular(),
                         fontWeight = FontWeight.SemiBold,
                         color = colors.secondaryText
                     )
@@ -986,23 +1173,24 @@ fun SidebarContent(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(7.dp))
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .background(
-                            if (allSelected) colors.accentBlue.copy(alpha = 0.14f)
+                            if (allSelected) colors.blueBadgeBackground
                             else Color.Transparent
                         )
                         .selectable(selected = allSelected, onClick = { store.selectedStudyDeck = null })
-                        .padding(horizontal = 10.dp, vertical = 7.dp)
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Inventory2,
                         contentDescription = null,
                         tint = if (allSelected) colors.accentBlue else colors.secondaryText,
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Tüm Desteler",
+                        text = stringResource(R.string.drawer_all_decks),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = if (allSelected) FontWeight.Bold else FontWeight.Medium,
                         color = if (allSelected) colors.accentBlue else colors.primaryText,
@@ -1011,8 +1199,7 @@ fun SidebarContent(
                     )
                     Text(
                         text = "${store.cards.size}",
-                        fontSize = MaterialTheme.typography.labelSmall.fontSize,
-                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.labelSmall.tabular(),
                         color = colors.secondaryText
                     )
                 }
@@ -1021,30 +1208,32 @@ fun SidebarContent(
                 store.allDeckNames.forEach { deck ->
                     val isDeckSelected = store.selectedStudyDeck == deck
                     var showContextMenu by remember { mutableStateOf(false) }
+                    val deckOptionsLabel = stringResource(R.string.drawer_deck_options_a11y)
 
                     Box {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(7.dp))
+                                .heightIn(min = 48.dp)
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(
-                                    if (isDeckSelected) colors.accentBlue.copy(alpha = 0.14f)
+                                    if (isDeckSelected) colors.blueBadgeBackground
                                     else Color.Transparent
                                 )
                                 .semantics { selected = isDeckSelected }
                                 .combinedClickable(
                                     onClick = { store.selectedStudyDeck = deck },
-                                    onLongClickLabel = "Deste seçenekleri",
+                                    onLongClickLabel = deckOptionsLabel,
                                     onLongClick = { showContextMenu = true }
                                 )
-                                .padding(horizontal = 10.dp, vertical = 7.dp)
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
                         ) {
                             Icon(
                                 imageVector = if (isDeckSelected) Icons.Filled.Folder else Icons.Outlined.Folder,
                                 contentDescription = null,
                                 tint = if (isDeckSelected) colors.accentBlue else colors.secondaryText,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
@@ -1058,8 +1247,7 @@ fun SidebarContent(
                             )
                             Text(
                                 text = "${store.cardCount(deck)}",
-                                fontSize = MaterialTheme.typography.labelSmall.fontSize,
-                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.labelSmall.tabular(),
                                 color = colors.secondaryText
                             )
                         }
@@ -1069,7 +1257,7 @@ fun SidebarContent(
                             onDismissRequest = { showContextMenu = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Deste Adını Değiştir...") },
+                                text = { Text(stringResource(R.string.drawer_rename_deck)) },
                                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                                 onClick = {
                                     showContextMenu = false
@@ -1080,7 +1268,7 @@ fun SidebarContent(
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            "Desteyi Sil (Kelimeleri 'Genel'e Taşı)",
+                                            stringResource(R.string.drawer_delete_deck),
                                             color = colors.vividRed
                                         )
                                     },
@@ -1107,9 +1295,10 @@ fun SidebarContent(
                     modifier = Modifier
                         .padding(top = 4.dp)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(colors.accentBlue.copy(alpha = 0.12f))
-                        .border(1.dp, colors.accentBlue.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.blueBadgeBackground)
+                        .border(1.dp, colors.accentBlue.copy(alpha = 0.28f), RoundedCornerShape(10.dp))
                         .clickable { onShowNewDeck() }
                         .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
@@ -1121,7 +1310,7 @@ fun SidebarContent(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Yeni Deste Ekle",
+                        text = stringResource(R.string.sidebar_add_deck),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.accentBlue,
@@ -1159,35 +1348,26 @@ fun SidebarContent(
         HorizontalDivider(color = colors.cardBorderSubtle)
 
         // Bottom Legend
-        Column(
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+                .padding(12.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Artikel.entries.forEach { art ->
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .background(art.themeColor(), CircleShape)
-                    )
-                    Text(
-                        text = art.rawValue,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.secondaryText
-                    )
-                }
+            Artikel.entries.forEach { art ->
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .background(art.themeColor(), CircleShape)
+                )
+                Text(
+                    text = art.rawValue,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.secondaryText
+                )
             }
-            Text(
-                text = if (authManager.isGoogleAccountConnected) "Google Drive & Yerel Depolama Aktif" else "Yerel Depolama Aktif",
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.secondaryText
-            )
         }
     }
 }
@@ -1257,9 +1437,11 @@ private fun UniversalProfileSidebarCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = if (isConnected) {
-                        authManager.userEmail.ifBlank { authManager.userName.ifBlank { "Google Hesabı Bağlı" } }
+                        authManager.userEmail.ifBlank {
+                            authManager.userName.ifBlank { stringResource(R.string.drawer_google_connected) }
+                        }
                     } else {
-                        "Google ile Giriş Yap"
+                        stringResource(R.string.drawer_google_signin)
                     },
                     fontSize = MaterialTheme.typography.labelSmall.fontSize,
                     fontWeight = FontWeight.Bold,
@@ -1269,9 +1451,9 @@ private fun UniversalProfileSidebarCard(
                 )
                 Text(
                     text = when {
-                        store.isSyncingCloud -> "Drive ile eşitleniyor..."
-                        isConnected -> "Drive Eşitleme & AI Aktif"
-                        else -> "Bulut Eşitleme & AI için dokun"
+                        store.isSyncingCloud -> stringResource(R.string.drawer_syncing)
+                        isConnected -> stringResource(R.string.drawer_sync_active)
+                        else -> stringResource(R.string.drawer_sync_tap)
                     },
                     fontSize = MaterialTheme.typography.labelSmall.fontSize,
                     color = if (isConnected) colors.vividGreen else colors.secondaryText,
@@ -1283,7 +1465,7 @@ private fun UniversalProfileSidebarCard(
             if (isConnected && !store.isSyncingCloud) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
-                    contentDescription = "Şimdi Eşitle",
+                    contentDescription = stringResource(R.string.drawer_sync_now_a11y),
                     tint = colors.secondaryText,
                     modifier = Modifier.size(16.dp)
                 )
@@ -1341,7 +1523,7 @@ fun OnboardingSetupScreen(
             )
 
             Text(
-                text = "Almanca Artikel & Hafıza Çalışma Sistemi",
+                text = stringResource(R.string.onboarding_subtitle),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.secondaryText,
                 textAlign = TextAlign.Center
@@ -1360,17 +1542,10 @@ fun OnboardingSetupScreen(
                     modifier = Modifier.padding(18.dp)
                 ) {
                     Text(
-                        text = "Kurulum ve Bulut Senkronizasyonu",
+                        text = stringResource(R.string.onboarding_card_title),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                         color = colors.primaryText
-                    )
-
-                    Text(
-                        text = "Google hesabınızla bağlanarak kelimelerinizi ve çalışma serinizi tüm cihazlarınızla eşitleyebilir veya uygulamayı doğrudan çevrimdışı modda kullanabilirsiniz.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondaryText,
-                        lineHeight = 17.sp
                     )
 
                     HorizontalDivider(color = colors.cardBorderSubtle)
@@ -1378,22 +1553,22 @@ fun OnboardingSetupScreen(
                     OnboardingFeatureRow(
                         icon = Icons.Default.CloudSync,
                         iconTint = colors.accentBlue,
-                        title = "Bulut Senkronizasyonu",
-                        desc = "Kelimeleriniz, seriniz (streak) ve öğrenme geçmişiniz tüm cihazlarınız arasında otomatik eşitlenir."
+                        title = stringResource(R.string.onboarding_feat_sync_title),
+                        desc = stringResource(R.string.onboarding_feat_sync_desc)
                     )
 
                     OnboardingFeatureRow(
                         icon = Icons.Default.CheckCircle,
                         iconTint = colors.vividGreen,
-                        title = "Kelimeleri Otomatik Birleştirme",
-                        desc = "Farklı cihazlardan eklenen kelimeler mükerrer kaydedilmeden birleştirilir ve güncel öğrenme ilerlemeniz korunur."
+                        title = stringResource(R.string.onboarding_feat_merge_title),
+                        desc = stringResource(R.string.onboarding_feat_merge_desc)
                     )
 
                     OnboardingFeatureRow(
                         icon = Icons.Default.AutoAwesome,
                         iconTint = colors.accentPurple,
-                        title = "Yapay Zeka ile Kelime Üretimi",
-                        desc = "Almanca seviyenize uygun yeni kelimeleri yapay zeka ile anında üretip çalışabilirsiniz."
+                        title = stringResource(R.string.onboarding_feat_ai_title),
+                        desc = stringResource(R.string.onboarding_feat_ai_desc)
                     )
                 }
             }
@@ -1436,9 +1611,9 @@ fun OnboardingSetupScreen(
                     )
                     Text(
                         text = if (store.isSyncingCloud) {
-                            "Verileriniz bulut ile eşitleniyor..."
+                            stringResource(R.string.onboarding_syncing_cloud)
                         } else {
-                            authManager.authStatusMessage ?: "Google ile giriş yapılıyor..."
+                            authManager.authStatusMessage ?: stringResource(R.string.onboarding_signing_in)
                         },
                         fontSize = MaterialTheme.typography.labelSmall.fontSize,
                         color = colors.secondaryText
@@ -1473,7 +1648,7 @@ fun OnboardingSetupScreen(
                     Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Google Hesabı ile Giriş Yap & Eşitle",
+                        text = stringResource(R.string.onboarding_signin_sync_btn),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -1486,10 +1661,10 @@ fun OnboardingSetupScreen(
                     border = BorderStroke(1.dp, colors.cardBorderSubtle),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp)
+                        .heightIn(min = 48.dp)
                 ) {
                     Text(
-                        text = "Çevrimdışı Modda Devam Et",
+                        text = stringResource(R.string.onboarding_continue_offline),
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                         color = colors.secondaryText

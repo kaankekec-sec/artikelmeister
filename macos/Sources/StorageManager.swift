@@ -24,9 +24,9 @@ enum ThemeMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .system: return "Sistem Varsayılanı"
-        case .light: return "Açık"
-        case .dark: return "Koyu"
+        case .system: return L10n.text("Sistem Varsayılanı", en: "System Default", de: "Systemstandard")
+        case .light: return L10n.text("Açık", en: "Light", de: "Hell")
+        case .dark: return L10n.text("Koyu", en: "Dark", de: "Dunkel")
         }
     }
 
@@ -905,7 +905,7 @@ final class DeckStore: ObservableObject {
         // wipe the word list. Require a real cards array and snapshot before replacing.
         let probe = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         guard probe?["cards"] is [Any] || probe?["articlelessCards"] is [Any] else {
-            throw NSError(domain: "BackupImport", code: 1, userInfo: [NSLocalizedDescriptionKey: "Bu dosya geçerli bir ArtikelMeister yedeği değil. Hiçbir veri değiştirilmedi."])
+            throw NSError(domain: "BackupImport", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.text("Bu dosya geçerli bir ArtikelMeister yedeği değil. Hiçbir veri değiştirilmedi.", en: "This file is not a valid ArtikelMeister backup. No data was changed.", de: "Diese Datei ist kein gültiges ArtikelMeister-Backup. Keine Daten wurden geändert.")])
         }
         let backup = try decoder.decode(ArtikelMeisterBackup.self, from: data)
 
@@ -990,13 +990,13 @@ final class DeckStore: ObservableObject {
         if cardsLoadFailed {
             // Local card files could not be decoded: do not merge/upload anything.
             cloudSyncIsError = true
-            cloudSyncStatusMessage = "Yerel kelime dosyası okunamadı; veri kaybını önlemek için eşitleme durduruldu."
+            cloudSyncStatusMessage = L10n.text("Yerel kelime dosyası okunamadı; veri kaybını önlemek için eşitleme durduruldu.", en: "Local word file could not be read; sync stopped to prevent data loss.", de: "Lokale Wortdatei konnte nicht gelesen werden; Synchronisierung zum Schutz vor Datenverlust gestoppt.")
             return
         }
         isSyncingCloud = true
         if !isSilentAutoSync {
             cloudSyncIsError = false
-            cloudSyncStatusMessage = "Google Drive ('\(GoogleDriveSyncService.SYNC_FOLDER_NAME)') ile eşitleniyor..."
+            cloudSyncStatusMessage = L10n.text("Google Drive ('\(GoogleDriveSyncService.SYNC_FOLDER_NAME)') ile eşitleniyor...", en: "Syncing with Google Drive ('\(GoogleDriveSyncService.SYNC_FOLDER_NAME)')...", de: "Synchronisiere mit Google Drive ('\(GoogleDriveSyncService.SYNC_FOLDER_NAME)')...")
         }
 
         do {
@@ -1115,8 +1115,8 @@ final class DeckStore: ObservableObject {
             lastCloudSyncTime = Date()
             cloudSyncIsError = false
             cloudSyncStatusMessage = (addedFromCloud > 0)
-                ? "Bulutla eşitlendi: +\(addedFromCloud) yeni kelime alındı (Toplam \(cards.count) kelime)."
-                : "Google Drive ile başarıyla eşitlendi (\(cards.count) kelime, \(currentStreakDays) gün seri)."
+                ? L10n.text("Bulutla eşitlendi: +\(addedFromCloud) yeni kelime alındı (Toplam \(cards.count) kelime).", en: "Synced with cloud: +\(addedFromCloud) new words added (Total \(cards.count) words).", de: "Mit Cloud synchronisiert: +\(addedFromCloud) neue Wörter (Gesamt \(cards.count) Wörter).")
+                : L10n.text("Google Drive ile başarıyla eşitlendi (\(cards.count) kelime, \(currentStreakDays) gün seri).", en: "Synced with Google Drive (\(cards.count) words, \(currentStreakDays) day streak).", de: "Mit Google Drive synchronisiert (\(cards.count) Wörter, \(currentStreakDays) Tage Serie).")
         } catch {
             // Cancellation is never a user-visible sync error.
             let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
@@ -1124,7 +1124,7 @@ final class DeckStore: ObservableObject {
                 if !isSilentAutoSync { cloudSyncStatusMessage = nil }
             } else {
                 cloudSyncIsError = true
-                cloudSyncStatusMessage = "Bulut eşitleme hatası: \(error.localizedDescription)"
+                cloudSyncStatusMessage = L10n.text("Bulut eşitleme hatası: \(error.localizedDescription)", en: "Cloud sync error: \(error.localizedDescription)", de: "Cloud-Sync-Fehler: \(error.localizedDescription)")
             }
         }
 
@@ -1186,7 +1186,7 @@ final class DeckStore: ObservableObject {
         try CsvCards.requireCsvName(url.lastPathComponent)
         let data: Data
         do { data = try Data(contentsOf: url) } catch {
-            throw NSError(domain: "CSVImport", code: 1, userInfo: [NSLocalizedDescriptionKey: "CSV dosyası okunamadı."])
+            throw NSError(domain: "CSVImport", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.text("CSV dosyası okunamadı.", en: "Could not read CSV file.", de: "CSV-Datei konnte nicht gelesen werden.")])
         }
         let rawContent = try CsvCards.decodeAndValidate(data)
 

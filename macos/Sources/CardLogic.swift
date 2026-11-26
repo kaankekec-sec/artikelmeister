@@ -556,3 +556,101 @@ enum CsvCards {
         return fields
     }
 }
+
+// MARK: - SemVer & GitHub Release Version Checker (pure)
+
+struct SemVer: Comparable, Equatable {
+    let major: Int
+    let minor: Int
+    let patch: Int
+    let preRelease: String?
+
+    static func parse(_ raw: String) -> SemVer? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if s.hasPrefix("v") || s.hasPrefix("V") {
+            s.removeFirst()
+        }
+        guard !s.isEmpty else { return nil }
+
+        // Strip build metadata (+...)
+        if let plusIdx = s.firstIndex(of: "+") {
+            s = String(s[..<plusIdx])
+        }
+
+        let dashParts = s.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        let core = String(dashParts[0])
+        let pre: String? = dashParts.count > 1 ? String(dashParts[1]) : nil
+        if let pre, pre.isEmpty { return nil }
+
+        let parts = core.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 2 || parts.count == 3 else { return nil }
+
+        var nums: [Int] = []
+        for p in parts {
+            let str = String(p)
+            guard !str.isEmpty, str.allSatisfy(\.isASCII), str.allSatisfy(\.isNumber),
+                  let val = Int(str), val >= 0 else {
+                return nil
+            }
+            nums.append(val)
+        }
+
+        return SemVer(
+            major: nums[0],
+            minor: nums[1],
+            patch: nums.count == 3 ? nums[2] : 0,
+            preRelease: pre
+        )
+    }
+
+    static func < (lhs: SemVer, rhs: SemVer) -> Bool {
+        if lhs.major != rhs.major { return lhs.major < rhs.major }
+        if lhs.minor != rhs.minor { return lhs.minor < rhs.minor }
+        if lhs.patch != rhs.patch { return lhs.patch < rhs.patch }
+
+        switch (lhs.preRelease, rhs.preRelease) {
+        case (nil, nil): return false
+        case (nil, .some): return false   // 1.3.0 > 1.3.0-beta
+        case (.some, nil): return true    // 1.3.0-beta < 1.3.0
+        case let (.some(a), .some(b)): return a.compare(b, options: .numeric) == .orderedAscending
+        }
+    }
+}
+
+struct ReleaseUpdateInfo: Equatable {
+    let tagName: String
+    let version: SemVer
+    let htmlUrl: String
+}
+
+enum VersionChecker {
+    static let latestReleaseEndpoint = "https://api.github.com/repos/kaankekec-sec/artikelmeister/releases/latest"
+    static let repoReleasePrefix = "https://github.com/kaankekec-sec/artikelmeister/"
+    static let fallbackReleaseUrl = "https://github.com/kaankekec-sec/artikelmeister/releases/latest"
+
+    static func parseLatestReleaseJson(_ json: String) -> ReleaseUpdateInfo? {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tagName = obj["tag_name"] as? String else {
+            return nil
+        }
+
+        let trimmedTag = tagName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let version = SemVer.parse(trimmedTag) else {
+            return nil
+        }
+
+        let rawUrl = (obj["html_url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let safeUrl = rawUrl.hasPrefix(repoReleasePrefix) ? rawUrl : fallbackReleaseUrl
+        return ReleaseUpdateInfo(tagName: trimmedTag, version: version, htmlUrl: safeUrl)
+    }
+
+    static func isUpdateRequired(currentVersion: String, latestTag: String) -> Bool {
+        guard let current = SemVer.parse(currentVersion),
+              let latest = SemVer.parse(latestTag) else {
+            return false
+        }
+        return latest > current
+    }
+}

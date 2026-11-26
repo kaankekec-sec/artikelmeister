@@ -2,6 +2,11 @@ package com.artikelmeister.android.ui
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.res.Configuration
+import android.content.res.Resources
+import androidx.annotation.StringRes
+import com.artikelmeister.android.R
+import java.util.Locale
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -13,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +29,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
@@ -51,6 +58,13 @@ import com.artikelmeister.android.Artikel
 import com.artikelmeister.android.CardStage
 import com.artikelmeister.android.DeckStore
 import com.artikelmeister.android.ReviewRating
+import com.artikelmeister.android.VersionChecker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 
 // =====================================================================================
 // Color tokens
@@ -107,13 +121,13 @@ data class ArtikelMeisterColors(
 
 private val DarkAppColors = ArtikelMeisterColors(
     isDark = true,
-    windowBackground = Color(0xFF161618),
-    controlBackground = Color(0xFF212124),
-    textBackground = Color(0xFF121214),
-    sidebarBackground = Color(0xFF1C1C1F),
-    cardBorderSubtle = Color(0x22FFFFFF),
-    primaryText = Color(0xFFF5F5F7),
-    secondaryText = Color(0xFFA3A3AB),
+    windowBackground = Color(0xFF0F1115),
+    controlBackground = Color(0xFF1B1F27),
+    textBackground = Color(0xFF151820),
+    sidebarBackground = Color(0xFF13161C),
+    cardBorderSubtle = Color(0x18FFFFFF),
+    primaryText = Color(0xFFF4F6FA),
+    secondaryText = Color(0xFF9DA3B0),
     accentBlue = Color(0xFF429EFF),
     accentPurple = Color(0xFFC080FF),
     accentOrange = Color(0xFFFF9F0A),
@@ -124,26 +138,26 @@ private val DarkAppColors = ArtikelMeisterColors(
     artikelDie = Color(0xFFF56FCA),
     artikelDas = Color(0xFFE8B90E),
     artikelNone = Color(0xFFA1A1AA),
-    blueBadgeBackground = Color(0xFF192B46),
-    purpleBadgeBackground = Color(0xFF352244),
-    orangeBadgeBackground = Color(0xFF372817),
-    successBadgeBackground = Color(0xFF193526),
-    errorBadgeBackground = Color(0xFF412529),
-    derBadgeBackground = Color(0xFF1A2A46),
-    dieBadgeBackground = Color(0xFF3C2237),
-    dasBadgeBackground = Color(0xFF372D17),
-    articleNoneBadgeBackground = Color(0xFF2D2E36)
+    blueBadgeBackground = Color(0xFF182842),
+    purpleBadgeBackground = Color(0xFF2D1E3E),
+    orangeBadgeBackground = Color(0xFF342516),
+    successBadgeBackground = Color(0xFF173123),
+    errorBadgeBackground = Color(0xFF3B2025),
+    derBadgeBackground = Color(0xFF182742),
+    dieBadgeBackground = Color(0xFF371E33),
+    dasBadgeBackground = Color(0xFF342A15),
+    articleNoneBadgeBackground = Color(0xFF262932)
 )
 
 private val LightAppColors = ArtikelMeisterColors(
     isDark = false,
-    windowBackground = Color(0xFFF2F4F8),
+    windowBackground = Color(0xFFF3F5F8),
     controlBackground = Color(0xFFFFFFFF),
-    textBackground = Color(0xFFEFF1F6),
-    sidebarBackground = Color(0xFFF7F8FB),
-    cardBorderSubtle = Color(0x1C000000),
-    primaryText = Color(0xFF15171E),
-    secondaryText = Color(0xFF555A68),
+    textBackground = Color(0xFFECEFF4),
+    sidebarBackground = Color(0xFFF8F9FC),
+    cardBorderSubtle = Color(0x160F172A),
+    primaryText = Color(0xFF141720),
+    secondaryText = Color(0xFF565C6B),
     accentBlue = Color(0xFF005BCD),
     accentPurple = Color(0xFF7130D4),
     accentOrange = Color(0xFF984900),
@@ -351,11 +365,84 @@ val AppTypography = Typography(
     labelSmall = style(12, 16, FontWeight.Normal, 0.2f)
 )
 
+fun TextStyle.tabular(): TextStyle = copy(fontFeatureSettings = "tnum")
+
+val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(26.dp)
+)
+
 // =====================================================================================
 // Theme mode adapter (System / Light / Dark)
 // =====================================================================================
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
+enum class AppLanguage(val rawValue: String, @StringRes val labelRes: Int) {
+    TR("tr", R.string.language_tr),
+    EN("en", R.string.language_en),
+    DE("de", R.string.language_de);
+
+    companion object {
+        fun defaultFromSystemLocale(): AppLanguage {
+            val sysLang = Resources.getSystem().configuration.locales.get(0)?.language
+                ?: Locale.getDefault().language
+            return when (sysLang.lowercase(Locale.ROOT)) {
+                "de" -> DE
+                "en" -> EN
+                "tr" -> TR
+                else -> TR
+            }
+        }
+
+        fun fromRaw(raw: String?): AppLanguage =
+            entries.firstOrNull { it.rawValue == raw } ?: defaultFromSystemLocale()
+    }
+}
+
+@StringRes
+fun Artikel.grammaticalLabelRes(): Int = when (this) {
+    Artikel.DER -> R.string.artikel_der_label
+    Artikel.DIE -> R.string.artikel_die_label
+    Artikel.DAS -> R.string.artikel_das_label
+}
+
+@StringRes
+fun CardStage.titleRes(): Int = when (this) {
+    CardStage.NEW -> R.string.stage_new
+    CardStage.LEARNING -> R.string.stage_learning
+    CardStage.REVIEW -> R.string.stage_review
+    CardStage.RELEARNING -> R.string.stage_relearning
+}
+
+@StringRes
+fun ReviewRating.titleRes(): Int = when (this) {
+    ReviewRating.AGAIN -> R.string.rating_again
+    ReviewRating.HARD -> R.string.rating_hard
+    ReviewRating.GOOD -> R.string.rating_good
+    ReviewRating.EASY -> R.string.rating_easy
+}
+
+@StringRes
+fun com.artikelmeister.android.CEFRLevel.titleRes(): Int = when (this) {
+    com.artikelmeister.android.CEFRLevel.A1 -> R.string.cefr_a1_title
+    com.artikelmeister.android.CEFRLevel.A2 -> R.string.cefr_a2_title
+    com.artikelmeister.android.CEFRLevel.B1 -> R.string.cefr_b1_title
+    com.artikelmeister.android.CEFRLevel.B2 -> R.string.cefr_b2_title
+    com.artikelmeister.android.CEFRLevel.C1 -> R.string.cefr_c1_title
+}
+
+@StringRes
+fun com.artikelmeister.android.CEFRLevel.descriptionRes(): Int = when (this) {
+    com.artikelmeister.android.CEFRLevel.A1 -> R.string.cefr_a1_desc
+    com.artikelmeister.android.CEFRLevel.A2 -> R.string.cefr_a2_desc
+    com.artikelmeister.android.CEFRLevel.B1 -> R.string.cefr_b1_desc
+    com.artikelmeister.android.CEFRLevel.B2 -> R.string.cefr_b2_desc
+    com.artikelmeister.android.CEFRLevel.C1 -> R.string.cefr_c1_desc
+}
 
 /**
  * ADAPTER — UI-only preferences that are not (yet) part of `AppSettings` in Models.kt.
@@ -370,7 +457,12 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 object UiPreferences {
     private const val PREFS_NAME = "artikelmeister_ui_prefs"
     private const val KEY_THEME_MODE = "theme_mode"
+    private const val KEY_APP_LANGUAGE = "app_language"
     private const val KEY_SEEN_INTRO = "has_seen_intro_splash"
+    private const val KEY_LAST_VERSION_CHECK_AT = "last_version_check_at"
+    private const val KEY_REQUIRED_UPDATE_TAG = "required_update_tag"
+    private const val KEY_REQUIRED_UPDATE_URL = "required_update_url"
+    private const val VERSION_CHECK_THROTTLE_MS = 2L * 60L * 60L * 1000L
 
     private var prefs: SharedPreferences? = null
 
@@ -378,17 +470,137 @@ object UiPreferences {
     var themeMode by mutableStateOf<ThemeMode?>(null)
         private set
 
+    var appLanguage by mutableStateOf(AppLanguage.TR)
+        private set
+
     var hasSeenIntro by mutableStateOf(false)
         private set
 
-    fun init(context: Context) {
+    var requiredUpdateTag by mutableStateOf<String?>(null)
+        private set
+
+    var requiredUpdateUrl by mutableStateOf<String?>(null)
+        private set
+
+    var isCheckingForUpdate by mutableStateOf(false)
+        private set
+
+    fun init(context: Context, currentVersion: String = resolveAppVersion(context)) {
         if (prefs != null) return
         val p = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs = p
         themeMode = p.getString(KEY_THEME_MODE, null)?.let { raw ->
             runCatching { ThemeMode.valueOf(raw) }.getOrNull()
         }
+        val rawLang = p.getString(KEY_APP_LANGUAGE, null)
+        val resolvedLang = AppLanguage.fromRaw(rawLang)
+        if (rawLang == null || rawLang == "system") {
+            p.edit().putString(KEY_APP_LANGUAGE, resolvedLang.rawValue).apply()
+        }
+        appLanguage = resolvedLang
         hasSeenIntro = p.getBoolean(KEY_SEEN_INTRO, false)
+        val cachedTag = p.getString(KEY_REQUIRED_UPDATE_TAG, null)
+        val cachedUrl = p.getString(KEY_REQUIRED_UPDATE_URL, null)
+        if (cachedTag != null && VersionChecker.isUpdateRequired(currentVersion, cachedTag)) {
+            requiredUpdateTag = cachedTag
+            requiredUpdateUrl = VersionChecker.sanitizeReleaseUrl(cachedUrl)
+        } else if (cachedTag != null) {
+            p.edit().remove(KEY_REQUIRED_UPDATE_TAG).remove(KEY_REQUIRED_UPDATE_URL).apply()
+        }
+    }
+
+    fun wrapContext(base: Context): Context {
+        val p = base.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val rawLang = p.getString(KEY_APP_LANGUAGE, null)
+        val lang = AppLanguage.fromRaw(rawLang)
+        if (rawLang == null || rawLang == "system") {
+            p.edit().putString(KEY_APP_LANGUAGE, lang.rawValue).apply()
+        }
+        appLanguage = lang
+        val locale = when (lang) {
+            AppLanguage.TR -> Locale.forLanguageTag("tr-TR")
+            AppLanguage.EN -> Locale.forLanguageTag("en-US")
+            AppLanguage.DE -> Locale.forLanguageTag("de-DE")
+        }
+        Locale.setDefault(locale)
+        val config = Configuration(base.resources.configuration)
+        config.setLocale(locale)
+        config.setLayoutDirection(locale)
+        return base.createConfigurationContext(config)
+    }
+
+    fun selectAppLanguage(language: AppLanguage) {
+        appLanguage = language
+        prefs?.edit()?.putString(KEY_APP_LANGUAGE, language.rawValue)?.apply()
+    }
+
+    fun localizedContext(context: Context): Context {
+        val locale = when (appLanguage) {
+            AppLanguage.TR -> Locale.forLanguageTag("tr-TR")
+            AppLanguage.EN -> Locale.forLanguageTag("en-US")
+            AppLanguage.DE -> Locale.forLanguageTag("de-DE")
+        }
+        val config = Configuration(context.resources.configuration)
+        config.setLocale(locale)
+        return context.createConfigurationContext(config)
+    }
+
+    fun getString(context: Context, @StringRes resId: Int, vararg args: Any): String {
+        val ctx = localizedContext(context)
+        return if (args.isEmpty()) ctx.getString(resId) else ctx.getString(resId, *args)
+    }
+
+    fun resolveAppVersion(context: Context): String = runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: "1.3.0"
+
+    suspend fun checkForRequiredUpdate(currentVersion: String, force: Boolean = false) {
+        val p = prefs ?: return
+        val now = System.currentTimeMillis()
+        val lastCheck = p.getLong(KEY_LAST_VERSION_CHECK_AT, 0L)
+        if (!force && requiredUpdateTag == null && (now - lastCheck) in 0 until VERSION_CHECK_THROTTLE_MS) {
+            return
+        }
+        isCheckingForUpdate = true
+        try {
+            val info = withContext(Dispatchers.IO) {
+                runCatching {
+                    val conn = (URL(VersionChecker.LATEST_RELEASE_API_URL).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 8_000
+                        readTimeout = 8_000
+                        setRequestProperty("Accept", "application/vnd.github+json")
+                        setRequestProperty("User-Agent", "ArtikelMeister/$currentVersion")
+                    }
+                    try {
+                        if (conn.responseCode !in 200..299) return@runCatching null
+                        val body = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+                        VersionChecker.parseLatestReleaseJson(body)
+                    } finally {
+                        conn.disconnect()
+                    }
+                }.getOrNull()
+            } ?: return // Fail-open on network/rate-limit errors
+
+            p.edit().putLong(KEY_LAST_VERSION_CHECK_AT, System.currentTimeMillis()).apply()
+            if (VersionChecker.isUpdateRequired(currentVersion, info.tagName)) {
+                requiredUpdateTag = info.tagName
+                requiredUpdateUrl = info.htmlUrl
+                p.edit()
+                    .putString(KEY_REQUIRED_UPDATE_TAG, info.tagName)
+                    .putString(KEY_REQUIRED_UPDATE_URL, info.htmlUrl)
+                    .apply()
+            } else {
+                requiredUpdateTag = null
+                requiredUpdateUrl = null
+                p.edit()
+                    .remove(KEY_REQUIRED_UPDATE_TAG)
+                    .remove(KEY_REQUIRED_UPDATE_URL)
+                    .apply()
+            }
+        } finally {
+            isCheckingForUpdate = false
+        }
     }
 
     /** The mode to show as selected in the UI. */
@@ -439,6 +651,7 @@ fun ArtikelMeisterTheme(
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColorPalette else LightColorPalette,
             typography = AppTypography,
+            shapes = AppShapes,
             content = content
         )
     }
@@ -449,7 +662,7 @@ fun ArtikelMeisterTheme(
 // =====================================================================================
 
 /**
- * macOS-style GroupBox container used across StatsView, SettingsView, and AIGeneratorSheet
+ * Consistent grouped section card used across StatsView, SettingsView, and AIGeneratorSheet.
  */
 @Composable
 fun GroupBoxCard(
@@ -465,7 +678,7 @@ fun GroupBoxCard(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .padding(bottom = 8.dp, start = 2.dp)
+                    .padding(bottom = 10.dp, start = 4.dp)
                     .semantics { heading() }
             ) {
                 if (icon != null) {
@@ -475,26 +688,26 @@ fun GroupBoxCard(
                         tint = iconTint,
                         modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(7.dp))
                 }
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = colors.primaryText
+                    color = colors.secondaryText
                 )
             }
         }
         Surface(
             color = colors.controlBackground,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(18.dp),
             border = BorderStroke(1.dp, colors.cardBorderSubtle),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp),
+                    .padding(16.dp),
                 content = content
             )
         }
@@ -563,7 +776,11 @@ fun StateMessageView(
         }
         if (primaryActionLabel != null && onPrimaryAction != null) {
             Spacer(modifier = Modifier.height(18.dp))
-            FilledTonalButton(onClick = onPrimaryAction) {
+            FilledTonalButton(
+                onClick = onPrimaryAction,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
                 if (primaryActionIcon != null) {
                     Icon(
                         primaryActionIcon,

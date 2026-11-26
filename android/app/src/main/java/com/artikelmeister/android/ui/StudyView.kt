@@ -5,9 +5,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -17,7 +20,10 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -51,12 +57,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AddCircle
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -73,7 +76,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -95,12 +97,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -129,10 +135,6 @@ import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.max
 
-private const val AI_ACTION_LABEL = "AI ile kelime üret"
-private const val CSV_IMPORT_LABEL = "CSV içe aktar…"
-private const val INCREASE_LIMIT_LABEL = "Günlük yeni kart sınırını 10 artır"
-
 enum class ArtikelGuessResult {
     NONE,
     CORRECT,
@@ -146,6 +148,7 @@ fun StudyView(
     onOpenDrawer: (() -> Unit)? = null
 ) {
     val colors = LocalAppColors.current
+    val context = LocalContext.current
     var isRevealed by remember { mutableStateOf(false) }
     var typedArtikel by remember { mutableStateOf("") }
     var guessResult by remember { mutableStateOf(ArtikelGuessResult.NONE) }
@@ -174,22 +177,20 @@ fun StudyView(
     ) { uri ->
         if (uri != null) {
             runCatching {
-                val targetDeck = store.selectedStudyDeck ?: "Genel"
+                val targetDeck = store.selectedStudyDeck ?: context.getString(R.string.common_default_deck)
                 val res = store.importCSVFromUri(uri, defaultDeckName = targetDeck)
-                importTitle = "CSV içe aktarıldı"
-                importMessage = """
-                    Yeni eklenen kelime: ${res.addedCount}
-                    Güncellenen kelime: ${res.updatedCount}
-                    Zaten mevcut (atlanan): ${res.skippedCount}
-                    Geçersiz/Atlanan satır: ${res.invalidLines}
-                """.trimIndent()
+                importTitle = context.getString(R.string.study_csv_imported_title)
+                importMessage = context.getString(
+                    R.string.study_csv_imported_msg,
+                    res.addedCount, res.updatedCount, res.skippedCount, res.invalidLines
+                )
                 offerImportUndo = store.canUndoImport
                 showImportAlert = true
             }.onFailure { error ->
                 offerImportUndo = false
-                importTitle = "CSV okunamadı"
+                importTitle = context.getString(R.string.study_csv_read_error_title)
                 importMessage = (error as? CsvCards.RejectedException)?.message
-                    ?: "Dosyanın CSV biçiminde olduğunu ve okunabildiğini kontrol edip tekrar deneyin."
+                    ?: context.getString(R.string.study_csv_read_error_fallback)
                 showImportAlert = true
             }
         }
@@ -261,8 +262,7 @@ fun StudyView(
             onSelectDeck = { store.selectedStudyDeck = it },
             onOpenDrawer = onOpenDrawer,
             onShowNewDeck = { showNewDeckSheet = true },
-            onShowAIGenerator = openAIGenerator,
-            onImportCSV = importCSV
+            onShowAIGenerator = openAIGenerator
         ) {
             StudyQueueSummary(
                 newCount = store.availableNewCardsCount,
@@ -287,8 +287,8 @@ fun StudyView(
                         onImportCSV = importCSV,
                         onLoadStarterPack = {
                             val res = store.loadStarterGermanPack()
-                            importTitle = "Örnek kelimeler eklendi"
-                            importMessage = "Yeni eklenen kelime: ${res.addedCount}"
+                            importTitle = context.getString(R.string.study_starter_added_title)
+                            importMessage = context.getString(R.string.study_starter_added_msg, res.addedCount)
                             offerImportUndo = store.canUndoImport
                             showImportAlert = true
                         }
@@ -296,25 +296,27 @@ fun StudyView(
                 }
 
                 currentCard != null -> {
-                    ActiveCardSessionView(
-                        card = currentCard,
-                        showMeaningOnFront = store.settings.showMeaningOnFront,
-                        isRevealed = isRevealed,
-                        typedArtikel = typedArtikel,
-                        onTypedArtikelChange = { typedArtikel = it },
-                        guessResult = guessResult,
-                        availableRatings = availableRatingsForCurrentState,
-                        onCheckAndReveal = { checkAndRevealCard(currentCard) },
-                        onSelectArtikel = { art -> revealCard(currentCard, art.rawValue) },
-                        onSubmitRating = { rating -> submitRating(currentCard, rating) }
-                    )
+                    androidx.compose.runtime.key(currentCard.id) {
+                        ActiveCardSessionView(
+                            card = currentCard,
+                            showMeaningOnFront = store.settings.showMeaningOnFront,
+                            isRevealed = isRevealed,
+                            typedArtikel = typedArtikel,
+                            onTypedArtikelChange = { typedArtikel = it },
+                            guessResult = guessResult,
+                            availableRatings = availableRatingsForCurrentState,
+                            onCheckAndReveal = { checkAndRevealCard(currentCard) },
+                            onSelectArtikel = { art -> revealCard(currentCard, art.rawValue) },
+                            onSubmitRating = { rating -> submitRating(currentCard, rating) }
+                        )
+                    }
                 }
 
                 store.selectedStudyDeck != null && store.filteredPoolCards.isEmpty() -> {
                     StateMessageView(
                         icon = Icons.Outlined.Folder,
-                        title = "Bu destede henüz kelime yok",
-                        message = "Bu desteye kelime eklemek için CSV içe aktarabilir veya AI ile kelime üretebilirsiniz.",
+                        title = stringResource(R.string.study_empty_deck_title),
+                        message = stringResource(R.string.study_empty_deck_msg),
                         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                     )
                 }
@@ -372,7 +374,7 @@ fun StudyView(
             },
             confirmButton = {
                 TextButton(onClick = ::closeImportAlert) {
-                    Text("Tamam")
+                    Text(stringResource(R.string.action_ok))
                 }
             },
             dismissButton = if (offerImportUndo && store.canUndoImport) {
@@ -382,11 +384,11 @@ fun StudyView(
                         closeImportAlert()
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
-                                if (undone) "İçe aktarma geri alındı." else "İçe aktarma geri alınamadı."
+                                context.getString(if (undone) R.string.study_undo_done else R.string.study_undo_failed)
                             )
                         }
                     }) {
-                        Text("Geri al")
+                        Text(stringResource(R.string.action_undo))
                     }
                 }
             } else null
@@ -404,7 +406,6 @@ private fun StudyHeaderBar(
     onOpenDrawer: (() -> Unit)?,
     onShowNewDeck: () -> Unit,
     onShowAIGenerator: () -> Unit,
-    onImportCSV: () -> Unit,
     queueSummary: @Composable () -> Unit
 ) {
     val colors = LocalAppColors.current
@@ -415,30 +416,18 @@ private fun StudyHeaderBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(colors.controlBackground)
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        val inlineSummary = maxWidth >= 420.dp
-        val showActionLabels = maxWidth >= 680.dp && LocalDensity.current.fontScale <= 1.3f
-        val queueToggle: @Composable () -> Unit = {
-            val chevronRotation by animateFloatAsState(
-                targetValue = if (showQueueStats) 180f else 0f,
-                label = "chevronRotation"
-            )
-            TextButton(
-                onClick = { showQueueStats = !showQueueStats },
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .semantics { stateDescription = if (showQueueStats) "Açık" else "Kapalı" },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text("Çalışma özeti", style = MaterialTheme.typography.labelMedium)
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(19.dp).rotate(chevronRotation)
-                )
-            }
-        }
+        val showActionLabels = maxWidth >= 600.dp && LocalDensity.current.fontScale <= 1.3f
+        val chevronRotation by animateFloatAsState(
+            targetValue = if (showQueueStats) 180f else 0f,
+            animationSpec = tween(durationMillis = 200),
+            label = "chevronRotation"
+        )
+        val summaryOpenDesc = stringResource(R.string.study_summary_state_open)
+        val summaryClosedDesc = stringResource(R.string.study_summary_state_closed)
+        val summaryToggleLabel = stringResource(R.string.study_summary_toggle)
+        val controlShape = RoundedCornerShape(14.dp)
 
         Column {
             Row(
@@ -447,40 +436,66 @@ private fun StudyHeaderBar(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 if (onOpenDrawer != null) {
-                    IconButton(onClick = onOpenDrawer, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.action_open_menu))
+                    val menuDesc = stringResource(R.string.action_open_menu)
+                    Surface(
+                        onClick = onOpenDrawer,
+                        shape = controlShape,
+                        color = colors.textBackground,
+                        border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .semantics { contentDescription = menuDesc }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = null,
+                                tint = colors.primaryText,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
 
-                Box(Modifier.weight(1f)) {
-                    OutlinedButton(
+                // Left: Clean deck selector pill sharing the exact 48dp height & 14dp corner radius
+                Box(Modifier.weight(1f, fill = false)) {
+                    Surface(
                         onClick = { showDeckMenu = true },
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.widthIn(min = 48.dp, max = 240.dp).heightIn(min = 48.dp)
+                        shape = controlShape,
+                        color = colors.textBackground,
+                        border = BorderStroke(1.dp, colors.cardBorderSubtle),
+                        modifier = Modifier
+                            .widthIn(min = 48.dp, max = 240.dp)
+                            .height(48.dp)
                     ) {
-                        Icon(
-                            imageVector = if (selectedDeck == null) Icons.Outlined.Folder else Icons.Filled.Folder,
-                            contentDescription = null,
-                            tint = colors.accentBlue,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = selectedDeck ?: "Tüm Desteler",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.primaryText,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = null,
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (selectedDeck == null) Icons.Outlined.Folder else Icons.Filled.Folder,
+                                contentDescription = null,
+                                tint = colors.accentBlue,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(7.dp))
+                            Text(
+                                text = selectedDeck ?: stringResource(R.string.study_all_decks),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.primaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
 
                     DropdownMenu(
@@ -488,7 +503,7 @@ private fun StudyHeaderBar(
                         onDismissRequest = { showDeckMenu = false }
                     ) {
                         StudyDeckMenuItem(
-                            label = "Tüm Desteler ($totalCardCount)",
+                            label = stringResource(R.string.study_all_decks_count, totalCardCount),
                             isSelected = selectedDeck == null,
                             onClick = {
                                 onSelectDeck(null)
@@ -508,7 +523,7 @@ private fun StudyHeaderBar(
                         }
                         HorizontalDivider()
                         DropdownMenuItem(
-                            text = { Text("Yeni Deste Ekle...") },
+                            text = { Text(stringResource(R.string.study_new_deck_menu)) },
                             leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
                             onClick = {
                                 showDeckMenu = false
@@ -518,37 +533,75 @@ private fun StudyHeaderBar(
                     }
                 }
 
-                if (inlineSummary) queueToggle()
-
-                if (showActionLabels) {
-                    Button(
-                        onClick = onShowAIGenerator,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.accentPurple,
-                            contentColor = colors.onPurple
-                        ),
-                        shape = RoundedCornerShape(8.dp)
+                // AI Word Generator button immediately to the right of the deck selector
+                val aiLabel = stringResource(R.string.action_ai_generate)
+                Surface(
+                    onClick = onShowAIGenerator,
+                    shape = controlShape,
+                    color = colors.purpleBadgeBackground,
+                    border = BorderStroke(1.dp, colors.accentPurple.copy(alpha = 0.28f)),
+                    modifier = if (showActionLabels) {
+                        Modifier.height(48.dp)
+                    } else {
+                        Modifier
+                            .size(48.dp)
+                            .semantics { contentDescription = aiLabel }
+                    }
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(horizontal = if (showActionLabels) 14.dp else 0.dp)
                     ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(AI_ACTION_LABEL)
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = if (showActionLabels) null else aiLabel,
+                            tint = colors.accentPurple,
+                            modifier = Modifier.size(19.dp)
+                        )
+                        if (showActionLabels) {
+                            Spacer(modifier = Modifier.width(7.dp))
+                            Text(
+                                text = aiLabel,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.accentPurple
+                            )
+                        }
                     }
-                    OutlinedButton(onClick = onImportCSV, shape = RoundedCornerShape(8.dp)) {
-                        Icon(Icons.Default.MoveToInbox, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(CSV_IMPORT_LABEL)
-                    }
-                } else {
-                    IconButton(onClick = onShowAIGenerator, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = AI_ACTION_LABEL, tint = colors.accentPurple)
-                    }
-                    IconButton(onClick = onImportCSV, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.MoveToInbox, contentDescription = CSV_IMPORT_LABEL)
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Far right: Study Summary toggle button
+
+                Surface(
+                    onClick = { showQueueStats = !showQueueStats },
+                    shape = controlShape,
+                    color = if (showQueueStats) colors.blueBadgeBackground else colors.textBackground,
+                    border = BorderStroke(
+                        1.dp,
+                        if (showQueueStats) colors.accentBlue.copy(alpha = 0.35f) else colors.cardBorderSubtle
+                    ),
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics {
+                            contentDescription = summaryToggleLabel
+                            stateDescription = if (showQueueStats) summaryOpenDesc else summaryClosedDesc
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = if (showQueueStats) colors.accentBlue else colors.secondaryText,
+                            modifier = Modifier
+                                .size(21.dp)
+                                .rotate(chevronRotation)
+                        )
                     }
                 }
             }
-
-            if (!inlineSummary) queueToggle()
 
             AnimatedVisibility(
                 visible = showQueueStats,
@@ -565,19 +618,19 @@ private fun StudyHeaderBar(
 @Composable
 private fun StudyQueueSummary(newCount: Int, learningCount: Int, reviewCount: Int, streakDays: Int) {
     val colors = LocalAppColors.current
-    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp)) {
         HorizontalDivider(
             color = colors.cardBorderSubtle,
-            modifier = Modifier.padding(bottom = 6.dp)
+            modifier = Modifier.padding(bottom = 8.dp)
         )
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            CounterPill("Yeni", newCount, colors.accentBlue, colors.blueBadgeBackground)
-            CounterPill("Öğreniliyor", learningCount, colors.accentOrange, colors.orangeBadgeBackground)
-            CounterPill("Tekrar", reviewCount, colors.success, colors.successBadgeBackground)
-            CounterPill("Seri", streakDays, colors.accentOrange, colors.orangeBadgeBackground, isStreak = true)
+            CounterPill(stringResource(R.string.study_summary_new), newCount, colors.accentBlue, colors.blueBadgeBackground)
+            CounterPill(stringResource(R.string.study_summary_learning), learningCount, colors.accentOrange, colors.orangeBadgeBackground)
+            CounterPill(stringResource(R.string.study_summary_review), reviewCount, colors.success, colors.successBadgeBackground)
+            CounterPill(stringResource(R.string.study_summary_streak), streakDays, colors.accentOrange, colors.orangeBadgeBackground, isStreak = true)
         }
     }
 }
@@ -599,6 +652,12 @@ private fun StudyDeckMenuItem(label: String, isSelected: Boolean, onClick: () ->
         onClick = onClick
     )
 }
+
+private data class BottomActionsState(
+    val isRevealed: Boolean,
+    val isArticleless: Boolean,
+    val ratings: List<ReviewRating>
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -622,491 +681,546 @@ private fun ActiveCardSessionView(
     val cardBorderColor by animateColorAsState(
         targetValue = when {
             !isRevealed -> colors.cardBorderSubtle
-            guessResult == ArtikelGuessResult.CORRECT -> colors.feedbackCorrect.copy(alpha = 0.85f)
-            guessResult == ArtikelGuessResult.WRONG -> colors.feedbackIncorrect.copy(alpha = 0.85f)
+            guessResult == ArtikelGuessResult.CORRECT -> colors.feedbackCorrect.copy(alpha = 0.72f)
+            guessResult == ArtikelGuessResult.WRONG -> colors.feedbackIncorrect.copy(alpha = 0.72f)
             else -> colors.cardBorderSubtle
         },
-        animationSpec = tween(durationMillis = 180),
+        animationSpec = tween(durationMillis = 200),
         label = "cardBorderColor"
     )
     val cardBorderWidth by animateDpAsState(
-        targetValue = if (isRevealed) 3.5.dp else 1.dp,
-        animationSpec = tween(durationMillis = 180),
+        targetValue = if (isRevealed) 1.75.dp else 1.dp,
+        animationSpec = tween(durationMillis = 200),
         label = "cardBorderWidth"
     )
+    val cardScale by animateFloatAsState(
+        targetValue = if (isRevealed) 1f else 0.992f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "cardRevealScale"
+    )
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween,
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .consumeWindowInsets(WindowInsets.navigationBars)
             .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Flashcard
-        Surface(
-            color = colors.controlBackground,
-            shape = RoundedCornerShape(22.dp),
-            border = BorderStroke(cardBorderWidth, cardBorderColor),
-            shadowElevation = if (colors.isDark) (if (isRevealed) 12.dp else 6.dp) else (if (isRevealed) 6.dp else 2.dp),
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
             modifier = Modifier
-                .widthIn(max = 680.dp)
                 .fillMaxWidth()
-                .heightIn(min = 310.dp)
+                .verticalScroll(rememberScrollState())
+                .heightIn(min = maxHeight)
+                .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween,
+            // Flashcard
+            Surface(
+                color = colors.controlBackground,
+                shape = RoundedCornerShape(26.dp),
+                border = BorderStroke(cardBorderWidth, cardBorderColor),
+                shadowElevation = if (colors.isDark) (if (isRevealed) 10.dp else 4.dp) else (if (isRevealed) 6.dp else 2.dp),
                 modifier = Modifier
+                    .widthIn(max = 680.dp)
                     .fillMaxWidth()
-                    .padding(22.dp)
+                    .graphicsLayer {
+                        scaleX = cardScale
+                        scaleY = cardScale
+                    }
             ) {
-                // Top metadata bar inside card. The listen control is a separate fixed column so it
-                // stays pinned to the top-right on narrow phones instead of wrapping into the pills.
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    modifier = Modifier.fillMaxWidth()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 288.dp)
+                        .padding(horizontal = 20.dp, vertical = 14.dp)
                 ) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.weight(1f)
+                    // Quiet, unified single-baseline card header aligned to the top
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                     ) {
-                        Text(
-                            text = card.stage.title.uppercase(Locale("tr", "TR")),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.stageColor(card.stage),
-                            modifier = Modifier
-                                .background(colors.stageBadgeBackground(card.stage), CircleShape)
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .background(colors.secondaryText.copy(alpha = 0.12f), CircleShape)
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .weight(1f, fill = false)
+                                .padding(end = 10.dp)
+                                .clip(CircleShape)
+                                .background(colors.textBackground)
+                                .border(1.dp, colors.cardBorderSubtle, CircleShape)
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Folder,
-                                contentDescription = null,
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(12.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(colors.stageColor(card.stage), CircleShape)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(card.stage.titleRes()),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.stageColor(card.stage),
+                                maxLines = 1
+                            )
+                            Text(
+                                text = " · ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.secondaryText.copy(alpha = 0.55f)
+                            )
                             Text(
                                 text = card.deckName,
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = colors.secondaryText,
-                                maxLines = 1
-                            )
-                        }
-
-                        if (card.totalReviews > 0) {
-                            Text(
-                                text = "Kolaylık (tekrar aralığı çarpanı): %${(card.easeFactor * 100).toInt()} • Tekrar: ${card.totalReviews}",
-                                fontSize = MaterialTheme.typography.labelSmall.fontSize,
-                                color = colors.secondaryText,
-                                modifier = Modifier.align(Alignment.CenterVertically)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    ListenPill(
-                        onClick = {
-                            val spokenText = if (isRevealed) card.fullGermanTerm else card.word
-                            SpeechManager.speak(spokenText)
-                        }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Keep the live region in place so TalkBack can announce its text change.
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
-                ) {
-                    if (isRevealed) {
-                        val feedbackColor = if (isCorrect) colors.feedbackCorrect else colors.feedbackIncorrect
-                        val feedbackBackground =
-                            if (isCorrect) colors.successBadgeBackground else colors.errorBadgeBackground
-                        val userAnswer = typedArtikel.trim()
-                        val statusText = when {
-                            isCorrect -> card.artikel?.let { "DOĞRU! (${it.grammaticalLabel})" } ?: "DOĞRU!"
-                            userAnswer.isEmpty() -> "BOŞ BIRAKILDI"
-                            else -> "YANLIŞ ($userAnswer)"
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.Top,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .background(feedbackBackground, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isCorrect) Icons.Default.CheckCircle else Icons.Default.Cancel,
-                                contentDescription = null,
-                                tint = feedbackColor,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    text = statusText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = feedbackColor
-                                )
-                                if (!isCorrect) {
-                                    val answerKind = if (card.isArticleless) "Anlam" else "Artikel"
-                                    Text(
-                                        text = "Doğru $answerKind: ${AnswerChecker.expectedLabel(card)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = feedbackColor
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(14.dp))
-                    }
-                }
-
-                // Center Content: Front (3 Vertical Buttons + Word) vs Back (Revealed Result)
-                AnimatedContent(
-                    targetState = isRevealed,
-                    transitionSpec = {
-                        (fadeIn(tween(180)) + scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
-                            .togetherWith(fadeOut(tween(150)))
-                    },
-                    label = "card_flip"
-                ) { revealed ->
-                    if (!revealed) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = if (card.isArticleless) {
-                                    stringResource(R.string.study_meaning_prompt)
-                                } else {
-                                    "Doğru artikeli seçin:"
-                                },
-                                fontSize = MaterialTheme.typography.bodySmall.fontSize,
                                 fontWeight = FontWeight.Medium,
                                 color = colors.secondaryText,
-                                textAlign = TextAlign.Center
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                        }
 
-                            if (card.isArticleless) {
-                                ArticlelessFront(
-                                    card = card,
-                                    typed = typedArtikel,
-                                    onTypedChange = onTypedArtikelChange,
-                                    onSubmit = onCheckAndReveal
-                                )
-                            } else {
-                                // Row: Left 3 Artikel Buttons stacked vertically, Right: Word (die is horizontally aligned with the word)
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp)
-                                ) {
-                                    // 3 vertical buttons: der (top), die (middle), das (bottom)
-                                    Column(
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.selectableGroup()
-                                    ) {
-                                        Artikel.entries.forEach { art ->
-                                            val isSelected = typedArtikel.trim().equals(art.rawValue, ignoreCase = true)
-                                            val artColor = colors.artikelColor(art)
-                                            Surface(
-                                                color = if (isSelected) artColor else colors.artikelBadgeBackground(art),
-                                                shape = RoundedCornerShape(10.dp),
-                                                border = BorderStroke(
-                                                    width = if (isSelected) 2.dp else 1.5.dp,
-                                                    color = artColor
-                                                ),
-                                                shadowElevation = if (isSelected) 4.dp else 0.dp,
-                                                modifier = Modifier
-                                                    .width(76.dp)
-                                                    .heightIn(min = 48.dp)
-                                                    .selectable(
-                                                        selected = isSelected,
-                                                        role = Role.RadioButton,
-                                                        onClick = { onSelectArtikel(art) }
-                                                    )
-                                            ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                                                ) {
-                                                    Text(
-                                                        text = art.rawValue,
-                                                        style = MaterialTheme.typography.titleSmall,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = if (isSelected) colors.onArtikel(art) else artColor
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
+                        ListenPill(
+                            onClick = {
+                                val spokenText = if (isRevealed) card.fullGermanTerm else card.word
+                                SpeechManager.speak(spokenText)
+                            }
+                        )
+                    }
 
-                                    Spacer(modifier = Modifier.width(18.dp))
-
-                                    // Word on right, dynamically scaled for long words like Arbeitsalltag
-                                    val wordFontSize = when {
-                                        card.word.length > 22 -> 18.sp
-                                        card.word.length > 16 -> 22.sp
-                                        card.word.length > 12 -> 25.sp
-                                        card.word.length > 8 -> 29.sp
-                                        else -> 34.sp
-                                    }
-
-                                    Text(
-                                        text = card.word,
-                                        fontSize = wordFontSize,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colors.primaryText,
-                                        textAlign = TextAlign.Start,
-                                        softWrap = true,
-                                        modifier = Modifier.weight(1f, fill = false)
+                    // Truly vertically centered centerpiece (symmetric top/bottom clearance)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .fillMaxWidth()
+                            .padding(top = 52.dp, bottom = 52.dp)
+                    ) {
+                        // Keep live region in place so TalkBack announces reveal status.
+                        val userAnswer = typedArtikel.trim()
+                        val statusAnnouncement = if (isRevealed) {
+                            when {
+                                isCorrect -> card.artikel?.let {
+                                    stringResource(R.string.study_correct_with_label, stringResource(it.grammaticalLabelRes()))
+                                } ?: stringResource(R.string.study_correct)
+                                else -> {
+                                    val answerKind = stringResource(
+                                        if (card.isArticleless) R.string.study_answer_kind_meaning
+                                        else R.string.study_answer_kind_artikel
                                     )
+                                    val wrongPart = if (userAnswer.isEmpty()) {
+                                        stringResource(R.string.study_blank)
+                                    } else {
+                                        stringResource(R.string.study_wrong, userAnswer)
+                                    }
+                                    "$wrongPart. ${stringResource(R.string.study_correct_answer_is, answerKind, AnswerChecker.expectedLabel(card))}"
                                 }
                             }
+                        } else ""
 
-                            // The meaning is the answer for article-less cards -> never on the front.
-                            if (!card.isArticleless && showMeaningOnFront && card.meaning.isNotEmpty()) {
-                                Text(
-                                    text = card.meaning,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = colors.secondaryText,
-                                    textAlign = TextAlign.Center
+                        Box(
+                            modifier = Modifier.semantics(mergeDescendants = true) {
+                                liveRegion = LiveRegionMode.Polite
+                                if (statusAnnouncement.isNotEmpty()) {
+                                    contentDescription = statusAnnouncement
+                                }
+                            }
+                        ) {
+                            if (isRevealed) {
+                                val feedbackColor = if (isCorrect) colors.feedbackCorrect else colors.feedbackIncorrect
+                                Surface(
+                                    shape = CircleShape,
+                                    color = feedbackColor.copy(alpha = if (colors.isDark) 0.16f else 0.11f),
+                                    border = BorderStroke(1.dp, feedbackColor.copy(alpha = 0.35f)),
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.padding(
+                                            horizontal = if (isCorrect) 12.dp else 10.dp,
+                                            vertical = 4.dp
+                                        )
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isCorrect) Icons.Default.Check else Icons.Default.Close,
+                                            contentDescription = null,
+                                            tint = feedbackColor,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        if (!isCorrect) {
+                                            Text(
+                                                text = userAnswer.ifEmpty { "—" },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = feedbackColor,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.widthIn(max = 180.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Center Content: Front (German Word / Articleless Input) vs Back (Revealed Result)
+                        AnimatedContent(
+                            targetState = isRevealed,
+                            transitionSpec = {
+                                (fadeIn(tween(180)) + scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
+                                    .togetherWith(fadeOut(tween(130)))
+                            },
+                            label = "card_flip"
+                        ) { revealed ->
+                            if (!revealed) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    if (card.isArticleless) {
+                                        ArticlelessFront(
+                                            card = card,
+                                            typed = typedArtikel,
+                                            onTypedChange = onTypedArtikelChange,
+                                            onSubmit = onCheckAndReveal
+                                        )
+                                    } else {
+                                        val wordFontSize = when {
+                                            card.word.length > 22 -> 19.sp
+                                            card.word.length > 16 -> 23.sp
+                                            card.word.length > 12 -> 28.sp
+                                            card.word.length > 8 -> 33.sp
+                                            else -> 38.sp
+                                        }
+
+                                        Text(
+                                            text = card.word,
+                                            fontSize = wordFontSize,
+                                            fontWeight = FontWeight.Bold,
+                                            color = colors.primaryText,
+                                            textAlign = TextAlign.Center,
+                                            softWrap = true,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 8.dp)
+                                        )
+                                    }
+
+                                    // The meaning is the answer for article-less cards -> never on the front.
+                                    if (!card.isArticleless && showMeaningOnFront && card.meaning.isNotEmpty()) {
+                                        Text(
+                                            text = card.meaning,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = colors.secondaryText,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            } else {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    // Keep article colors tied to their grammatical category.
+                                    val revealedWordFontSize = when {
+                                        card.word.length > 22 -> 20.sp
+                                        card.word.length > 16 -> 23.sp
+                                        card.word.length > 12 -> 26.sp
+                                        card.word.length > 8 -> 30.sp
+                                        else -> 36.sp
+                                    }
+                                    val revealedArtikelFontSize = when {
+                                        card.word.length > 22 -> 23.sp
+                                        card.word.length > 16 -> 26.sp
+                                        card.word.length > 12 -> 29.sp
+                                        card.word.length > 8 -> 33.sp
+                                        else -> 40.sp
+                                    }
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp)
+                                    ) {
+                                        card.artikel?.let { art ->
+                                            Text(
+                                                text = art.rawValue,
+                                                fontSize = revealedArtikelFontSize,
+                                                fontWeight = FontWeight.Black,
+                                                color = colors.artikelColor(art)
+                                            )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                        }
+                                        Text(
+                                            text = card.word,
+                                            fontSize = revealedWordFontSize,
+                                            fontWeight = FontWeight.Bold,
+                                            color = colors.primaryText,
+                                            textAlign = TextAlign.Start,
+                                            softWrap = true,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                    }
+
+                                    if (card.meaning.isNotEmpty()) {
+                                        HorizontalDivider(
+                                            color = colors.cardBorderSubtle,
+                                            modifier = Modifier.width(64.dp)
+                                        )
+                                        Text(
+                                            text = card.meaning,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Medium,
+                                            color = colors.secondaryText,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Bottom Action Area: der/die/das buttons or "Kontrol Et" before reveal; SM-2 ratings after.
+            // Snapshot ratings inside targetState so resetting guessResult on reveal->unreveal never
+            // flashes 4 buttons inside the exiting 2-button branch.
+            val configuration = LocalConfiguration.current
+            val density = LocalDensity.current
+            val actionState = BottomActionsState(
+                isRevealed = isRevealed,
+                isArticleless = card.isArticleless,
+                ratings = if (isRevealed) availableRatings else emptyList()
+            )
+
+            AnimatedContent(
+                targetState = actionState,
+                contentKey = { it.isRevealed to it.isArticleless },
+                transitionSpec = {
+                    (fadeIn(tween(190, delayMillis = 35)) + scaleIn(initialScale = 0.97f, animationSpec = tween(190, delayMillis = 35)))
+                        .togetherWith(fadeOut(tween(110)))
+                        .using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> spring(stiffness = Spring.StiffnessMediumLow) }))
+                },
+                label = "bottom_actions"
+            ) { state ->
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 60.dp)
+                ) {
+                    if (!state.isRevealed) {
+                        if (state.isArticleless) {
+                            Button(
+                                onClick = {
+                                    focusManager.clearFocus()
+                                    onCheckAndReveal()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = colors.accentBlue,
+                                    contentColor = colors.onBlue
+                                ),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .widthIn(min = 200.dp, max = 280.dp)
+                                    .heightIn(min = 54.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.study_check_button),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier
+                                    .widthIn(max = 520.dp)
+                                    .fillMaxWidth()
+                                    .selectableGroup()
+                            ) {
+                                Artikel.entries.forEach { art ->
+                                    val isSelected = typedArtikel.trim().equals(art.rawValue, ignoreCase = true)
+                                    ArtikelChoiceButton(
+                                        artikel = art,
+                                        isSelected = isSelected,
+                                        onClick = { onSelectArtikel(art) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
                         }
                     } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            // Keep article colors tied to their grammatical category.
-                            val revealedWordFontSize = when {
-                                card.word.length > 22 -> 20.sp
-                                card.word.length > 16 -> 23.sp
-                                card.word.length > 12 -> 26.sp
-                                card.word.length > 8 -> 30.sp
-                                else -> 36.sp
-                            }
-                            val revealedArtikelFontSize = when {
-                                card.word.length > 22 -> 23.sp
-                                card.word.length > 16 -> 26.sp
-                                card.word.length > 12 -> 29.sp
-                                card.word.length > 8 -> 33.sp
-                                else -> 40.sp
-                            }
+                        val ratingsToRender = state.ratings
+                        val useSingleRowRatings = ratingsToRender.size <= 2 ||
+                            (configuration.screenWidthDp >= 400 && density.fontScale <= 1.25f)
+                        val containerMaxWidth = if (ratingsToRender.size <= 2) 340.dp else 640.dp
 
+                        if (useSingleRowRatings) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier
+                                    .widthIn(max = containerMaxWidth)
                                     .fillMaxWidth()
-                                    .padding(horizontal = 8.dp)
                             ) {
-                                card.artikel?.let { art ->
-                                    Text(
-                                        text = art.rawValue,
-                                        fontSize = revealedArtikelFontSize,
-                                        fontWeight = FontWeight.Black,
-                                        color = colors.artikelColor(art)
+                                ratingsToRender.forEach { rating ->
+                                    RatingButton(
+                                        rating = rating,
+                                        intervalText = SM2Scheduler.previewInterval(card = card, rating = rating),
+                                        onClick = { onSubmitRating(rating) },
+                                        modifier = Modifier.weight(1f)
                                     )
-                                    Spacer(modifier = Modifier.width(10.dp))
                                 }
-                                Text(
-                                    text = card.word,
-                                    fontSize = revealedWordFontSize,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colors.primaryText,
-                                    textAlign = TextAlign.Start,
-                                    softWrap = true,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
                             }
-
-                            if (card.meaning.isNotEmpty()) {
-                                HorizontalDivider(
-                                    color = colors.cardBorderSubtle,
-                                    modifier = Modifier.width(160.dp)
-                                )
-                                Text(
-                                    text = card.meaning,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Medium,
-                                    color = colors.secondaryText,
-                                    textAlign = TextAlign.Center
-                                )
+                        } else {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .widthIn(max = containerMaxWidth)
+                                    .fillMaxWidth()
+                            ) {
+                                ratingsToRender.chunked(2).forEach { rowRatings ->
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        rowRatings.forEach { rating ->
+                                            RatingButton(
+                                                rating = rating,
+                                                intervalText = SM2Scheduler.previewInterval(card = card, rating = rating),
+                                                onClick = { onSubmitRating(rating) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Legend for artikel colors (irrelevant for article-less cards)
-                if (!card.isArticleless) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        ArtikelLegendDot(artikel = Artikel.DER, label = "der (Eril)")
-                        ArtikelLegendDot(artikel = Artikel.DIE, label = "die (Dişil)")
-                        ArtikelLegendDot(artikel = Artikel.DAS, label = "das (Nötr)")
-                    }
-                }
             }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(16.dp))
+@Composable
+private fun ArtikelChoiceButton(
+    artikel: Artikel,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalAppColors.current
+    val artColor = colors.artikelColor(artikel)
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "artikelButtonScale"
+    )
 
-        // Bottom Action Area (Clean mobile buttons, no keyboard shortcuts)
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+    Surface(
+        color = if (isSelected) artColor else colors.artikelBadgeBackground(artikel),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(
+            width = if (isSelected) 2.dp else 1.25.dp,
+            color = if (isSelected) artColor else artColor.copy(alpha = 0.50f)
+        ),
+        shadowElevation = if (isSelected) 4.dp else 1.dp,
+        modifier = modifier
+            .heightIn(min = 58.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(14.dp))
+            .selectable(
+                selected = isSelected,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.RadioButton,
+                onClick = onClick
+            )
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 84.dp)
+                .padding(horizontal = 8.dp, vertical = 12.dp)
         ) {
-            if (!isRevealed) {
-                // Article cards reveal on tap: the three article buttons above are the answer
-                // controls, so a second "Kontrol Et" step only adds friction. Article-less cards
-                // still need the explicit check because the answer is typed text.
-                if (card.isArticleless) {
-                    Button(
-                        onClick = {
-                            focusManager.clearFocus()
-                            onCheckAndReveal()
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.accentBlue,
-                            contentColor = colors.onBlue
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .widthIn(min = 200.dp, max = 280.dp)
-                            .heightIn(min = 48.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Kontrol Et",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else {
-                    Text(
-                        text = "Bir artikel seçin; cevap hemen gösterilir.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondaryText,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-                }
-            } else {
-                if (guessResult == ArtikelGuessResult.WRONG) {
-                    Text(
-                        text = "Yanlış cevaplandığı için sadece 'Tekrar' veya 'Zor' seçilebilir:",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Medium,
-                        color = colors.secondaryText,
-                        textAlign = TextAlign.Center
-                    )
-                } else {
-                    Text(
-                        text = "Hatırlama zorluğunu seçin:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondaryText,
-                        textAlign = TextAlign.Center
-                    )
-                }
-
-                BoxWithConstraints(
-                    modifier = Modifier
-                        .widthIn(max = if (availableRatings.size == 2) 340.dp else 640.dp)
-                        .fillMaxWidth()
-                ) {
-                    val ratingsPerRow = if (maxWidth >= 400.dp && LocalDensity.current.fontScale <= 1.3f) 4 else 2
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        maxItemsInEachRow = ratingsPerRow,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        availableRatings.forEach { rating ->
-                            RatingButton(
-                                rating = rating,
-                                intervalText = SM2Scheduler.previewInterval(card = card, rating = rating),
-                                onClick = { onSubmitRating(rating) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-            }
+            Text(
+                text = artikel.rawValue,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) colors.onArtikel(artikel) else artColor,
+                maxLines = 1
+            )
         }
-
-        Spacer(modifier = Modifier.height(4.dp))
     }
 }
 
 /**
- * Small secondary action inside the card header. Kept at 48dp so the touch target follows the
- * app-wide accessibility rule while still reading as a quiet pill next to the metadata.
+ * Quiet compact audio trigger in the card header. The outer Box provides a 48dp touch target while
+ * keeping the visible pill on the exact same baseline as the card metadata pill.
  */
 @Composable
 private fun ListenPill(onClick: () -> Unit) {
     val colors = LocalAppColors.current
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    val listenA11y = stringResource(R.string.study_listen_a11y)
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(50))
-            .background(colors.secondaryText.copy(alpha = 0.12f))
-            .clickable(onClickLabel = "Almanca telaffuzu dinle", role = Role.Button, onClick = onClick)
-            .padding(horizontal = 14.dp)
+            .clip(CircleShape)
+            .clickable(onClickLabel = listenA11y, role = Role.Button, onClick = onClick)
     ) {
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-            contentDescription = null,
-            tint = colors.primaryText,
-            modifier = Modifier.size(16.dp)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = "Dinle",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            color = colors.primaryText,
-            maxLines = 1
-        )
+        Surface(
+            color = colors.textBackground,
+            shape = CircleShape,
+            border = BorderStroke(1.dp, colors.cardBorderSubtle)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = null,
+                    tint = colors.accentBlue,
+                    modifier = Modifier.size(15.dp)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = stringResource(R.string.study_listen),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.primaryText,
+                    maxLines = 1
+                )
+            }
+        }
     }
 }
 
@@ -1142,78 +1256,46 @@ private fun WaitingForLearningCardView(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Öğrenme Kartı Zamanlayıcısı",
+            text = stringResource(R.string.study_learning_timer_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = colors.primaryText,
             textAlign = TextAlign.Center
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Text(
-            text = "Sıradaki tekrar kelimesi vaat edilen süre dolduğunda otomatik olarak ekrana gelecektir:",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.secondaryText,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 460.dp)
-        )
-
         Spacer(modifier = Modifier.height(18.dp))
 
         Text(
             text = timeString,
-            style = MaterialTheme.typography.headlineLarge,
+            style = MaterialTheme.typography.headlineLarge.tabular(),
             fontWeight = FontWeight.Black,
             fontFamily = FontFamily.Monospace,
             color = colors.accentOrange,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .background(colors.orangeBadgeBackground, RoundedCornerShape(16.dp))
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .border(1.dp, colors.accentOrange.copy(alpha = 0.30f), RoundedCornerShape(16.dp))
+                .padding(horizontal = 18.dp, vertical = 10.dp)
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        if (store.filteredPoolCards.any { it.stage == CardStage.NEW } && store.remainingNewToday == 0) {
+            Spacer(modifier = Modifier.height(20.dp))
 
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Button(
-                onClick = { store.forcePullNextLearningCard() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = colors.accentOrange,
-                    contentColor = colors.onOrange
-                ),
-                shape = RoundedCornerShape(10.dp),
+            OutlinedButton(
+                onClick = {
+                    store.updateSettings { it.copy(dailyNewCardLimit = it.dailyNewCardLimit + 10) }
+                },
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, colors.cardBorderSubtle),
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
-                Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Süreyi Beklemeden Şimdi Çalış",
+                    text = stringResource(R.string.study_increase_limit_10),
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center
                 )
-            }
-
-            if (store.filteredPoolCards.any { it.stage == CardStage.NEW } && store.remainingNewToday == 0) {
-                OutlinedButton(
-                    onClick = {
-                        store.updateSettings { it.copy(dailyNewCardLimit = it.dailyNewCardLimit + 10) }
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) {
-                    Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = INCREASE_LIMIT_LABEL,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center
-                    )
-                }
             }
         }
     }
@@ -1240,7 +1322,7 @@ private fun EmptyDatabaseView(
         Spacer(modifier = Modifier.height(18.dp))
 
         Text(
-            text = "Henüz Kelime Eklenmedi",
+            text = stringResource(R.string.study_empty_db_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = colors.primaryText,
@@ -1250,7 +1332,7 @@ private fun EmptyDatabaseView(
         Spacer(modifier = Modifier.height(10.dp))
 
         Text(
-            text = "Örnek kelimelerle başlayabilir, CSV içe aktarabilir veya AI ile kelime üretebilirsiniz.",
+            text = stringResource(R.string.study_empty_db_msg),
             style = MaterialTheme.typography.bodyMedium,
             color = colors.secondaryText,
             textAlign = TextAlign.Center,
@@ -1259,11 +1341,17 @@ private fun EmptyDatabaseView(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        Button(onClick = onLoadStarterPack, shape = RoundedCornerShape(10.dp)) {
+        Button(
+            onClick = onLoadStarterPack,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.heightIn(min = 48.dp)
+        ) {
             Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Örnek 30 Kelime", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.study_starter_pack_btn), fontWeight = FontWeight.SemiBold)
         }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         StudyAddWordsActions(onShowAIGenerator, onImportCSV)
     }
@@ -1297,24 +1385,14 @@ private fun SessionCompletedView(
 
         Text(
             text = if (store.selectedStudyDeck != null) {
-                "'${store.selectedStudyDeck}' Destesi Tamamlandı!"
+                stringResource(R.string.study_done_deck_title, store.selectedStudyDeck.orEmpty())
             } else {
-                "Bugünkü Çalışma Tamamlandı!"
+                stringResource(R.string.study_done_today_title)
             },
             fontSize = MaterialTheme.typography.headlineSmall.fontSize,
             fontWeight = FontWeight.Bold,
             color = colors.primaryText,
             textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Text(
-            text = "Günlük hedeflerinizi ve bekleyen tekrarlarınızı tamamladınız. Kartlarınız hatırlama durumunuza göre sonraki günlere planlandı.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.secondaryText,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 480.dp)
         )
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -1324,19 +1402,21 @@ private fun SessionCompletedView(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             StatMiniBox(
-                title = "Bugün öğrenilen (tüm desteler)",
+                title = stringResource(R.string.study_done_learned_today),
                 value = "${store.dailyProgress.newCardsStudied}",
                 color = colors.accentBlue,
                 background = colors.blueBadgeBackground
             )
             StatMiniBox(
-                title = "Bugün tekrar edilen (tüm desteler)",
+                title = stringResource(R.string.study_done_reviewed_today),
                 value = "${store.dailyProgress.reviewsCompleted}",
                 color = colors.success,
                 background = colors.successBadgeBackground
             )
             StatMiniBox(
-                title = if (store.selectedStudyDeck == null) "Toplam kelime" else "Destedeki kelime",
+                title = stringResource(
+                    if (store.selectedStudyDeck == null) R.string.study_total_words else R.string.study_deck_words
+                ),
                 value = "${store.filteredPoolCards.size}",
                 color = colors.accentPurple,
                 background = colors.purpleBadgeBackground
@@ -1350,12 +1430,14 @@ private fun SessionCompletedView(
                 onClick = {
                     store.updateSettings { it.copy(dailyNewCardLimit = it.dailyNewCardLimit + 10) }
                 },
-                shape = RoundedCornerShape(10.dp)
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.heightIn(min = 48.dp)
             ) {
                 Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(INCREASE_LIMIT_LABEL, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.study_increase_limit_10), fontWeight = FontWeight.SemiBold)
             }
+            Spacer(modifier = Modifier.height(10.dp))
         }
 
         StudyAddWordsActions(onShowAIGenerator, onImportCSV)
@@ -1369,16 +1451,26 @@ private fun StudyAddWordsActions(onShowAIGenerator: () -> Unit, onImportCSV: () 
         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        OutlinedButton(onClick = onShowAIGenerator, shape = RoundedCornerShape(10.dp)) {
+        OutlinedButton(
+            onClick = onShowAIGenerator,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, LocalAppColors.current.cardBorderSubtle),
+            modifier = Modifier.heightIn(min = 48.dp)
+        ) {
             Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text(AI_ACTION_LABEL, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.action_ai_generate), fontWeight = FontWeight.SemiBold)
         }
 
-        OutlinedButton(onClick = onImportCSV, shape = RoundedCornerShape(10.dp)) {
+        OutlinedButton(
+            onClick = onImportCSV,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, LocalAppColors.current.cardBorderSubtle),
+            modifier = Modifier.heightIn(min = 48.dp)
+        ) {
             Icon(Icons.Default.MoveToInbox, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text(CSV_IMPORT_LABEL, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.study_csv_import_btn), fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -1409,33 +1501,10 @@ private fun CounterPill(
         }
         Text(title, style = MaterialTheme.typography.labelSmall, color = colors.secondaryText)
         Text(
-            text = if (isStreak) "$count gün" else "$count",
-            style = MaterialTheme.typography.labelSmall,
+            text = if (isStreak) stringResource(R.string.study_streak_days_unit, count) else "$count",
+            style = MaterialTheme.typography.labelSmall.tabular(),
             fontWeight = FontWeight.Bold,
             color = color
-        )
-    }
-}
-
-@Composable
-private fun ArtikelLegendDot(
-    artikel: Artikel,
-    label: String
-) {
-    val colors = LocalAppColors.current
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .background(artikel.themeColor(), CircleShape)
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.secondaryText
         )
     }
 }
@@ -1448,30 +1517,64 @@ private fun RatingButton(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalAppColors.current
-    Button(
-        onClick = onClick,
-        modifier = modifier.heightIn(min = 48.dp).semantics(mergeDescendants = true) {},
-        shape = RoundedCornerShape(9.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = colors.ratingColor(rating),
-            contentColor = colors.onRating(rating)
+    val accent = colors.ratingColor(rating)
+    val containerColor = if (colors.isDark) accent.copy(alpha = 0.16f) else lerp(Color.White, accent, 0.11f)
+    val borderColor = if (colors.isDark) accent.copy(alpha = 0.45f) else accent.copy(alpha = 0.25f)
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
         ),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+        label = "ratingButtonScale"
+    )
+
+    Surface(
+        color = containerColor,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, borderColor),
+        modifier = modifier
+            .heightIn(min = 58.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .semantics(mergeDescendants = true) {}
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 9.dp)
         ) {
             Text(
-                text = rating.title,
+                text = stringResource(rating.titleRes()),
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
+                color = accent,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = intervalText,
-                style = MaterialTheme.typography.labelSmall,
-                textAlign = TextAlign.Center
+                style = MaterialTheme.typography.labelSmall.tabular(),
+                color = colors.secondaryText,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -1485,27 +1588,32 @@ private fun StatMiniBox(
     background: Color
 ) {
     val colors = LocalAppColors.current
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+    Surface(
+        color = background,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.22f)),
         modifier = Modifier
             .widthIn(min = 96.dp, max = 150.dp)
-            .heightIn(min = 66.dp)
-            .background(background, RoundedCornerShape(12.dp))
-            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .heightIn(min = 68.dp)
     ) {
-        Text(
-            text = value,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = color
-        )
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.secondaryText,
-            textAlign = TextAlign.Center
-        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+        ) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.headlineSmall.tabular(),
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.secondaryText,
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }
 
@@ -1577,8 +1685,7 @@ private fun StudyHeaderBarPreview() {
             onSelectDeck = {},
             onOpenDrawer = onOpenDrawer,
             onShowNewDeck = {},
-            onShowAIGenerator = {},
-            onImportCSV = {}
+            onShowAIGenerator = {}
         ) {
             StudyQueueSummary(newCount = 10, learningCount = 3, reviewCount = 8, streakDays = 4)
         }

@@ -105,21 +105,19 @@ data class GeneratedWordItem(
         get() = "${artikel.lowercase(Locale.ROOT)}_${word.lowercase(Locale.ROOT)}"
 }
 
-/** OAuth scope sets. Gemini scopes are sensitive and need OAuth consent screen configuration in Google Cloud. */
+/** OAuth scope sets for Google Sign-In and Google Drive sync. */
 object GoogleScopes {
     const val DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
     const val USER_EMAIL = "https://www.googleapis.com/auth/userinfo.email"
     const val USER_PROFILE = "https://www.googleapis.com/auth/userinfo.profile"
-    const val GEMINI_RETRIEVER = "https://www.googleapis.com/auth/generative-language.retriever"
-    const val CLOUD_PLATFORM = "https://www.googleapis.com/auth/cloud-platform"
 
-    /** Scopes needed by Drive sync only (used for Drive calls so existing narrower grants keep working). */
+    /** Scopes needed by Drive sync only. */
     const val DRIVE_TOKEN = "oauth2:$DRIVE_FILE $USER_EMAIL $USER_PROFILE"
 
-    /** Drive + Gemini scopes (same set the manual OAuth deep-link flow requests). */
-    const val FULL_TOKEN = "oauth2:$DRIVE_FILE $USER_EMAIL $USER_PROFILE $GEMINI_RETRIEVER $CLOUD_PLATFORM"
+    /** Alias kept for compatibility; only Drive + profile scopes are requested. */
+    const val FULL_TOKEN = DRIVE_TOKEN
 
-    /** True when a Gemini HTTP response means the OAuth token lacks the required scopes. */
+    /** True when an HTTP 403 response indicates insufficient authentication scopes. */
     fun isInsufficientScopes(httpStatus: Int, body: String): Boolean =
         httpStatus == 403 && (
             body.contains("insufficient authentication scopes", ignoreCase = true) ||
@@ -128,13 +126,24 @@ object GoogleScopes {
             )
 
     const val RECONSENT_MESSAGE =
-        "Gemini erişimi için Google hesabınızın ek izinleri (Gemini / Cloud) gerekiyor. " +
-            "\"Google Hesabını Yeniden Bağla\" düğmesine dokunup izinleri onaylayın. " +
-            "Sorun sürerse Ayarlar'dan \"Hesaptan Çıkış Yap\" deyip tekrar giriş yapın."
+        "Google Drive erişimi için hesap izinlerini yeniden onaylayın."
 }
 
-/** Thrown when the Google token lacks Gemini scopes; the user must re-consent. Never retried. */
-class GeminiScopeException(message: String = GoogleScopes.RECONSENT_MESSAGE) : IllegalStateException(message)
+private fun localizedText(tr: String, en: String, de: String): String =
+    when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
+        "en" -> en
+        "de" -> de
+        else -> tr
+    }
+
+/** Thrown when the Google token lacks required scopes; the user must re-consent. Never retried. */
+class GeminiScopeException(
+    message: String = localizedText(
+        tr = GoogleScopes.RECONSENT_MESSAGE,
+        en = "Please re-approve account permissions for Google Drive access.",
+        de = "Bitte bestätigen Sie die Kontoberechtigungen für den Google Drive-Zugriff erneut."
+    )
+) : IllegalStateException(message)
 
 class GeminiAuthManager private constructor(private val appContext: Context) {
     var authMode by mutableStateOf(GeminiAuthMode.GOOGLE_OAUTH)
@@ -184,7 +193,9 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 deferred.complete(code)
                 return true
             } else if (!error.isNullOrEmpty()) {
-                deferred.completeExceptionally(IllegalStateException("Google OAuth hatası: $error"))
+                deferred.completeExceptionally(
+                    IllegalStateException(com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.oauth_error_prefix, error))
+                )
                 return true
             }
         }
@@ -312,11 +323,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestProfile()
-            .requestScopes(
-                Scope(GoogleScopes.DRIVE_FILE),
-                Scope(GoogleScopes.GEMINI_RETRIEVER),
-                Scope(GoogleScopes.CLOUD_PLATFORM)
-            )
+            .requestScopes(Scope(GoogleScopes.DRIVE_FILE))
             .build()
         return GoogleSignIn.getClient(context, gso)
     }
@@ -327,17 +334,19 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
 
     suspend fun handleGoogleSignInResult(data: Intent?, context: Context) {
         isAuthenticating = true
-        authStatusMessage = "Google hesabı doğrulanıyor..."
+        authStatusMessage = com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.auth_verifying_google)
         try {
             val task = GoogleSignIn.getSignedInAccountFromIntent(data)
             val account = try {
                 task.getResult(ApiException::class.java)
             } catch (e: ApiException) {
                 if (e.statusCode == CommonStatusCodes.SIGN_IN_REQUIRED || e.statusCode == 12501 || e.statusCode == CommonStatusCodes.CANCELED) {
-                    throw IllegalStateException("Giriş işlemi iptal edildi.")
+                    throw IllegalStateException(com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.auth_cancelled))
                 }
                 val statusMsg = CommonStatusCodes.getStatusCodeString(e.statusCode)
-                throw IllegalStateException("Google girişi başarısız oldu: $statusMsg (Kod: ${e.statusCode})")
+                throw IllegalStateException(
+                    com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.auth_google_failed_code, statusMsg, e.statusCode)
+                )
             }
 
             userEmail = account.email ?: ""
@@ -347,16 +356,9 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             val rawAccount = account.account
                 ?: Account(userEmail, "com.google")
 
-            authStatusMessage = "Bulut senkronizasyonu için erişim anahtarı alınıyor..."
-            // Request Drive + Gemini scopes. If the user un-ticked the Gemini permissions on the
-            // consent screen, fall back to a Drive-only token so cloud sync still works.
+            authStatusMessage = com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.auth_fetching_drive_token)
             val token = withContext(Dispatchers.IO) {
-                try {
-                    GoogleAuthUtil.getToken(context.applicationContext, rawAccount, GoogleScopes.FULL_TOKEN)
-                } catch (_: GoogleAuthException) {
-                    // Consent missing OR scope refused by the Cloud project: keep Drive sync working.
-                    GoogleAuthUtil.getToken(context.applicationContext, rawAccount, GoogleScopes.DRIVE_TOKEN)
-                }
+                GoogleAuthUtil.getToken(context.applicationContext, rawAccount, GoogleScopes.DRIVE_TOKEN)
             }
 
             oauthAccessToken = token
@@ -365,7 +367,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             hasCompletedOnboarding = true
             hasDismissedStartupSignIn = true
             saveToKeystore()
-            authStatusMessage = "Google Hesabı ($userEmail) başarıyla bağlandı!"
+            authStatusMessage = com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.auth_google_connected_email, userEmail)
         } finally {
             isAuthenticating = false
         }
@@ -437,7 +439,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 .appendQueryParameter("response_type", "code")
                 .appendQueryParameter(
                     "scope",
-                    "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/generative-language.retriever https://www.googleapis.com/auth/cloud-platform"
+                    "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/drive.file"
                 )
                 .appendQueryParameter("access_type", "offline")
                 .appendQueryParameter("prompt", "consent")
@@ -474,7 +476,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 serverJob.cancel()
             }
 
-            authStatusMessage = "Yetkilendirme kodu alındı, erişim anahtarı (Access Token) alınıyor..."
+            authStatusMessage = com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.auth_exchanging_code)
             exchangeCodeForToken(
                 code = authCode,
                 codeVerifier = codeVerifier,
@@ -491,11 +493,11 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
             saveToKeystore()
             runCatchingCancellable { fetchUserProfile() }
             val emailSuffix = if (userEmail.isNotBlank()) " ($userEmail)" else ""
-            authStatusMessage = "Google Hesabı$emailSuffix, Drive Senkronizasyonu ve Gemini AI başarıyla bağlandı!"
+            authStatusMessage = com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.auth_drive_connected_full, emailSuffix)
         } catch (e: Exception) {
             val msg = e.localizedMessage ?: ""
             if (msg.contains("Unable to resolve host", ignoreCase = true) || msg.contains("No address associated", ignoreCase = true)) {
-                throw IllegalStateException("Google sunucularına bağlanılamadı (Ağ/DNS Hatası).\nLütfen emülatörünüzün veya cihazınızın internet bağlantısını kontrol edin (Android Emülatörde Uçak modunu açıp kapatmak ağ bağlantısını yeniler).")
+                throw IllegalStateException(com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.auth_network_dns_error))
             } else {
                 throw e
             }
@@ -642,7 +644,7 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
 
     private suspend fun <T> withNetworkRetry(
         maxAttempts: Int = 4,
-        operation: String = "Ağ isteği",
+        operation: String = com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.network_request_default),
         block: suspend () -> T
     ): T {
         var lastException: Exception? = null
@@ -669,7 +671,9 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 throw e
             }
         }
-        throw lastException ?: IllegalStateException("$operation başarısız oldu.")
+        throw lastException ?: IllegalStateException(
+            com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.network_request_failed, operation)
+        )
     }
 
     private suspend fun exchangeCodeForToken(
@@ -679,7 +683,10 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
         clientId: String,
         clientSecret: String
     ) = withContext(Dispatchers.IO) {
-        withNetworkRetry(maxAttempts = 4, operation = "Google OAuth Token Değişimi") {
+        withNetworkRetry(
+            maxAttempts = 4,
+            operation = com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.oauth_token_exchange_op)
+        ) {
             val params = mutableMapOf(
                 "client_id" to clientId,
                 "code" to code,
@@ -710,7 +717,9 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
 
             if (status !in 200..299) {
-                throw IllegalStateException("OAuth Token Hatası: $body")
+                throw IllegalStateException(
+                    com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.oauth_token_error, body)
+                )
             }
 
             val json = JSONObject(body)
@@ -750,51 +759,18 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
         }
         val token = oauthAccessToken.trim()
         if (token.isEmpty()) {
-            throw IllegalStateException("Geçerli bir OAuth erişim anahtarı bulunamadı. Lütfen yeniden giriş yapın.")
+            throw IllegalStateException(
+                com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.oauth_no_valid_token)
+            )
         }
         return token
     }
 
     /**
-     * Access token for Gemini (generative-language) calls. Requests the Drive + Gemini scope set.
-     * A user who signed in natively before the Gemini scopes were added only holds drive.file; for them
-     * getToken needs consent again, which is reported as [GeminiScopeException] (Turkish re-consent message).
-     * Tokens from the manual OAuth flow (refresh token present) already carry the Gemini scopes.
+     * Access token for Google Drive sync calls. Requests only Drive + basic profile scopes.
+     * Kept as an alias so existing callers continue to work without requesting Gemini/Cloud scopes.
      */
-    suspend fun validGeminiAccessToken(): String {
-        val email = userEmail.trim()
-        var consentMissing = false
-        if (email.isNotEmpty()) {
-            try {
-                val token = withContext(Dispatchers.IO) {
-                    GoogleAuthUtil.getToken(appContext, Account(email, "com.google"), GoogleScopes.FULL_TOKEN)
-                }
-                if (token.isNotEmpty()) {
-                    oauthAccessToken = token
-                    return token
-                }
-            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-                throw e
-            } catch (_: GoogleAuthException) {
-                // UserRecoverableAuthException (consent for the Gemini scopes missing) or scope refused;
-                // maybe a manual-flow token below still works.
-                consentMissing = true
-            } catch (_: Exception) {
-                // Account not on device / transient failure: fall through to stored credentials.
-            }
-        }
-
-        if (oauthRefreshToken.isNotEmpty() && effectiveClientId.isNotEmpty()) {
-            // Manual OAuth flow tokens carry the Gemini scopes; the access token may have been
-            // replaced by a Drive-only one, so refresh to get the full-scope token back.
-            val refreshed = runCatchingCancellable { refreshOAuthToken() }
-            if (refreshed.isSuccess && oauthAccessToken.isNotBlank()) return oauthAccessToken.trim()
-        }
-        if (consentMissing && oauthRefreshToken.isEmpty()) {
-            throw GeminiScopeException()
-        }
-        return validOAuthAccessToken()
-    }
+    suspend fun validGeminiAccessToken(): String = validOAuthAccessToken()
 
     suspend fun refreshOAuthToken() = withContext(Dispatchers.IO) {
         withNetworkRetry(maxAttempts = 3, operation = "OAuth Token Yenileme") {
@@ -825,13 +801,17 @@ class GeminiAuthManager private constructor(private val appContext: Context) {
                 ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
 
             if (status !in 200..299) {
-                throw IllegalStateException("OAuth oturumu yenilenemedi. Lütfen tekrar giriş yapın.")
+                throw IllegalStateException(
+                    com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.oauth_refresh_failed)
+                )
             }
 
             val json = JSONObject(body)
             val access = json.optString("access_token", "")
             if (access.isEmpty()) {
-                throw IllegalStateException("OAuth oturumu yenilenemedi. Lütfen tekrar giriş yapın.")
+                throw IllegalStateException(
+                    com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.oauth_refresh_failed)
+                )
             }
             val expiresIn = json.optDouble("expires_in", 3600.0)
 
@@ -1448,21 +1428,41 @@ object GoogleDriveSyncService {
             rawMsg.contains("is disabled", ignoreCase = true) ||
             reason == "accessNotConfigured" || reason == "SERVICE_DISABLED"
         ) {
-            return "Google Cloud projenizde 'Google Drive API' etkinleştirilmemiş.\nLütfen Google Cloud Console'dan Google Drive API'yi etkinleştirin (Enable):\nhttps://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=414393134856"
+            return localizedText(
+                tr = "Google Cloud projenizde 'Google Drive API' etkinleştirilmemiş.",
+                en = "'Google Drive API' is not enabled in your Google Cloud project.",
+                de = "Die 'Google Drive API' ist in Ihrem Google Cloud-Projekt nicht aktiviert."
+            )
         }
 
         if (httpCode == 401) {
-            return "Google oturumunun süresi dolmuş. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın."
+            return localizedText(
+                tr = "Google oturumunun süresi dolmuş. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın.",
+                en = "Google session expired. Please sign out and sign in again.",
+                de = "Google-Sitzung abgelaufen. Bitte melden Sie sich ab und erneut an."
+            )
         }
 
         if (httpCode == 403) {
             if (rawMsg.contains("insufficient", ignoreCase = true)) {
-                return "Google Drive izinleri eksik. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın ve Drive izin kutucuğunu işaretleyin."
+                return localizedText(
+                    tr = "Google Drive izinleri eksik. Lütfen 'Hesaptan Çıkış Yap' deyip tekrar giriş yapın ve Drive izin kutucuğunu işaretleyin.",
+                    en = "Google Drive permissions missing. Please sign out, sign in again, and check the Drive permission box.",
+                    de = "Google Drive-Berechtigungen fehlen. Bitte melden Sie sich ab, wieder an und aktivieren Sie die Drive-Berechtigung."
+                )
             }
-            return "Google Drive erişim reddedildi (HTTP 403):\n$rawMsg"
+            return localizedText(
+                tr = "Google Drive erişim reddedildi (HTTP 403):\n$rawMsg",
+                en = "Google Drive access denied (HTTP 403):\n$rawMsg",
+                de = "Google Drive-Zugriff verweigert (HTTP 403):\n$rawMsg"
+            )
         }
 
-        return "Google Drive hatası (HTTP $httpCode):\n$rawMsg"
+        return localizedText(
+            tr = "Google Drive hatası (HTTP $httpCode):\n$rawMsg",
+            en = "Google Drive error (HTTP $httpCode):\n$rawMsg",
+            de = "Google Drive-Fehler (HTTP $httpCode):\n$rawMsg"
+        )
     }
 
     suspend fun ensureSyncFolder(authManager: GeminiAuthManager): String = withContext(Dispatchers.IO) {
@@ -1582,7 +1582,13 @@ object GoogleDriveSyncService {
 
         val newFolderId = JSONObject(createBody).optString("id", "")
         if (newFolderId.isEmpty()) {
-            throw IllegalStateException("Google Drive klasör kimliği alınamadı.")
+            throw IllegalStateException(
+                localizedText(
+                    tr = "Google Drive klasör kimliği alınamadı.",
+                    en = "Could not obtain Google Drive folder ID.",
+                    de = "Google Drive-Ordner-ID konnte nicht abgerufen werden."
+                )
+            )
         }
 
         withContext(Dispatchers.Main) {
@@ -1679,7 +1685,13 @@ object GoogleDriveSyncService {
         val parsedBackup = try {
             ArtikelMeisterBackup.fromJsonString(dlText)
         } catch (e: Exception) {
-            throw IllegalStateException("Buluttaki yedek dosyası okunamadı; üzerine yazılmadı. (${e.localizedMessage})")
+            throw IllegalStateException(
+                localizedText(
+                    tr = "Buluttaki yedek dosyası okunamadı; üzerine yazılmadı. (${e.localizedMessage})",
+                    en = "Could not read cloud backup file; not overwritten. (${e.localizedMessage})",
+                    de = "Cloud-Backup-Datei konnte nicht gelesen werden; nicht überschrieben. (${e.localizedMessage})"
+                )
+            )
         }
         CloudSnapshot(folderId = folderId, fileId = fileId, backup = parsedBackup)
     }
@@ -1735,7 +1747,13 @@ object GoogleDriveSyncService {
         }
 
         if (targetFileId.isEmpty()) {
-            throw IllegalStateException("Google Drive dosya kimliği oluşturulamadı.")
+            throw IllegalStateException(
+                localizedText(
+                    tr = "Google Drive dosya kimliği oluşturulamadı.",
+                    en = "Could not create Google Drive file ID.",
+                    de = "Google Drive-Datei-ID konnte nicht erstellt werden."
+                )
+            )
         }
 
         // Step 2: Upload the JSON content via media upload (using POST + X-HTTP-Method-Override: PATCH for Android HttpURLConnection compatibility)

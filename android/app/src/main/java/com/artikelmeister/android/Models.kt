@@ -488,7 +488,7 @@ object SM2Scheduler {
                             intervalDays = 0.5 / (24.0 * 60.0), // 30 sec
                             dueDate = nowMillis + 30_000L
                         )
-                        return ScheduleResult(updated, "30 sn")
+                        return ScheduleResult(updated, localizedUnit(30, UnitKind.SECOND))
                     }
 
                     ReviewRating.HARD -> {
@@ -497,7 +497,7 @@ object SM2Scheduler {
                             intervalDays = 2.0 / (24.0 * 60.0), // 2 min
                             dueDate = nowMillis + 2 * minuteMs
                         )
-                        return ScheduleResult(updated, "2 dk")
+                        return ScheduleResult(updated, localizedUnit(2, UnitKind.MINUTE))
                     }
 
                     ReviewRating.GOOD -> {
@@ -508,7 +508,7 @@ object SM2Scheduler {
                                 intervalDays = 5.0 / (24.0 * 60.0), // 5 min
                                 dueDate = nowMillis + 5 * minuteMs
                             )
-                            ScheduleResult(updated, "5 dk")
+                            ScheduleResult(updated, localizedUnit(5, UnitKind.MINUTE))
                         } else {
                             updated = updated.copy(
                                 stage = CardStage.REVIEW,
@@ -516,7 +516,7 @@ object SM2Scheduler {
                                 intervalDays = 1.0,
                                 dueDate = nowMillis + 1 * dayMs
                             )
-                            ScheduleResult(updated, "1 gün")
+                            ScheduleResult(updated, formatDays(1.0))
                         }
                     }
 
@@ -528,7 +528,7 @@ object SM2Scheduler {
                             easeFactor = max(1.3, card.easeFactor + 0.15),
                             dueDate = nowMillis + 4 * dayMs
                         )
-                        return ScheduleResult(updated, "4 gün")
+                        return ScheduleResult(updated, formatDays(4.0))
                     }
                 }
             }
@@ -540,7 +540,7 @@ object SM2Scheduler {
                             intervalDays = 0.5 / (24.0 * 60.0),
                             dueDate = nowMillis + 30_000L
                         )
-                        return ScheduleResult(updated, "30 sn")
+                        return ScheduleResult(updated, localizedUnit(30, UnitKind.SECOND))
                     }
 
                     ReviewRating.HARD -> {
@@ -548,7 +548,7 @@ object SM2Scheduler {
                             intervalDays = 2.0 / (24.0 * 60.0),
                             dueDate = nowMillis + 2 * minuteMs
                         )
-                        return ScheduleResult(updated, "2 dk")
+                        return ScheduleResult(updated, localizedUnit(2, UnitKind.MINUTE))
                     }
 
                     ReviewRating.GOOD -> {
@@ -591,7 +591,7 @@ object SM2Scheduler {
                             intervalDays = max(1.0, round(currentInterval * 0.4)),
                             dueDate = nowMillis + 30_000L
                         )
-                        return ScheduleResult(updated, "30 sn")
+                        return ScheduleResult(updated, localizedUnit(30, UnitKind.SECOND))
                     }
 
                     ReviewRating.HARD -> {
@@ -640,12 +640,53 @@ object SM2Scheduler {
         }
     }
 
+    private enum class UnitKind { SECOND, MINUTE }
+
+    private fun localizedUnit(value: Int, kind: UnitKind): String {
+        val lang = Locale.getDefault().language.lowercase(Locale.ROOT)
+        return when (kind) {
+            UnitKind.SECOND -> when (lang) {
+                "en" -> "$value s"
+                "de" -> "$value Sek."
+                else -> "$value sn"
+            }
+            UnitKind.MINUTE -> when (lang) {
+                "en" -> "$value min"
+                "de" -> "$value Min."
+                else -> "$value dk"
+            }
+        }
+    }
+
     fun formatDays(days: Double): String {
         val intDays = days.roundToInt()
+        val locale = Locale.getDefault()
+        val lang = locale.language.lowercase(Locale.ROOT)
         return when {
-            intDays < 30 -> "${max(1, intDays)} gün"
-            intDays < 365 -> String.format(Locale("tr", "TR"), "%.1f ay", intDays / 30.0)
-            else -> String.format(Locale("tr", "TR"), "%.1f yıl", intDays / 365.0)
+            intDays < 30 -> {
+                val d = max(1, intDays)
+                when (lang) {
+                    "en" -> if (d == 1) "1 day" else "$d days"
+                    "de" -> if (d == 1) "1 Tag" else "$d Tage"
+                    else -> "$d gün"
+                }
+            }
+            intDays < 365 -> {
+                val m = intDays / 30.0
+                when (lang) {
+                    "en" -> String.format(locale, "%.1f mo", m)
+                    "de" -> String.format(locale, "%.1f Mon.", m)
+                    else -> String.format(locale, "%.1f ay", m)
+                }
+            }
+            else -> {
+                val y = intDays / 365.0
+                when (lang) {
+                    "en" -> String.format(locale, "%.1f yr", y)
+                    "de" -> String.format(locale, "%.1f J.", y)
+                    else -> String.format(locale, "%.1f yıl", y)
+                }
+            }
         }
     }
 }

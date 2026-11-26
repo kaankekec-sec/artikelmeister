@@ -200,6 +200,59 @@ do {
     check(again.stage == .relearning && again.lapses == 1, "sm2 again -> relearning")
 }
 
+// ---------- SemVer & VersionChecker ----------
+do {
+    check(SemVer.parse("1.3.0") == SemVer(major: 1, minor: 3, patch: 0, preRelease: nil), "semver plain")
+    check(SemVer.parse("v1.3.0") == SemVer(major: 1, minor: 3, patch: 0, preRelease: nil), "semver leading v")
+    check(SemVer.parse("V1.2") == SemVer(major: 1, minor: 2, patch: 0, preRelease: nil), "semver 2-part")
+    check(SemVer.parse("v1.4.0-beta.1")?.preRelease == "beta.1", "semver pre-release")
+    check(SemVer.parse("invalid") == nil, "semver invalid")
+    check(SemVer.parse("") == nil, "semver empty")
+    check(SemVer.parse("1.2.3.4") == nil, "semver 4-part rejected")
+
+    check(SemVer.parse("v1.2.5")! < SemVer.parse("1.3.0")!, "v1.2.5 < 1.3.0")
+    check(SemVer.parse("1.3.0")! < SemVer.parse("v1.4.0")!, "1.3.0 < v1.4.0")
+    check(SemVer.parse("1.3.0-beta.1")! < SemVer.parse("1.3.0")!, "pre-release < release")
+
+    check(!VersionChecker.isUpdateRequired(currentVersion: "1.3.0", latestTag: "v1.2.5"), "no update for older tag")
+    check(!VersionChecker.isUpdateRequired(currentVersion: "1.3.0", latestTag: "v1.3.0"), "no update for equal tag")
+    check(VersionChecker.isUpdateRequired(currentVersion: "1.3.0", latestTag: "v1.4.0"), "update required for newer tag")
+    check(!VersionChecker.isUpdateRequired(currentVersion: "1.3.0", latestTag: "not-a-tag"), "malformed tag fails open")
+
+    let validJson = """
+    {"tag_name":"v1.4.0","html_url":"https://github.com/kaankekec-sec/artikelmeister/releases/tag/v1.4.0"}
+    """
+    let parsed = VersionChecker.parseLatestReleaseJson(validJson)
+    check(parsed?.tagName == "v1.4.0", "parseLatestReleaseJson tag")
+    check(parsed?.htmlUrl == "https://github.com/kaankekec-sec/artikelmeister/releases/tag/v1.4.0", "parseLatestReleaseJson url")
+
+    let untrustedUrlJson = """
+    {"tag_name":"v1.4.0","html_url":"https://evil.example.com/release"}
+    """
+    let parsedFallback = VersionChecker.parseLatestReleaseJson(untrustedUrlJson)
+    check(parsedFallback?.htmlUrl == VersionChecker.fallbackReleaseUrl, "untrusted html_url falls back safely")
+
+    check(VersionChecker.parseLatestReleaseJson("not json") == nil, "malformed json returns nil")
+    check(VersionChecker.parseLatestReleaseJson("{\"html_url\":\"https://github.com/kaankekec-sec/artikelmeister/\"}") == nil, "missing tag_name returns nil")
+}
+
+// ---------- Localization (TR / EN / DE) ----------
+do {
+    check(AppLanguage.allCases == [.tr, .en, .de], "AppLanguage has only tr, en, de")
+    check(AppLanguage.resolveSystemLanguage(preferredLanguages: ["tr-TR"]) == .tr, "system lang tr")
+    check(AppLanguage.resolveSystemLanguage(preferredLanguages: ["en-US"]) == .en, "system lang en")
+    check(AppLanguage.resolveSystemLanguage(preferredLanguages: ["de-DE"]) == .de, "system lang de")
+    check(AppLanguage.resolveSystemLanguage(preferredLanguages: ["fr-FR"]) == .tr, "system lang fallback tr")
+
+    for (key, resolver) in L10n.allCoreKeysForTesting {
+        for lang in [AppLanguage.tr, AppLanguage.en, AppLanguage.de] {
+            let value = resolver(lang).trimmingCharacters(in: .whitespacesAndNewlines)
+            check(!value.isEmpty, "L10n \(key) non-empty for \(lang.rawValue)")
+        }
+    }
+    check(L10n.tabStudy(.tr) != L10n.tabStudy(.en) && L10n.tabStudy(.en) != L10n.tabStudy(.de), "tabStudy distinct across TR/EN/DE")
+}
+
 runCsvSafetyTests()
 print("\(total - failures)/\(total) checks passed")
 exit(failures == 0 ? 0 : 1)

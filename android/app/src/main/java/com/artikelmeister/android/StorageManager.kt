@@ -915,13 +915,20 @@ class DeckStore(private val appContext: Context) {
         if (cardsLoadFailed) {
             // Local card files could not be decoded: do not merge/upload anything.
             cloudSyncIsError = true
-            cloudSyncStatusMessage = "Yerel kelime dosyası okunamadı; veri kaybını önlemek için eşitleme durduruldu."
+            cloudSyncStatusMessage = com.artikelmeister.android.ui.UiPreferences.getString(
+                appContext,
+                R.string.sync_corrupt_local_aborted
+            )
             return
         }
         isSyncingCloud = true
         if (!isSilentAutoSync) {
             cloudSyncIsError = false
-            cloudSyncStatusMessage = "Google Drive ('${GoogleDriveSyncService.SYNC_FOLDER_NAME}') ile eşitleniyor..."
+            cloudSyncStatusMessage = com.artikelmeister.android.ui.UiPreferences.getString(
+                appContext,
+                R.string.sync_in_progress_folder,
+                GoogleDriveSyncService.SYNC_FOLDER_NAME
+            )
         }
 
         try {
@@ -1029,21 +1036,38 @@ class DeckStore(private val appContext: Context) {
             cloudSyncIsError = false
             cloudSyncStatusMessage = when {
                 addedFromCloud > 0 ->
-                    "Bulutla eşitlendi: +$addedFromCloud yeni kelime alındı (Toplam ${cards.size} kelime)."
+                    com.artikelmeister.android.ui.UiPreferences.getString(
+                        appContext,
+                        R.string.sync_done_added,
+                        addedFromCloud,
+                        cards.size
+                    )
                 else ->
-                    "Google Drive ile başarıyla eşitlendi (${cards.size} kelime, $currentStreakDays gün seri)."
+                    com.artikelmeister.android.ui.UiPreferences.getString(
+                        appContext,
+                        R.string.sync_done_summary,
+                        cards.size,
+                        currentStreakDays
+                    )
             }
         } catch (e: Exception) {
             // Cancellation (e.g. the calling composition left the screen) is NOT a sync error:
             // never show it to the user. Rethrow so structured concurrency keeps working;
             // isSyncingCloud is reset in finally either way.
-            val message = SyncErrors.userMessage(e, "Bağlantı kurulamadı")
+            val message = SyncErrors.userMessage(
+                e,
+                com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.sync_connection_failed)
+            )
             if (message == null) {
                 if (!isSilentAutoSync) cloudSyncStatusMessage = null
                 throw e
             }
             cloudSyncIsError = true
-            cloudSyncStatusMessage = "Bulut eşitleme hatası: $message"
+            cloudSyncStatusMessage = com.artikelmeister.android.ui.UiPreferences.getString(
+                appContext,
+                R.string.sync_error_prefix,
+                message
+            )
         } finally {
             isSyncingCloud = false
         }
@@ -1072,7 +1096,10 @@ class DeckStore(private val appContext: Context) {
             try {
                 authManager.handleGoogleSignInResult(data, appContext)
             } catch (e: Exception) {
-                error = SyncErrors.userMessage(e, "Google girişi başarısız oldu.")
+                error = SyncErrors.userMessage(
+                    e,
+                    com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.auth_google_signin_failed)
+                )
                 if (error == null) throw e
                 cloudSyncStatusMessage = error
                 cloudSyncIsError = true
@@ -1091,10 +1118,17 @@ class DeckStore(private val appContext: Context) {
             try {
                 deleteAccountAndAllData(authManager)
             } catch (e: Exception) {
-                val message = SyncErrors.userMessage(e, "Hesap silinemedi.")
+                val message = SyncErrors.userMessage(
+                    e,
+                    com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.settings_deleting_account)
+                )
                 if (message == null) throw e
                 cloudSyncIsError = true
-                cloudSyncStatusMessage = "Hesap silme hatası: $message"
+                cloudSyncStatusMessage = com.artikelmeister.android.ui.UiPreferences.getString(
+                    appContext,
+                    R.string.account_delete_error,
+                    message
+                )
             } finally {
                 onFinished()
             }
@@ -1148,7 +1182,9 @@ class DeckStore(private val appContext: Context) {
         // would then wipe the word list. Require a real cards array and snapshot before replacing.
         val probe = JSONObject(jsonStr)
         if (probe.optJSONArray("cards") == null && probe.optJSONArray("articlelessCards") == null) {
-            throw IllegalArgumentException("Bu dosya geçerli bir ArtikelMeister yedeği değil. Hiçbir veri değiştirilmedi.")
+            throw IllegalArgumentException(
+                com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.backup_invalid_file)
+            )
         }
         val backup = ArtikelMeisterBackup.fromJsonString(jsonStr)
         if (!mergeWithExisting) writeImportSnapshot()
@@ -1237,7 +1273,9 @@ class DeckStore(private val appContext: Context) {
         CsvCards.requireCsvName(displayNameOf(uri))
 
         val bytes = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: throw IllegalArgumentException("CSV dosyası okunamadı.")
+            ?: throw IllegalArgumentException(
+                com.artikelmeister.android.ui.UiPreferences.getString(appContext, R.string.csv_read_failed)
+            )
 
         val rawContent = CsvCards.decodeAndValidate(bytes)
 

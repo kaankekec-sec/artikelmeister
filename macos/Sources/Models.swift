@@ -148,9 +148,9 @@ enum Artikel: String, Codable, CaseIterable, Identifiable {
 
     var grammaticalLabel: String {
         switch self {
-        case .der: return "Maskulin (Eril)"
-        case .die: return "Feminin (Dişil)"
-        case .das: return "Neutrum (Nötr)"
+        case .der: return L10n.text("Maskulin (Eril)", en: "Masculine", de: "Maskulin")
+        case .die: return L10n.text("Feminin (Dişil)", en: "Feminine", de: "Feminin")
+        case .das: return L10n.text("Neutrum (Nötr)", en: "Neuter", de: "Neutrum")
         }
     }
 
@@ -173,10 +173,10 @@ enum CardStage: String, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .new: return "Yeni"
-        case .learning: return "Öğreniliyor"
-        case .review: return "Tekrar"
-        case .relearning: return "Yeniden Öğreniliyor"
+        case .new: return L10n.text("Yeni", en: "New", de: "Neu")
+        case .learning: return L10n.text("Öğreniliyor", en: "Learning", de: "Lernen")
+        case .review: return L10n.text("Tekrar", en: "Review", de: "Wiederholung")
+        case .relearning: return L10n.text("Yeniden Öğreniliyor", en: "Relearning", de: "Erneut lernen")
         }
     }
 
@@ -207,10 +207,10 @@ enum ReviewRating: Int, CaseIterable {
 
     var title: String {
         switch self {
-        case .again: return "Tekrar"
-        case .hard: return "Zor"
-        case .good: return "İyi"
-        case .easy: return "Kolay"
+        case .again: return L10n.text("Tekrar", en: "Again", de: "Nochmal")
+        case .hard: return L10n.text("Zor", en: "Hard", de: "Schwer")
+        case .good: return L10n.text("İyi", en: "Good", de: "Gut")
+        case .easy: return L10n.text("Kolay", en: "Easy", de: "Einfach")
         }
     }
 
@@ -745,13 +745,13 @@ enum SM2Scheduler {
                 updated.repetitions = 0
                 updated.intervalDays = 0.5 / (24.0 * 60.0) // 30 sec
                 updated.dueDate = now.addingTimeInterval(30)
-                return ScheduleResult(updatedCard: updated, intervalDescription: "30 sn")
+                return ScheduleResult(updatedCard: updated, intervalDescription: L10n.text("30 sn", en: "30s", de: "30 Sek."))
 
             case .hard:
                 updated.stage = .learning
                 updated.intervalDays = 2.0 / (24.0 * 60.0) // 2 min
                 updated.dueDate = now.addingTimeInterval(2 * minute)
-                return ScheduleResult(updatedCard: updated, intervalDescription: "2 dk")
+                return ScheduleResult(updatedCard: updated, intervalDescription: L10n.text("2 dk", en: "2m", de: "2 Min."))
 
             case .good:
                 if card.stage == .new && card.repetitions == 0 {
@@ -759,13 +759,13 @@ enum SM2Scheduler {
                     updated.repetitions = 1
                     updated.intervalDays = 5.0 / (24.0 * 60.0) // 5 min
                     updated.dueDate = now.addingTimeInterval(5 * minute)
-                    return ScheduleResult(updatedCard: updated, intervalDescription: "5 dk")
+                    return ScheduleResult(updatedCard: updated, intervalDescription: L10n.text("5 dk", en: "5m", de: "5 Min."))
                 } else {
                     updated.stage = .review
                     updated.repetitions = max(1, card.repetitions + 1)
                     updated.intervalDays = 1.0
                     updated.dueDate = now.addingTimeInterval(1 * day)
-                    return ScheduleResult(updatedCard: updated, intervalDescription: "1 gün")
+                    return ScheduleResult(updatedCard: updated, intervalDescription: L10n.text("1 gün", en: "1d", de: "1 Tag"))
                 }
 
             case .easy:
@@ -774,7 +774,7 @@ enum SM2Scheduler {
                 updated.intervalDays = 4.0
                 updated.easeFactor = max(1.3, card.easeFactor + 0.15)
                 updated.dueDate = now.addingTimeInterval(4 * day)
-                return ScheduleResult(updatedCard: updated, intervalDescription: "4 gün")
+                return ScheduleResult(updatedCard: updated, intervalDescription: L10n.text("4 gün", en: "4d", de: "4 Tage"))
             }
 
         case .relearning:
@@ -782,12 +782,12 @@ enum SM2Scheduler {
             case .again:
                 updated.intervalDays = 0.5 / (24.0 * 60.0)
                 updated.dueDate = now.addingTimeInterval(30)
-                return ScheduleResult(updatedCard: updated, intervalDescription: "30 sn")
+                return ScheduleResult(updatedCard: updated, intervalDescription: L10n.text("30 sn", en: "30s", de: "30 Sek."))
 
             case .hard:
                 updated.intervalDays = 2.0 / (24.0 * 60.0)
                 updated.dueDate = now.addingTimeInterval(2 * minute)
-                return ScheduleResult(updatedCard: updated, intervalDescription: "2 dk")
+                return ScheduleResult(updatedCard: updated, intervalDescription: L10n.text("2 dk", en: "2m", de: "2 Min."))
 
             case .good:
                 updated.stage = .review
@@ -823,7 +823,7 @@ enum SM2Scheduler {
                 // Keep previous interval reference scaled down for when relearned
                 updated.intervalDays = max(1.0, round(currentInterval * 0.4))
                 updated.dueDate = now.addingTimeInterval(30)
-                return ScheduleResult(updatedCard: updated, intervalDescription: "30 sn")
+                return ScheduleResult(updatedCard: updated, intervalDescription: L10n.text("30 sn", en: "30s", de: "30 Sek."))
 
             case .hard:
                 updated.stage = .review
@@ -858,13 +858,16 @@ enum SM2Scheduler {
     static func formatDays(_ days: Double) -> String {
         let intDays = Int(round(days))
         if intDays < 30 {
-            return "\(max(1, intDays)) gün"
+            let d = max(1, intDays)
+            return L10n.text("\(d) gün", en: "\(d)d", de: d == 1 ? "1 Tag" : "\(d) Tage")
         } else if intDays < 365 {
             let months = Double(intDays) / 30.0
-            return String(format: "%.1f ay", months)
+            let formatted = String(format: "%.1f", months)
+            return L10n.text("\(formatted) ay", en: "\(formatted) mo", de: "\(formatted) Mon.")
         } else {
             let years = Double(intDays) / 365.0
-            return String(format: "%.1f yıl", years)
+            let formatted = String(format: "%.1f", years)
+            return L10n.text("\(formatted) yıl", en: "\(formatted) yr", de: "\(formatted) J.")
         }
     }
 }
